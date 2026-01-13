@@ -3,8 +3,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, JSON
 from sqlalchemy.sql import func
 
 from src.config.database import Base
@@ -21,9 +20,9 @@ class AuditLog(Base):
     operation_id = Column(String(255), index=True)
     http_method = Column(String(10))
     path = Column(String(512))
-    request_body = Column(JSONB)
+    request_body = Column(JSON)
     response_status = Column(Integer)
-    response_body = Column(JSONB)
+    response_body = Column(JSON)
     error_message = Column(Text)
     client_ip = Column(String(45), index=True)
     timestamp = Column(DateTime, default=func.now(), nullable=False, index=True)

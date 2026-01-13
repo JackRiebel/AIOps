@@ -10,6 +10,7 @@ from src.config.database import get_db
 from src.config.settings import get_settings
 from src.config.model_pricing import get_all_pricing, get_model_pricing, MODEL_PRICING
 from src.models.user import User
+from src.services.config_service import get_config_service
 
 router = APIRouter()
 
@@ -58,18 +59,30 @@ async def get_available_models(user: User = Depends(require_viewer)):
     """Get list of available AI models with cost and performance data.
 
     Models are available if:
-    1. Admin has configured the provider's API key (system-wide), OR
+    1. Admin has configured the provider's API key (system-wide via database or env), OR
     2. User has provided their own API key for that provider
     """
     settings = get_settings()
     all_models = settings.available_models
     available = []
 
-    # Check which providers have keys (admin or user)
-    has_anthropic = bool(settings.anthropic_api_key) or bool(user.user_anthropic_api_key)
-    has_openai = bool(settings.openai_api_key) or bool(user.user_openai_api_key)
-    has_google = bool(settings.google_api_key) or bool(user.user_google_api_key)
-    has_cisco = bool(settings.cisco_circuit_client_id and settings.cisco_circuit_client_secret) or bool(user.user_cisco_client_id and user.user_cisco_client_secret)
+    # Check database for admin-configured keys (setup wizard saves to database)
+    config_service = get_config_service()
+    db_anthropic_key = await config_service.get_config("anthropic_api_key")
+    db_openai_key = await config_service.get_config("openai_api_key")
+    db_google_key = await config_service.get_config("google_api_key")
+    db_cisco_client_id = await config_service.get_config("cisco_circuit_client_id")
+    db_cisco_client_secret = await config_service.get_config("cisco_circuit_client_secret")
+
+    # Check which providers have keys (database, env, or user)
+    has_anthropic = bool(db_anthropic_key or settings.anthropic_api_key or user.user_anthropic_api_key)
+    has_openai = bool(db_openai_key or settings.openai_api_key or user.user_openai_api_key)
+    has_google = bool(db_google_key or settings.google_api_key or user.user_google_api_key)
+    has_cisco = bool(
+        (db_cisco_client_id and db_cisco_client_secret) or
+        (settings.cisco_circuit_client_id and settings.cisco_circuit_client_secret) or
+        (user.user_cisco_client_id and user.user_cisco_client_secret)
+    )
 
     if has_anthropic:
         for model in all_models["anthropic"]:
@@ -108,10 +121,38 @@ async def get_available_models(user: User = Depends(require_viewer)):
 
 @router.get("/api/settings/model", dependencies=[Depends(require_viewer)])
 async def get_user_model(user: User = Depends(require_viewer)):
-    """Get current user's preferred AI model."""
-    return {
-        "model": user.preferred_model or "claude-sonnet-4-5-20250929"
-    }
+    """Get current user's preferred AI model.
+
+    If user has no preferred model set, returns the first available model
+    from a configured provider.
+    """
+    if user.preferred_model:
+        return {"model": user.preferred_model}
+
+    # No preferred model set - find the first available model
+    settings = get_settings()
+    all_models = settings.available_models
+    config_service = get_config_service()
+
+    # Check database for admin-configured keys
+    db_anthropic_key = await config_service.get_config("anthropic_api_key")
+    db_openai_key = await config_service.get_config("openai_api_key")
+    db_google_key = await config_service.get_config("google_api_key")
+    db_cisco_client_id = await config_service.get_config("cisco_circuit_client_id")
+    db_cisco_client_secret = await config_service.get_config("cisco_circuit_client_secret")
+
+    # Return first available model based on configured provider (Cisco priority)
+    if db_cisco_client_id and db_cisco_client_secret or (settings.cisco_circuit_client_id and settings.cisco_circuit_client_secret):
+        return {"model": all_models["cisco"][0]["id"]}
+    if db_anthropic_key or settings.anthropic_api_key or user.user_anthropic_api_key:
+        return {"model": all_models["anthropic"][0]["id"]}
+    if db_openai_key or settings.openai_api_key or user.user_openai_api_key:
+        return {"model": all_models["openai"][0]["id"]}
+    if db_google_key or settings.google_api_key or user.user_google_api_key:
+        return {"model": all_models["google"][0]["id"]}
+
+    # Fallback to Claude if nothing is configured (will show error when actually used)
+    return {"model": "claude-sonnet-4-5-20250929"}
 
 
 @router.put("/api/settings/model", dependencies=[Depends(require_viewer)])
@@ -192,22 +233,33 @@ async def get_api_key_status(user: User = Depends(require_viewer)):
     """Get status of user's API keys (whether they're set, not the actual keys)."""
     settings = get_settings()
 
+    # Check database for admin-configured keys (setup wizard saves to database)
+    config_service = get_config_service()
+    db_anthropic_key = await config_service.get_config("anthropic_api_key")
+    db_openai_key = await config_service.get_config("openai_api_key")
+    db_google_key = await config_service.get_config("google_api_key")
+    db_cisco_client_id = await config_service.get_config("cisco_circuit_client_id")
+    db_cisco_client_secret = await config_service.get_config("cisco_circuit_client_secret")
+
     return {
         "anthropic": {
             "user_key_set": bool(user.user_anthropic_api_key),
-            "admin_key_available": bool(settings.anthropic_api_key),
+            "admin_key_available": bool(db_anthropic_key or settings.anthropic_api_key),
         },
         "openai": {
             "user_key_set": bool(user.user_openai_api_key),
-            "admin_key_available": bool(settings.openai_api_key),
+            "admin_key_available": bool(db_openai_key or settings.openai_api_key),
         },
         "google": {
             "user_key_set": bool(user.user_google_api_key),
-            "admin_key_available": bool(settings.google_api_key),
+            "admin_key_available": bool(db_google_key or settings.google_api_key),
         },
         "cisco": {
             "user_key_set": bool(user.user_cisco_client_id and user.user_cisco_client_secret),
-            "admin_key_available": bool(settings.cisco_circuit_client_id and settings.cisco_circuit_client_secret),
+            "admin_key_available": bool(
+                (db_cisco_client_id and db_cisco_client_secret) or
+                (settings.cisco_circuit_client_id and settings.cisco_circuit_client_secret)
+            ),
         },
     }
 
@@ -384,3 +436,260 @@ async def get_single_model_pricing(model_id: str):
         "pricing": pricing,
         "is_default": is_default,
     }
+
+
+# ==============================================================================
+# Agentic RAG Settings Endpoints
+# ==============================================================================
+
+
+class AgenticRAGSettingsRequest(BaseModel):
+    """Request model for updating agentic RAG settings."""
+    enabled: Optional[bool] = None
+    max_iterations: Optional[int] = Field(None, ge=1, le=5)
+    timeout_seconds: Optional[float] = Field(None, ge=5, le=60)
+    query_analysis_enabled: Optional[bool] = None
+    document_grading_enabled: Optional[bool] = None
+    reflection_enabled: Optional[bool] = None
+    web_search_enabled: Optional[bool] = None
+    debug_mode: Optional[bool] = None
+
+
+@router.get("/api/settings/agentic-rag", dependencies=[Depends(require_viewer)])
+async def get_agentic_rag_settings():
+    """Get current agentic RAG configuration settings.
+
+    Returns the current configuration for the agentic RAG pipeline,
+    including which agents are enabled and performance settings.
+    """
+    try:
+        from src.services.agentic_rag import get_agentic_rag_config
+        from src.services.agentic_rag.orchestrator import get_agentic_rag_orchestrator
+
+        config = get_agentic_rag_config()
+        orchestrator = get_agentic_rag_orchestrator()
+
+        return {
+            "success": True,
+            "settings": {
+                "enabled": config.enabled,
+                "max_iterations": config.max_iterations,
+                "timeout_seconds": config.total_timeout_seconds,
+                "query_analysis_enabled": config.query_analysis_enabled,
+                "document_grading_enabled": config.document_grading_enabled,
+                "reflection_enabled": config.reflection_enabled,
+                "web_search_enabled": config.web_search_enabled,
+                "debug_mode": config.debug_mode,
+            },
+            "status": {
+                "orchestrator_initialized": orchestrator is not None,
+                "available_providers": list(orchestrator.llm_service.adapters.keys()) if orchestrator and orchestrator.llm_service else [],
+            }
+        }
+    except ImportError:
+        return {
+            "success": True,
+            "settings": {
+                "enabled": False,
+                "max_iterations": 2,
+                "timeout_seconds": 15,
+                "query_analysis_enabled": True,
+                "document_grading_enabled": True,
+                "reflection_enabled": True,
+                "web_search_enabled": False,
+                "debug_mode": False,
+            },
+            "status": {
+                "orchestrator_initialized": False,
+                "available_providers": [],
+                "message": "Agentic RAG module not available",
+            }
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get agentic RAG settings: {str(e)}"
+        )
+
+
+@router.put("/api/settings/agentic-rag", dependencies=[Depends(require_viewer)])
+async def update_agentic_rag_settings(request: AgenticRAGSettingsRequest):
+    """Update agentic RAG configuration settings.
+
+    Updates are persisted to the database and take effect immediately.
+    Note: Some changes may require reinitializing the orchestrator.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        from src.services.config_service import ConfigService
+
+        config_service = ConfigService()
+        updated = []
+
+        # Map request fields to config keys
+        field_map = {
+            "enabled": "agentic_rag_enabled",
+            "max_iterations": "agentic_rag_max_iterations",
+            "timeout_seconds": "agentic_rag_timeout",
+            "query_analysis_enabled": "agentic_rag_query_analysis",
+            "document_grading_enabled": "agentic_rag_document_grading",
+            "reflection_enabled": "agentic_rag_reflection",
+            "web_search_enabled": "agentic_rag_web_search",
+            "debug_mode": "agentic_rag_debug",
+        }
+
+        for field, config_key in field_map.items():
+            value = getattr(request, field, None)
+            if value is not None:
+                await config_service.set_config(
+                    key=config_key,
+                    value=str(value).lower() if isinstance(value, bool) else str(value),
+                )
+                updated.append(field)
+
+        # Reinitialize config from database
+        try:
+            from src.services.agentic_rag import init_agentic_rag_config
+
+            async with db.session() as session:
+                new_config = await init_agentic_rag_config(session)
+
+                # If enabling/disabling, may need to reinitialize orchestrator
+                if "enabled" in updated and new_config.enabled:
+                    from src.services.agentic_rag import (
+                        init_agentic_rag_orchestrator,
+                        init_agentic_rag_llm_service,
+                        get_agentic_rag_llm_service,
+                    )
+                    from src.services.knowledge_service import get_knowledge_service
+
+                    llm_service = get_agentic_rag_llm_service()
+
+                    # If LLM service doesn't exist, try to initialize from database/env keys
+                    if not llm_service:
+                        settings = get_settings()
+                        openai_key = getattr(settings, 'openai_api_key', None) or None
+                        anthropic_key = getattr(settings, 'anthropic_api_key', None) or None
+                        google_key = getattr(settings, 'google_api_key', None) or None
+
+                        # Check database for API keys
+                        if not openai_key:
+                            openai_key = await config_service.get_config("openai_api_key")
+                        if not anthropic_key:
+                            anthropic_key = await config_service.get_config("anthropic_api_key")
+                        if not google_key:
+                            google_key = await config_service.get_config("google_api_key")
+
+                        if openai_key or anthropic_key or google_key:
+                            llm_service = init_agentic_rag_llm_service(
+                                openai_key=openai_key,
+                                anthropic_key=anthropic_key,
+                                google_key=google_key,
+                                default_provider="openai" if openai_key else ("anthropic" if anthropic_key else "google"),
+                            )
+
+                    if llm_service:
+                        knowledge_service = get_knowledge_service()
+                        await init_agentic_rag_orchestrator(
+                            session=session,
+                            llm_service=llm_service,
+                            knowledge_service=knowledge_service,
+                        )
+        except ImportError:
+            pass
+        except Exception as e:
+            # Log but don't fail - settings were already saved
+            logger.warning(f"Failed to reinitialize agentic RAG: {e}")
+
+        return {
+            "success": True,
+            "updated_fields": updated,
+            "message": f"Updated {len(updated)} settings" if updated else "No settings changed",
+        }
+    except Exception as e:
+        logger.error(f"Failed to save agentic RAG settings: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save settings: {str(e)}")
+
+
+@router.get("/api/settings/agentic-rag/status", dependencies=[Depends(require_viewer)])
+async def get_agentic_rag_status():
+    """Get detailed status of the agentic RAG pipeline.
+
+    Includes information about agent initialization, LLM providers,
+    and recent performance metrics.
+    """
+    try:
+        from src.services.agentic_rag import (
+            get_agentic_rag_config,
+            get_agentic_rag_llm_service,
+        )
+        from src.services.agentic_rag.orchestrator import get_agentic_rag_orchestrator
+
+        config = get_agentic_rag_config()
+        orchestrator = get_agentic_rag_orchestrator()
+        llm_service = get_agentic_rag_llm_service()
+
+        agents_status = {}
+        if orchestrator:
+            agents_status = {
+                "query_analyzer": {
+                    "enabled": orchestrator.query_analyzer.enabled,
+                    "name": orchestrator.query_analyzer.name,
+                },
+                "retrieval_router": {
+                    "enabled": orchestrator.retrieval_router.enabled,
+                    "name": orchestrator.retrieval_router.name,
+                },
+                "document_grader": {
+                    "enabled": orchestrator.document_grader.enabled,
+                    "name": orchestrator.document_grader.name,
+                },
+                "corrective_rag": {
+                    "enabled": orchestrator.corrective_rag.enabled,
+                    "name": orchestrator.corrective_rag.name,
+                },
+                "synthesizer": {
+                    "enabled": orchestrator.synthesizer.enabled,
+                    "name": orchestrator.synthesizer.name,
+                },
+                "reflector": {
+                    "enabled": orchestrator.reflector.enabled,
+                    "name": orchestrator.reflector.name,
+                },
+            }
+
+        llm_status = {}
+        if llm_service:
+            usage = llm_service.get_usage_stats()
+            llm_status = {
+                "providers": list(llm_service.adapters.keys()),
+                "default_provider": llm_service.default_provider,
+                "usage": usage,
+            }
+
+        return {
+            "success": True,
+            "pipeline_enabled": config.enabled,
+            "orchestrator_ready": orchestrator is not None,
+            "agents": agents_status,
+            "llm": llm_status,
+            "config": config.to_dict(),
+        }
+
+    except ImportError:
+        return {
+            "success": True,
+            "pipeline_enabled": False,
+            "orchestrator_ready": False,
+            "agents": {},
+            "llm": {},
+            "config": {},
+            "message": "Agentic RAG module not available",
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get agentic RAG status: {str(e)}"
+        )

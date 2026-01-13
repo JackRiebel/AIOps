@@ -3,6 +3,9 @@
 This service fetches Splunk logs, uses AI to categorize them into
 summary insight cards, and stores them in the database.
 
+Supports multiple AI providers: Anthropic, OpenAI, Google, and Cisco Circuit.
+Uses whatever provider the user has configured in their AI settings.
+
 NO cross-platform enrichment happens here - that's the Incidents page's job.
 """
 
@@ -13,25 +16,68 @@ import asyncio
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 import httpx
-from anthropic import Anthropic
 from sqlalchemy import select, delete
 
 from src.models.splunk_insight import SplunkLogInsight
 from src.config.database import Database, get_settings
 from src.services.credential_manager import CredentialManager
 from src.services.cost_logger import get_cost_logger
+from src.services.ai_service import get_provider_from_model, get_model_costs
 
 logger = logging.getLogger(__name__)
 
 
 class SplunkInsightService:
-    """Generate and manage Splunk log insight cards."""
+    """Generate and manage Splunk log insight cards.
+
+    Supports multiple AI providers based on user configuration.
+    """
 
     # Default search - simple query, AI will filter out irrelevant events
     DEFAULT_MERAKI_SEARCH = 'search index=* | head 100'
 
-    def __init__(self, anthropic_api_key: str):
-        self.client = Anthropic(api_key=anthropic_api_key)
+    def __init__(
+        self,
+        provider: str,
+        model: str,
+        api_key: str = None,
+        client_id: str = None,
+        client_secret: str = None,
+        app_key: str = None,
+    ):
+        """Initialize with multi-provider support.
+
+        Args:
+            provider: AI provider (anthropic, openai, google, cisco)
+            model: Model ID to use
+            api_key: API key for Anthropic/OpenAI/Google
+            client_id: OAuth client ID for Cisco Circuit
+            client_secret: OAuth client secret for Cisco Circuit
+            app_key: App key for Cisco Circuit
+        """
+        self.provider = provider
+        self.model = model
+        self.api_key = api_key
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.app_key = app_key
+
+        # Initialize provider-specific client
+        self._client = None
+        if provider == "anthropic" and api_key:
+            from anthropic import Anthropic
+            self._client = Anthropic(api_key=api_key)
+        elif provider == "openai" and api_key:
+            import openai
+            self._client = openai.OpenAI(api_key=api_key)
+        elif provider == "google" and api_key:
+            import google.generativeai as genai
+            genai.configure(api_key=api_key)
+            self._client = genai
+        elif provider == "cisco" and client_id and client_secret:
+            # Cisco Circuit uses OAuth - we'll get tokens on demand
+            self._client = None  # Token will be fetched in _categorize_logs_with_ai
+
         settings = get_settings()
         self.db = Database(settings.database_url)
         self.credential_manager = CredentialManager()
@@ -163,21 +209,54 @@ class SplunkInsightService:
         """Fetch logs from Splunk."""
         logs = []
 
-        credentials = await self.credential_manager.get_credentials(organization)
+        # Try system_config first
+        from src.services.config_service import ConfigService
+        config_service = ConfigService()
+
+        api_url = await config_service.get_config("splunk_api_url")
+        bearer_token = await config_service.get_config("splunk_bearer_token")
+        username = await config_service.get_config("splunk_username")
+        password = await config_service.get_config("splunk_password")
+
+        credentials = None
+        if api_url and (bearer_token or (username and password)):
+            credentials = {
+                "base_url": api_url,
+                "api_key": bearer_token,
+                "username": username,
+                "password": password,
+                "verify_ssl": False,
+            }
+        else:
+            # Fall back to clusters table
+            credentials = await self.credential_manager.get_credentials(organization)
+
         if not credentials:
-            logger.warning(f"No credentials for organization: {organization}")
+            logger.warning(f"No Splunk credentials found in system_config or clusters")
             return logs
 
         try:
             token = credentials.get("api_key")
-            if not token:
-                logger.warning(f"No API key for {organization}")
+            username = credentials.get("username")
+            password = credentials.get("password")
+
+            if not token and not (username and password):
+                logger.warning("No Splunk credentials available")
                 return logs
 
+            # Build auth headers - prefer token, fall back to basic auth
             headers = {
-                "Authorization": f"Bearer {token}",
                 "Content-Type": "application/x-www-form-urlencoded",
             }
+
+            if token:
+                # Splunk uses "Splunk {token}" format for token auth
+                headers["Authorization"] = f"Splunk {token}"
+            elif username and password:
+                # Use basic auth
+                import base64
+                auth_string = base64.b64encode(f"{username}:{password}".encode()).decode()
+                headers["Authorization"] = f"Basic {auth_string}"
 
             async with httpx.AsyncClient(
                 verify=credentials.get("verify_ssl", False),
@@ -251,7 +330,10 @@ class SplunkInsightService:
         search_query: str,
         time_range: str,
     ) -> List[Dict[str, Any]]:
-        """Use AI to categorize logs into insight cards."""
+        """Use AI to categorize logs into insight cards.
+
+        Supports multiple providers: Anthropic, OpenAI, Google, and Cisco Circuit.
+        """
         if not logs:
             return []
 
@@ -298,18 +380,48 @@ Respond in JSON format:
 """
 
         try:
-            response = self.client.messages.create(
-                model="claude-sonnet-4-5-20250929",
-                max_tokens=4096,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            response_text = ""
+            input_tokens = 0
+            output_tokens = 0
 
-            response_text = response.content[0].text
+            if self.provider == "anthropic":
+                response = self._client.messages.create(
+                    model=self.model,
+                    max_tokens=4096,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                response_text = response.content[0].text
+                input_tokens = response.usage.input_tokens
+                output_tokens = response.usage.output_tokens
 
-            # Calculate cost
-            input_tokens = response.usage.input_tokens
-            output_tokens = response.usage.output_tokens
-            ai_cost = (input_tokens / 1_000_000 * 3.0) + (output_tokens / 1_000_000 * 15.0)
+            elif self.provider == "openai":
+                response = self._client.chat.completions.create(
+                    model=self.model,
+                    max_tokens=4096,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                response_text = response.choices[0].message.content
+                input_tokens = response.usage.prompt_tokens
+                output_tokens = response.usage.completion_tokens
+
+            elif self.provider == "google":
+                model = self._client.GenerativeModel(self.model)
+                response = model.generate_content(prompt)
+                response_text = response.text
+                # Google doesn't provide detailed token counts in the same way
+                input_tokens = len(prompt) // 4  # Rough estimate
+                output_tokens = len(response_text) // 4
+
+            elif self.provider == "cisco":
+                response_text, input_tokens, output_tokens = await self._call_cisco_circuit(prompt)
+
+            else:
+                logger.error(f"Unknown provider: {self.provider}")
+                return []
+
+            # Calculate cost using model-specific pricing
+            cost_input, cost_output = get_model_costs(self.model)
+            ai_cost = (input_tokens / 1000 * cost_input) + (output_tokens / 1000 * cost_output)
 
             # Log cost to database for telemetry
             try:
@@ -317,10 +429,10 @@ Respond in JSON format:
                 asyncio.create_task(
                     cost_logger.log_background_job(
                         job_name="splunk_insight_categorization",
-                        model="claude-sonnet-4-5-20250929",
+                        model=self.model,
                         input_tokens=input_tokens,
                         output_tokens=output_tokens,
-                        job_metadata={"log_count": len(logs)},
+                        job_metadata={"log_count": len(logs), "provider": self.provider},
                     )
                 )
             except Exception as cost_error:
@@ -345,8 +457,69 @@ Respond in JSON format:
             return insights
 
         except Exception as e:
-            logger.error(f"Error categorizing logs with AI: {e}")
+            logger.error(f"Error categorizing logs with AI ({self.provider}): {e}")
             return []
+
+    async def _call_cisco_circuit(self, prompt: str) -> tuple[str, int, int]:
+        """Call Cisco Circuit API for AI completion.
+
+        Returns:
+            Tuple of (response_text, input_tokens, output_tokens)
+        """
+        import base64
+        import time
+
+        TOKEN_URL = "https://id.cisco.com/oauth2/default/v1/token"
+        CHAT_BASE_URL = "https://chat-ai.cisco.com/openai/deployments"
+        API_VERSION = "2025-04-01-preview"
+
+        # Get the model endpoint (strip cisco- prefix if present)
+        api_model = self.model[6:] if self.model.startswith("cisco-") else self.model
+        chat_url = f"{CHAT_BASE_URL}/{api_model}/chat/completions?api-version={API_VERSION}"
+
+        # Get OAuth token
+        credentials = f"{self.client_id}:{self.client_secret}"
+        basic_auth = base64.b64encode(credentials.encode()).decode()
+
+        async with httpx.AsyncClient(verify=False, timeout=120.0) as client:
+            # Get access token
+            token_response = await client.post(
+                TOKEN_URL,
+                headers={
+                    "Authorization": f"Basic {basic_auth}",
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                data="grant_type=client_credentials",
+            )
+
+            if token_response.status_code != 200:
+                raise Exception(f"Cisco token request failed: {token_response.status_code}")
+
+            access_token = token_response.json()["access_token"]
+
+            # Call chat API
+            response = await client.post(
+                chat_url,
+                headers={
+                    "Content-Type": "application/json",
+                    "api-key": access_token,
+                },
+                json={
+                    "messages": [{"role": "user", "content": prompt}],
+                    "user": json.dumps({"appkey": self.app_key}) if self.app_key else None,
+                    "max_tokens": 4096,
+                },
+            )
+
+            if response.status_code != 200:
+                raise Exception(f"Cisco Circuit API error: {response.status_code} - {response.text}")
+
+            result = response.json()
+            response_text = result["choices"][0]["message"]["content"]
+            input_tokens = result.get("usage", {}).get("prompt_tokens", 0)
+            output_tokens = result.get("usage", {}).get("completion_tokens", 0)
+
+            return response_text, input_tokens, output_tokens
 
     async def _clear_old_insights(
         self,

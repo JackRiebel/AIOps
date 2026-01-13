@@ -1,10 +1,13 @@
-"""Workflow AI Service - Claude-powered workflow analysis and recommendations.
+"""Workflow AI Service - AI-powered workflow analysis and recommendations.
 
 This service:
-- Analyzes trigger events using Claude
+- Analyzes trigger events using AI
 - Determines if action is truly needed (reduces false positives)
 - Recommends specific remediation steps
 - Provides confidence scores and risk assessments
+
+Supports multiple AI providers: Anthropic, OpenAI, Google, and Cisco Circuit.
+Uses whatever provider is configured in the system settings.
 """
 
 import logging
@@ -12,11 +15,10 @@ import json
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 
-from anthropic import AsyncAnthropic
-
 from src.config.settings import get_settings
 from src.models.workflow import Workflow
 from src.services.cost_logger import get_cost_logger
+from src.services.prompt_service import get_prompt_template
 
 logger = logging.getLogger(__name__)
 
@@ -110,156 +112,75 @@ ACTION_PRESETS = {
     }
 }
 
-WORKFLOW_GENERATION_PROMPT = """You are an AI assistant that creates network automation workflows from natural language descriptions.
-
-**Available Triggers:**
-{triggers}
-
-**Available Actions:**
-{actions}
-
-**Instructions:**
-1. Parse the user's description to understand what they want to automate
-2. Choose the most appropriate trigger based on their description
-3. Select the actions they want to perform
-4. Determine if AI analysis should be enabled (default: yes for event-based triggers)
-5. Set an appropriate AI confidence threshold (default: 0.7)
-
-**IMPORTANT:**
-- Be conservative with actions that require approval (reboots, blocking, port disabling)
-- For scheduled tasks, pick a sensible default schedule
-- If unsure about any aspect, ask for clarification in the explanation
-
-Respond with ONLY a valid JSON object (no markdown):
-{{
-  "name": "Descriptive workflow name",
-  "description": "Brief description of what this workflow does",
-  "trigger_type": "splunk_query|schedule|manual",
-  "splunk_query": "Splunk query if trigger_type is splunk_query",
-  "schedule_cron": "Cron expression if trigger_type is schedule",
-  "actions": [
-    {{
-      "tool": "tool_name",
-      "params": {{}},
-      "requires_approval": true|false
-    }}
-  ],
-  "ai_enabled": true,
-  "ai_confidence_threshold": 0.7,
-  "confidence": 0.0-1.0,
-  "explanation": "Brief explanation of how you interpreted the request"
-}}"""
-
-WORKFLOW_ANALYSIS_SYSTEM_PROMPT = """You are a network operations AI assistant analyzing workflow trigger events.
-
-Your role:
-1. Analyze the events that triggered this workflow
-2. Determine if action is truly needed (avoid false positives)
-3. Recommend specific remediation steps
-4. Provide a confidence score (0.0-1.0) for your recommendation
-5. Assess the risk level of recommended actions
-
-**Workflow Context:**
-- Name: {workflow_name}
-- Description: {workflow_description}
-- Trigger Type: {trigger_type}
-
-**Custom Instructions from Workflow Owner:**
-{ai_prompt}
-
-**Available Actions:**
-{available_actions}
-
-**IMPORTANT:**
-- Be conservative with recommendations - false positives waste operator time
-- Consider if this could be planned maintenance, not an actual issue
-- Check for patterns that indicate widespread vs isolated problems
-- For destructive actions (reboots, config changes), require high confidence
-
-Respond with a JSON object (no markdown):
-{{
-  "should_act": true/false,
-  "confidence": 0.85,
-  "reasoning": "Brief explanation of your analysis",
-  "risk_level": "low" | "medium" | "high",
-  "estimated_impact": "What this will fix/affect",
-  "recommended_actions": [
-    {{"action": "tool_name", "params": {{}}, "reason": "why this action"}}
-  ],
-  "investigation_notes": "Additional context or things to check"
-}}"""
+# Prompts now loaded from src/config/prompts.yaml via prompt_service
+# See: workflow_generation, workflow_analysis
 
 
 class WorkflowAIService:
-    """Claude-powered workflow analysis and recommendations."""
+    """AI-powered workflow analysis and recommendations.
+
+    Supports multiple AI providers based on system configuration.
+    """
 
     def __init__(self):
-        self._client: Optional[AsyncAnthropic] = None
-        settings = get_settings()
-        self.model = settings.anthropic_model or "claude-sonnet-4-20250514"
         self.max_tokens = 2000
         self.temperature = 0.3  # Lower temp for more consistent analysis
-
-    @property
-    def client(self) -> AsyncAnthropic:
-        """Get Anthropic client (lazy init)."""
-        if self._client is None:
-            settings = get_settings()
-            if not settings.anthropic_api_key:
-                raise ValueError("ANTHROPIC_API_KEY not configured")
-            self._client = AsyncAnthropic(api_key=settings.anthropic_api_key)
-        return self._client
 
     async def analyze_trigger(
         self,
         workflow: Workflow,
         trigger_events: List[Dict[str, Any]],
+        model: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Analyze trigger events and recommend action.
 
         Args:
             workflow: The workflow configuration
             trigger_events: Events that triggered the workflow
+            model: Optional model override (user's preferred model)
 
         Returns:
             Analysis result with recommendations, or None on error
         """
         try:
+            from src.services.multi_provider_ai import generate_text
+
             # Build the system prompt
             system_prompt = self._build_system_prompt(workflow)
 
             # Build the user message with events
             user_message = self._build_user_message(trigger_events)
 
-            # Call Claude
-            response = await self.client.messages.create(
-                model=self.model,
+            # Use multi-provider AI
+            result = await generate_text(
+                prompt=user_message,
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_message}],
+                system_prompt=system_prompt,
             )
 
+            if not result:
+                logger.warning("No AI provider configured for workflow analysis")
+                return None
+
             # Parse response
-            response_text = response.content[0].text
+            response_text = result["text"]
             analysis = self._parse_response(response_text)
 
             # Add token usage
-            analysis["input_tokens"] = response.usage.input_tokens
-            analysis["output_tokens"] = response.usage.output_tokens
-            analysis["cost_usd"] = self._calculate_cost(
-                response.usage.input_tokens,
-                response.usage.output_tokens
-            )
+            analysis["input_tokens"] = result["input_tokens"]
+            analysis["output_tokens"] = result["output_tokens"]
+            analysis["cost_usd"] = result["cost_usd"]
+            analysis["model_used"] = result["model"]
 
             # Log cost to database for telemetry
             try:
                 cost_logger = get_cost_logger()
                 await cost_logger.log_background_job(
                     job_name="workflow_analysis",
-                    model=self.model,
-                    input_tokens=response.usage.input_tokens,
-                    output_tokens=response.usage.output_tokens,
+                    model=result["model"],
+                    input_tokens=result["input_tokens"],
+                    output_tokens=result["output_tokens"],
                     job_metadata={"workflow_id": workflow.id, "workflow_name": workflow.name},
                 )
             except Exception as cost_error:
@@ -288,7 +209,8 @@ class WorkflowAIService:
                 actions_list.append(f"- {tool} ({requires_approval})")
             actions_text = "\n".join(actions_list)
 
-        return WORKFLOW_ANALYSIS_SYSTEM_PROMPT.format(
+        # Load prompt from centralized registry
+        return get_prompt_template("workflow_analysis").format(
             workflow_name=workflow.name,
             workflow_description=workflow.description or "No description provided",
             trigger_type=workflow.trigger_type.value if workflow.trigger_type else "unknown",
@@ -356,19 +278,6 @@ class WorkflowAIService:
                 "investigation_notes": "Manual review recommended",
             }
 
-    def _calculate_cost(self, input_tokens: int, output_tokens: int) -> float:
-        """Calculate the cost of the API call.
-
-        Uses Claude Sonnet pricing as default.
-        """
-        # Sonnet pricing (as of 2024)
-        input_cost_per_1k = 0.003
-        output_cost_per_1k = 0.015
-
-        input_cost = (input_tokens / 1000) * input_cost_per_1k
-        output_cost = (output_tokens / 1000) * output_cost_per_1k
-
-        return round(input_cost + output_cost, 6)
 
     def _build_generation_prompt(self) -> str:
         """Build the system prompt for workflow generation with available triggers/actions."""
@@ -380,7 +289,8 @@ class WorkflowAIService:
             f"- {key}: {val['description']} (requires_approval={val['requires_approval']})"
             for key, val in ACTION_PRESETS.items()
         )
-        return WORKFLOW_GENERATION_PROMPT.format(triggers=triggers_text, actions=actions_text)
+        # Load prompt from centralized registry
+        return get_prompt_template("workflow_generation").format(triggers=triggers_text, actions=actions_text)
 
     async def generate_workflow_from_description(
         self,
@@ -403,20 +313,22 @@ class WorkflowAIService:
             raise ValueError("Description is too short. Please provide more detail.")
 
         try:
+            from src.services.multi_provider_ai import generate_text
+
             system_prompt = self._build_generation_prompt()
 
-            response = await self.client.messages.create(
-                model=self.model,
+            # Use multi-provider AI
+            result = await generate_text(
+                prompt=f"Create a workflow for: {description}",
                 max_tokens=2000,
                 temperature=0.3,  # Lower temperature for consistent outputs
-                system=system_prompt,
-                messages=[{
-                    "role": "user",
-                    "content": f"Create a workflow for: {description}"
-                }],
+                system_prompt=system_prompt,
             )
 
-            response_text = response.content[0].text if response.content else ""
+            if not result:
+                raise ValueError("No AI provider configured - please configure an AI provider in Admin > System Config")
+
+            response_text = result["text"]
 
             # Parse JSON from response (handle markdown code blocks)
             text = response_text.strip()
@@ -430,26 +342,26 @@ class WorkflowAIService:
                 text = text[json_start:json_end].strip()
 
             try:
-                result = json.loads(text)
+                parsed_result = json.loads(text)
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse AI response: {text[:500]}")
                 raise ValueError(f"Failed to parse AI response: {e}")
 
             # Extract metadata
-            confidence = result.pop("confidence", 0.7)
-            explanation = result.pop("explanation", "Workflow generated from your description")
+            confidence = parsed_result.pop("confidence", 0.7)
+            explanation = parsed_result.pop("explanation", "Workflow generated from your description")
 
             # Normalize the workflow
-            workflow = self._normalize_generated_workflow(result, organization)
+            workflow = self._normalize_generated_workflow(parsed_result, organization)
 
             # Log cost to database for telemetry
             try:
                 cost_logger = get_cost_logger()
                 await cost_logger.log_background_job(
                     job_name="workflow_generation",
-                    model=self.model,
-                    input_tokens=response.usage.input_tokens,
-                    output_tokens=response.usage.output_tokens,
+                    model=result["model"],
+                    input_tokens=result["input_tokens"],
+                    output_tokens=result["output_tokens"],
                     job_metadata={"workflow_name": workflow["name"]},
                 )
             except Exception as cost_error:

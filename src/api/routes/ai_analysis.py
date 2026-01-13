@@ -325,8 +325,8 @@ def generate_fallback_performance_analysis(stats: Dict[str, Any], time_range: st
                 lines.append(f"Network latency averaging {lat:.1f}ms is acceptable.")
             else:
                 lines.append(f"⚠️ Network latency averaging {lat:.1f}ms is elevated and may affect user experience.")
-        except:
-            pass
+        except (ValueError, TypeError):
+            pass  # Skip if latency can't be converted to float
 
     # Assess packet loss
     if avg_loss != 'N/A':
@@ -338,8 +338,8 @@ def generate_fallback_performance_analysis(stats: Dict[str, Any], time_range: st
                 lines.append(f"⚠️ Packet loss at {loss:.2f}% is slightly elevated - monitor for trends.")
             else:
                 lines.append(f"⚠️ Packet loss at {loss:.2f}% is high and should be investigated.")
-        except:
-            pass
+        except (ValueError, TypeError):
+            pass  # Skip if loss can't be converted to float
 
     lines.append("\n**Recommendations**")
     lines.append("• Review traffic patterns during peak hours")

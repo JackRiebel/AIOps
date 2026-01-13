@@ -57,8 +57,17 @@ web/out/
 web/node_modules/
 web/.turbo
 web/build
+web-ui/.next/
+web-ui/out/
+web-ui/node_modules/
+web-ui/.turbo
+web-ui/build
+.eslintcache
 
 # Misc
 *.bak
+*.backup
+*.old
 *.tmp
 .cache/
+.mypy_cache/

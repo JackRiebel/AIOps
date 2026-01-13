@@ -636,6 +636,8 @@ def get_ai_assistant(
     Returns:
         Appropriate assistant instance or None if no API key available
     """
+    from src.services.config_service import get_config_or_env
+
     settings = get_settings()
     user_api_keys = user_api_keys or {}
 
@@ -647,14 +649,22 @@ def get_ai_assistant(
     max_tokens = max_tokens if max_tokens is not None else 4096
 
     if provider == "openai":
-        api_key = user_api_keys.get("openai") or settings.openai_api_key
+        api_key = (
+            user_api_keys.get("openai") or
+            get_config_or_env("openai_api_key", "OPENAI_API_KEY") or
+            settings.openai_api_key
+        )
         if not api_key:
             return None
         model = model or "gpt-4o"
         return OpenAINetworkAssistant(api_key, model, temperature, max_tokens)
 
     elif provider == "google":
-        api_key = user_api_keys.get("google") or settings.google_api_key
+        api_key = (
+            user_api_keys.get("google") or
+            get_config_or_env("google_api_key", "GOOGLE_API_KEY") or
+            settings.google_api_key
+        )
         if not api_key:
             return None
         model = model or "gemini-1.5-pro"
@@ -662,9 +672,21 @@ def get_ai_assistant(
 
     elif provider == "cisco":
         # Cisco Circuit uses OAuth with client credentials
-        client_id = user_api_keys.get("cisco_client_id") or settings.cisco_circuit_client_id
-        client_secret = user_api_keys.get("cisco_client_secret") or settings.cisco_circuit_client_secret
-        app_key = settings.cisco_circuit_app_key
+        # Check database first, then user keys, then settings
+        client_id = (
+            user_api_keys.get("cisco_client_id") or
+            get_config_or_env("cisco_circuit_client_id", "CISCO_CIRCUIT_CLIENT_ID") or
+            settings.cisco_circuit_client_id
+        )
+        client_secret = (
+            user_api_keys.get("cisco_client_secret") or
+            get_config_or_env("cisco_circuit_client_secret", "CISCO_CIRCUIT_CLIENT_SECRET") or
+            settings.cisco_circuit_client_secret
+        )
+        app_key = (
+            get_config_or_env("cisco_circuit_app_key", "CISCO_CIRCUIT_APP_KEY") or
+            settings.cisco_circuit_app_key
+        )
 
         if not client_id or not client_secret or not app_key:
             import logging
@@ -683,7 +705,11 @@ def get_ai_assistant(
         )
 
     else:  # anthropic (default)
-        api_key = user_api_keys.get("anthropic") or settings.anthropic_api_key
+        api_key = (
+            user_api_keys.get("anthropic") or
+            get_config_or_env("anthropic_api_key", "ANTHROPIC_API_KEY") or
+            settings.anthropic_api_key
+        )
         if not api_key:
             return None
 

@@ -1,0 +1,1 @@
+export { DeviceDetailModal } from './DeviceDetailModal';

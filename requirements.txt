@@ -5,8 +5,9 @@ mcp==1.0.0
 fastapi>=0.115.0
 uvicorn[standard]==0.32.0
 
-# Database
+# Database (PostgreSQL only - embedded via pgserver)
 sqlalchemy==2.0.36
+pgserver>=0.1.0
 psycopg2-binary==2.9.10
 asyncpg==0.30.0
 alembic==1.14.0
@@ -21,6 +22,17 @@ python-multipart==0.0.12
 httpx==0.28.1
 aiohttp==3.11.10
 
+# Meraki Dashboard API
+meraki==1.48.0
+
+# Cisco Catalyst Center SDK
+catalystcentersdk>=2.7.0
+
+# AI / LLM
+anthropic==0.40.0
+openai>=1.40.0
+google-generativeai>=0.8.0
+
 # Configuration & Environment
 python-dotenv==1.0.1
 pydantic==2.10.3
@@ -29,3 +41,15 @@ pydantic-settings==2.6.1
 # Utilities
 python-json-logger==3.2.1
 pyyaml==6.0.2
+apscheduler==3.10.4
+rapidfuzz>=3.0.0  # Fuzzy string matching for query preprocessing
+
+# RAG / Vector Search
+pgvector==0.2.4
+tiktoken>=0.5.0
+sentence-transformers>=3.0.0  # Local embedding models (e5-small-v2)
+tf-keras>=2.16.0  # Keras 2 compatibility for sentence-transformers
+
+# Document Parsing
+pypdf>=4.0.0
+python-docx>=1.1.0

@@ -1,72 +1,63 @@
-"""Authentication middleware for Nexus Dashboard API requests."""
+"""Authentication middleware for Meraki Dashboard API requests."""
 
 import logging
 from typing import Any, Callable, Dict, Optional
 
 from src.core.api_registry import APIRegistry
 from src.services.credential_manager import CredentialManager
-from src.services.nexus_api import NexusAPIClient
+from src.services.meraki_api import MerakiAPIClient
 
 logger = logging.getLogger(__name__)
 
 
 class AuthMiddleware:
-    """Middleware for handling authentication to Nexus Dashboard."""
+    """Middleware for handling authentication to Meraki Dashboard."""
 
-    def __init__(self, cluster_name: str = "default"):
+    def __init__(self, organization_name: str = "default"):
         """Initialize authentication middleware.
 
         Args:
-            cluster_name: Name of the cluster to authenticate with
+            organization_name: Name of the organization to authenticate with
         """
-        self.cluster_name = cluster_name
+        self.organization_name = organization_name
         self.credential_manager = CredentialManager()
-        self.api_client: Optional[NexusAPIClient] = None
+        self.api_client: Optional[MerakiAPIClient] = None
 
-    async def get_api_client(self) -> NexusAPIClient:
+    async def get_api_client(self) -> MerakiAPIClient:
         """Get or create authenticated API client.
 
         Returns:
-            Authenticated NexusAPIClient instance
+            Authenticated MerakiAPIClient instance
 
         Raises:
-            RuntimeError: If credentials not found or authentication fails
+            RuntimeError: If credentials not found
         """
         if self.api_client is not None:
             return self.api_client
 
         # Retrieve credentials from database
-        credentials = await self.credential_manager.get_credentials(self.cluster_name)
+        credentials = await self.credential_manager.get_credentials(self.organization_name)
 
         if not credentials:
             raise RuntimeError(
-                f"No credentials found for cluster '{self.cluster_name}'. "
+                f"No credentials found for organization '{self.organization_name}'. "
                 f"Please configure credentials first."
             )
 
-        # Create and authenticate API client
-        self.api_client = NexusAPIClient(
-            base_url=credentials["url"],
-            username=credentials["username"],
-            password=credentials["password"],
+        # Create API client (no separate authentication needed with API key)
+        self.api_client = MerakiAPIClient(
+            api_key=credentials["api_key"],
+            base_url=credentials["base_url"],
             verify_ssl=credentials["verify_ssl"],
         )
 
-        # Authenticate
-        authenticated = await self.api_client.authenticate()
-        if not authenticated:
-            raise RuntimeError(
-                f"Failed to authenticate with cluster '{self.cluster_name}'"
-            )
-
-        logger.info(f"Successfully authenticated with cluster '{self.cluster_name}'")
+        logger.info(f"Successfully initialized API client for organization '{self.organization_name}'")
         return self.api_client
 
     async def execute_request(
         self,
         method: str,
         path: str,
-        api_name: str = "manage",
         params: Optional[Dict[str, Any]] = None,
         json_data: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
@@ -74,8 +65,7 @@ class AuthMiddleware:
 
         Args:
             method: HTTP method
-            path: API endpoint path (will be prefixed with appropriate API base path)
-            api_name: Name of the API (manage, analyze, infra, onemanage)
+            path: API endpoint path
             params: Query parameters
             json_data: JSON request body
 
@@ -86,15 +76,6 @@ class AuthMiddleware:
             RuntimeError: If request fails
         """
         client = await self.get_api_client()
-
-        # Prepend the API base path if not already present
-        if not path.startswith("/api/"):
-            base_path = APIRegistry.get_base_path_for_api(api_name)
-            if base_path:
-                path = f"{base_path}{path}"
-            else:
-                # Fallback to manage API
-                path = f"/api/v1/manage{path}"
 
         try:
             response = await client.request(

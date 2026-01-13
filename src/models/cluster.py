@@ -1,4 +1,4 @@
-"""Cluster model for storing Nexus Dashboard connection information."""
+"""Cluster model for storing Lumen connection information."""
 
 from datetime import datetime
 from typing import Optional
@@ -10,12 +10,13 @@ from src.config.database import Base
 
 
 class Cluster(Base):
-    """Model for Nexus Dashboard cluster credentials."""
+    """Model for Lumen cluster credentials."""
 
     __tablename__ = "clusters"
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(255), unique=True, nullable=False, index=True)
+    display_name = Column(String(255), nullable=True)
     url = Column(String(255), nullable=False)
     username = Column(String(255), nullable=False)
     password_encrypted = Column(Text, nullable=False)
@@ -36,6 +37,7 @@ class Cluster(Base):
         return {
             "id": self.id,
             "name": self.name,
+            "display_name": self.display_name,
             "url": self.url,
             "username": self.username,
             "verify_ssl": self.verify_ssl,

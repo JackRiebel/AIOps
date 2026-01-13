@@ -1,0 +1,403 @@
+/**
+ * Cisco Design System Theme
+ *
+ * A clean, professional design inspired by Meraki Dashboard and Catalyst Center.
+ * Enterprise-grade network visualization styles.
+ */
+
+:root {
+  /* Primary Colors - Cisco Blue */
+  --cisco-blue: #049FD9;
+  --cisco-blue-dark: #006B8F;
+  --cisco-blue-light: #64C8EB;
+  --cisco-blue-lighter: #B8E6F5;
+
+  /* Status Colors */
+  --status-healthy: #00A86B;
+  --status-healthy-light: #E6F7F0;
+  --status-warning: #F5A623;
+  --status-warning-light: #FEF7E6;
+  --status-critical: #D0021B;
+  --status-critical-light: #FCE6E8;
+  --status-offline: #8E8E93;
+  --status-offline-light: #F5F5F5;
+  --status-info: #049FD9;
+  --status-info-light: #E6F6FB;
+
+  /* Neutral Colors - Light Mode */
+  --bg-primary: #FFFFFF;
+  --bg-secondary: #F7F7F7;
+  --bg-tertiary: #E8E8E8;
+  --text-primary: #1A1A1A;
+  --text-secondary: #6E6E6E;
+  --text-tertiary: #9E9E9E;
+  --border-color: #E0E0E0;
+  --border-color-light: #F0F0F0;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 4px 6px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 10px 15px rgba(0, 0, 0, 0.1);
+
+  /* Typography */
+  --font-family: 'CiscoSans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-size-xs: 11px;
+  --font-size-sm: 13px;
+  --font-size-md: 15px;
+  --font-size-lg: 18px;
+  --font-size-xl: 24px;
+  --font-size-2xl: 32px;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* Border Radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 9999px;
+
+  /* Transitions */
+  --transition-fast: 150ms ease;
+  --transition-normal: 250ms ease;
+  --transition-slow: 350ms ease;
+}
+
+/* Dark Mode Colors */
+.dark {
+  --bg-primary: #1A1A1A;
+  --bg-secondary: #2D2D2D;
+  --bg-tertiary: #404040;
+  --text-primary: #FFFFFF;
+  --text-secondary: #A0A0A0;
+  --text-tertiary: #707070;
+  --border-color: #404040;
+  --border-color-light: #333333;
+
+  --status-healthy-light: rgba(0, 168, 107, 0.15);
+  --status-warning-light: rgba(245, 166, 35, 0.15);
+  --status-critical-light: rgba(208, 2, 27, 0.15);
+  --status-offline-light: rgba(142, 142, 147, 0.15);
+  --status-info-light: rgba(4, 159, 217, 0.15);
+}
+
+/* Enterprise Card Base Styles */
+.enterprise-card {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+  transition: box-shadow var(--transition-normal);
+}
+
+.enterprise-card:hover {
+  box-shadow: var(--shadow-lg);
+}
+
+.enterprise-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.enterprise-card-title {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.enterprise-card-subtitle {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  margin: var(--space-1) 0 0 0;
+}
+
+.enterprise-card-body {
+  padding: var(--space-4);
+}
+
+.enterprise-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+}
+
+/* Status Badge */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+}
+
+.status-badge.healthy {
+  background: var(--status-healthy-light);
+  color: var(--status-healthy);
+}
+
+.status-badge.warning {
+  background: var(--status-warning-light);
+  color: var(--status-warning);
+}
+
+.status-badge.critical {
+  background: var(--status-critical-light);
+  color: var(--status-critical);
+}
+
+.status-badge.offline {
+  background: var(--status-offline-light);
+  color: var(--status-offline);
+}
+
+/* Status Dot */
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot.healthy { background: var(--status-healthy); }
+.status-dot.warning { background: var(--status-warning); }
+.status-dot.critical { background: var(--status-critical); }
+.status-dot.offline { background: var(--status-offline); }
+
+.status-dot.pulse {
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 currentColor; opacity: 1; }
+  70% { box-shadow: 0 0 0 8px currentColor; opacity: 0; }
+  100% { box-shadow: 0 0 0 0 currentColor; opacity: 0; }
+}
+
+/* Metric Value Display */
+.metric-value {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.metric-unit {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-normal);
+  color: var(--text-secondary);
+  margin-left: var(--space-1);
+}
+
+.metric-label {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  margin-top: var(--space-1);
+}
+
+/* Trend Indicator */
+.trend-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+}
+
+.trend-indicator.up { color: var(--status-healthy); }
+.trend-indicator.down { color: var(--status-critical); }
+.trend-indicator.stable { color: var(--text-secondary); }
+
+/* Progress Bar */
+.progress-bar-container {
+  width: 100%;
+  height: 8px;
+  background: var(--border-color);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  border-radius: var(--radius-full);
+  transition: width var(--transition-normal);
+}
+
+/* Topology Node */
+.topology-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  cursor: pointer;
+  transition: transform var(--transition-fast);
+}
+
+.topology-node:hover {
+  transform: scale(1.05);
+}
+
+.topology-node-icon {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-primary);
+  border: 2px solid var(--border-color);
+  border-radius: var(--radius-md);
+  transition: border-color var(--transition-fast);
+}
+
+.topology-node.healthy .topology-node-icon { border-color: var(--status-healthy); }
+.topology-node.warning .topology-node-icon { border-color: var(--status-warning); }
+.topology-node.critical .topology-node-icon { border-color: var(--status-critical); }
+.topology-node.offline .topology-node-icon { border-color: var(--status-offline); }
+
+.topology-node-label {
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  max-width: 80px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Timeline Event */
+.timeline-event {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border-color-light);
+}
+
+.timeline-event:last-child {
+  border-bottom: none;
+}
+
+.timeline-event-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.timeline-event-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid;
+  background: var(--bg-primary);
+}
+
+.timeline-event-line {
+  width: 2px;
+  flex: 1;
+  background: var(--border-color);
+  margin-top: var(--space-1);
+}
+
+.timeline-event-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.timeline-event-title {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+}
+
+.timeline-event-description {
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  margin-top: var(--space-1);
+}
+
+.timeline-event-time {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  margin-top: var(--space-1);
+}
+
+/* Animated dash for connections */
+@keyframes dash {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+
+.animate-dash {
+  animation: dash 1s linear infinite;
+}
+
+/* Loading skeleton */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--bg-secondary) 25%,
+    var(--bg-tertiary) 50%,
+    var(--bg-secondary) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: var(--radius-sm);
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Tooltip */
+.card-tooltip {
+  position: absolute;
+  z-index: 50;
+  padding: var(--space-2) var(--space-3);
+  background: var(--text-primary);
+  color: var(--bg-primary);
+  font-size: var(--font-size-xs);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .enterprise-card-header {
+    padding: var(--space-3);
+  }
+
+  .enterprise-card-body {
+    padding: var(--space-3);
+  }
+
+  .metric-value {
+    font-size: var(--font-size-xl);
+  }
+}

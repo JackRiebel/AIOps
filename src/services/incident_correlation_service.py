@@ -1,22 +1,29 @@
-"""Service for correlating events into incidents and generating AI insights."""
+"""Service for correlating events into incidents and generating AI insights.
+
+Supports multiple AI providers: Anthropic, OpenAI, Google, and Cisco Circuit.
+Uses whatever provider is configured in the system settings.
+"""
 
 import logging
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
-from anthropic import Anthropic
 
 from src.models.incident import Event, Incident, EventSeverity, IncidentStatus, EventSource
 from src.config.database import Database, get_settings
 from src.services.cost_logger import get_cost_logger
+from src.services.prompt_service import get_prompt, get_prompt_metadata
 
 logger = logging.getLogger(__name__)
 
 
 class IncidentCorrelationService:
-    """Service for correlating events into incidents using AI."""
+    """Service for correlating events into incidents using AI.
 
-    def __init__(self, anthropic_api_key: str):
-        self.client = Anthropic(api_key=anthropic_api_key)
+    Supports multiple AI providers based on system configuration.
+    """
+
+    def __init__(self):
+        """Initialize service. AI provider is determined at runtime from config."""
         settings = get_settings()
         self.db = Database(settings.database_url)
 
@@ -169,72 +176,35 @@ class IncidentCorrelationService:
                 f"  Affected Resource: {event.affected_resource or 'N/A'}\n"
             )
 
-        prompt = f"""You are a network operations expert analyzing monitoring alerts. Below are {len(events)} recent events from various monitoring systems (Meraki, ThousandEyes, Splunk).
-
-Your task is to:
-1. Group related events that likely represent the same underlying incident
-2. For each incident group, provide:
-   - A clear incident title
-   - Root cause hypothesis (plain English explanation)
-   - Confidence score (0-100%)
-   - Severity level (critical, high, medium, low, info)
-   - List of affected services/resources
-
-Events to analyze:
-
-{chr(10).join(events_summary)}
-
-Respond in JSON format with an array of incidents:
-{{
-  "incidents": [
-    {{
-      "event_indices": [1, 3, 5],
-      "title": "Brief descriptive title",
-      "root_cause_hypothesis": "Plain English explanation of likely root cause",
-      "confidence_score": 87,
-      "severity": "high",
-      "affected_services": ["service1", "service2"]
-    }}
-  ]
-}}
-
-Guidelines for grouping and analysis:
-- Group events that are temporally close (within minutes) and logically related
-- Events affecting the same resource or service should be grouped
-- Single events with high severity should still create their own incident
-- Provide specific, actionable root cause hypotheses
-
-IMPORTANT - Confidence Score Rules:
-1. Device offline/down events: 100% confidence (we know for certain the device is unreachable)
-2. Network connectivity loss: 95-100% confidence (directly measurable)
-3. Multiple correlated failures: 85-95% confidence (strong evidence of common cause)
-4. Performance degradation: 70-85% confidence (may have multiple causes)
-5. Single anomalies without clear cause: 50-70% confidence (requires investigation)
-
-Severity Guidelines:
-- Critical: Complete service outages, multiple device failures, security breaches
-- High: Single device offline, significant performance degradation, connectivity issues
-- Medium: Minor performance issues, non-critical alerts, warnings
-- Low: Informational events, maintenance notifications
-- Info: Status updates, routine operations
-"""
+        # Use centralized prompt from registry
+        prompt = get_prompt(
+            "incident_correlation",
+            event_count=len(events),
+            events_summary=chr(10).join(events_summary)
+        )
 
         try:
-            # Call Claude API
-            response = self.client.messages.create(
-                model="claude-sonnet-4-5-20250929",
+            from src.services.multi_provider_ai import generate_text
+
+            # Use multi-provider AI
+            result = await generate_text(
+                prompt=prompt,
                 max_tokens=4096,
-                messages=[{"role": "user", "content": prompt}],
             )
 
-            # Calculate AI cost based on token usage
-            # Claude Sonnet 4.5 pricing: $3/MTok input, $15/MTok output
-            input_tokens = response.usage.input_tokens
-            output_tokens = response.usage.output_tokens
-            total_tokens = input_tokens + output_tokens
-            ai_cost = (input_tokens / 1_000_000 * 3.0) + (output_tokens / 1_000_000 * 15.0)
+            if not result:
+                logger.warning("No AI provider configured for incident correlation")
+                # Fallback: create individual incidents for high/critical events
+                return self._create_fallback_groups(events)
 
-            logger.info(f"AI API usage - Input: {input_tokens} tokens, Output: {output_tokens} tokens, Cost: ${ai_cost:.4f}")
+            response_text = result["text"]
+            input_tokens = result["input_tokens"]
+            output_tokens = result["output_tokens"]
+            total_tokens = input_tokens + output_tokens
+            ai_cost = result["cost_usd"]
+            model = result["model"]
+
+            logger.info(f"AI API usage ({model}) - Input: {input_tokens} tokens, Output: {output_tokens} tokens, Cost: ${ai_cost:.4f}")
 
             # Log cost to database for telemetry
             try:
@@ -242,7 +212,7 @@ Severity Guidelines:
                 import asyncio
                 asyncio.create_task(
                     cost_logger.log_incident_correlation(
-                        model="claude-sonnet-4-5-20250929",
+                        model=model,
                         input_tokens=input_tokens,
                         output_tokens=output_tokens,
                         alert_count=len(events),
@@ -250,9 +220,6 @@ Severity Guidelines:
                 )
             except Exception as cost_error:
                 logger.warning(f"Failed to log incident correlation cost: {cost_error}")
-
-            # Parse response
-            response_text = response.content[0].text
 
             # Extract JSON from response (handle markdown code blocks)
             import json
@@ -293,20 +260,31 @@ Severity Guidelines:
             return incident_groups
 
         except Exception as e:
-            logger.error(f"Error calling Claude API for event correlation: {e}")
+            logger.error(f"Error calling AI API for event correlation: {e}")
             # Fallback: create individual incidents for high/critical events
-            fallback_groups = []
-            for event in events:
-                if event.severity in [EventSeverity.CRITICAL, EventSeverity.HIGH]:
-                    fallback_groups.append({
-                        "events": [event],
-                        "title": event.title,
-                        "root_cause_hypothesis": "Automated incident created from high-severity event",
-                        "confidence_score": 50.0,
-                        "severity": event.severity.value,
-                        "affected_services": [event.affected_resource] if event.affected_resource else [],
-                    })
-            return fallback_groups
+            return self._create_fallback_groups(events)
+
+    def _create_fallback_groups(self, events: List[Event]) -> List[Dict[str, Any]]:
+        """Create fallback incident groups when AI correlation fails.
+
+        Args:
+            events: List of events to create fallback groups for
+
+        Returns:
+            List of incident group dictionaries
+        """
+        fallback_groups = []
+        for event in events:
+            if event.severity in [EventSeverity.CRITICAL, EventSeverity.HIGH]:
+                fallback_groups.append({
+                    "events": [event],
+                    "title": event.title,
+                    "root_cause_hypothesis": "Automated incident created from high-severity event",
+                    "confidence_score": 50.0,
+                    "severity": event.severity.value,
+                    "affected_services": [event.affected_resource] if event.affected_resource else [],
+                })
+        return fallback_groups
 
     async def _create_or_update_incident(self, group: Dict[str, Any]) -> Optional[int]:
         """Create or update an incident from a group of events.

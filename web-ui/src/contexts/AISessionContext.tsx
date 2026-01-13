@@ -178,6 +178,9 @@ export function AISessionProvider({ children }: { children: React.ReactNode }) {
   const batchTimerRef = useRef<NodeJS.Timeout | null>(null);
   const durationTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Stable ref for queueEvent callback (prevents fetch patch effect from re-running)
+  const queueEventRef = useRef<((event: SessionEvent) => void) | null>(null);
+
   // Flush event batch
   const flushEvents = useCallback(async () => {
     if (eventQueue.current.length === 0 || !session) return;
@@ -216,6 +219,12 @@ export function AISessionProvider({ children }: { children: React.ReactNode }) {
     }
     batchTimerRef.current = setTimeout(flushEvents, EVENT_BATCH_INTERVAL);
   }, [session, flushEvents]);
+
+  // Keep the ref updated with the latest queueEvent callback
+  // This allows fetch patching to use a stable ref while getting the latest callback
+  useEffect(() => {
+    queueEventRef.current = queueEvent;
+  }, [queueEvent]);
 
   // Fetch model pricing on mount (before session check)
   useEffect(() => {
@@ -375,9 +384,18 @@ export function AISessionProvider({ children }: { children: React.ReactNode }) {
     return () => document.removeEventListener('click', handleClick, true);
   }, [session, queueEvent]);
 
+  // Track if we've patched fetch to prevent double-patching
+  const fetchPatchedRef = useRef(false);
+
   // API call tracking via fetch patching
+  // Uses queueEventRef instead of queueEvent to prevent effect re-runs when queueEvent changes
   useEffect(() => {
     if (!session || !originalFetch) return;
+
+    // Prevent double-patching if effect runs multiple times
+    if (fetchPatchedRef.current) {
+      return;
+    }
 
     const trackedFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
@@ -398,8 +416,8 @@ export function AISessionProvider({ children }: { children: React.ReactNode }) {
         const response = await originalFetch(input, init);
         const durationMs = Date.now() - startTime;
 
-        // Queue the API call event
-        queueEvent({
+        // Queue the API call event using the ref (stable reference to latest callback)
+        queueEventRef.current?.({
           event_type: 'api_call',
           event_data: {
             endpoint: url.split('?')[0], // Remove query params
@@ -417,8 +435,8 @@ export function AISessionProvider({ children }: { children: React.ReactNode }) {
       } catch (error) {
         const durationMs = Date.now() - startTime;
 
-        // Log error API call
-        queueEvent({
+        // Log error API call using the ref
+        queueEventRef.current?.({
           event_type: 'api_call',
           event_data: {
             endpoint: url.split('?')[0],
@@ -437,14 +455,33 @@ export function AISessionProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
-    // Patch window.fetch
-    window.fetch = trackedFetch as typeof fetch;
+    // Safely patch window.fetch with error handling
+    try {
+      window.fetch = trackedFetch as typeof fetch;
+      fetchPatchedRef.current = true;
+    } catch (error) {
+      // If patching fails, log but don't crash - just skip API tracking
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[AISession] Failed to patch fetch for API tracking:', error);
+      }
+      return;
+    }
 
     return () => {
-      // Restore original fetch on cleanup
-      window.fetch = originalFetch;
+      // Restore original fetch on cleanup - always try to restore
+      try {
+        if (fetchPatchedRef.current && originalFetch) {
+          window.fetch = originalFetch;
+          fetchPatchedRef.current = false;
+        }
+      } catch (error) {
+        // If restoration fails, log but don't crash
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[AISession] Failed to restore original fetch:', error);
+        }
+      }
     };
-  }, [session, queueEvent]);
+  }, [session]); // Removed queueEvent dependency - using queueEventRef instead
 
   const startSession = useCallback(async (name?: string) => {
     if (!user) {

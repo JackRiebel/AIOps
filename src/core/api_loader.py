@@ -165,7 +165,7 @@ class APILoader:
             Dictionary mapping API name to spec dict
         """
         api_files = {
-            "manage": "nexus_dashboard_manage.json",
+            "manage": "lumen_manage.json",
             "analyze": "analyze.json",
             "infra": "infra.json",
             "one_manage": "one_mange.json",

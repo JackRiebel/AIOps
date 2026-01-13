@@ -43,8 +43,27 @@ MODEL_PRICING: Dict[str, ModelPrice] = {
     "gemini-1.5-flash": {"input": 0.075, "output": 0.30},
     "gemini-2.0-flash": {"input": 0.10, "output": 0.40},
 
-    # Cisco Circuit models (estimated pricing)
-    "gpt-4.1": {"input": 10.00, "output": 30.00},
+    # Cisco Circuit models (pricing via Cisco internal - costs may be subsidized)
+    # Free tier models
+    "gpt-4.1": {"input": 2.00, "output": 8.00},
+    "cisco-gpt-4.1": {"input": 2.00, "output": 8.00},
+    "cisco-gpt-4o-mini": {"input": 0.15, "output": 0.60},
+    "cisco-gpt-4o": {"input": 5.00, "output": 15.00},
+    # Premium tier models
+    "cisco-o4-mini": {"input": 3.00, "output": 12.00},
+    "cisco-o3": {"input": 15.00, "output": 60.00},
+    "cisco-gpt-5": {"input": 30.00, "output": 90.00},
+    "cisco-gpt-5-chat": {"input": 20.00, "output": 60.00},
+    "cisco-gpt-5-mini": {"input": 5.00, "output": 15.00},
+    "cisco-gpt-5-nano": {"input": 1.00, "output": 4.00},
+    "cisco-gpt-4.1-mini": {"input": 1.00, "output": 3.00},
+    "cisco-gemini-2.5-flash": {"input": 0.075, "output": 0.30},
+    "cisco-gemini-2.5-pro": {"input": 1.25, "output": 5.00},
+    "cisco-claude-sonnet-4-5": {"input": 3.00, "output": 15.00},
+    "cisco-claude-sonnet-4": {"input": 3.00, "output": 15.00},
+    "cisco-claude-opus-4-1": {"input": 15.00, "output": 75.00},
+    "cisco-claude-opus-4-5": {"input": 15.00, "output": 75.00},
+    "cisco-claude-haiku-4-5": {"input": 0.80, "output": 4.00},
 
     # Embedding models
     "text-embedding-ada-002": {"input": 0.10, "output": 0.00},

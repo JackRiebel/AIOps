@@ -1,291 +1,364 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Navigation from '@/components/Navigation';
-import { api } from '@/lib/api-client';
+import {
+  Users,
+  Shield,
+  Key,
+  UserCheck,
+  FileText,
+  Lock,
+  Settings,
+  CheckCircle,
+  XCircle,
+  AlertCircle,
+} from 'lucide-react';
+import { apiClient } from '@/lib/api-client';
 import type { SecurityConfig } from '@/types';
+import { usePermissions, PERMISSIONS } from '@/contexts/PermissionContext';
+import { PermissionGate } from '@/components/rbac';
+import {
+  UsersTab,
+  RolesTab,
+  PermissionsTab,
+  DelegationsTab,
+  RequestsTab,
+  RestrictionsTab,
+} from '@/components/security';
+
+type TabType = 'users' | 'roles' | 'permissions' | 'delegations' | 'requests' | 'restrictions' | 'settings';
+
+const TABS: { id: TabType; label: string; icon: React.ElementType; permission?: string }[] = [
+  { id: 'users', label: 'Users & Access', icon: Users, permission: PERMISSIONS.USERS_VIEW },
+  { id: 'roles', label: 'Roles', icon: Key, permission: PERMISSIONS.RBAC_ROLES_VIEW },
+  { id: 'permissions', label: 'Permissions', icon: Shield, permission: PERMISSIONS.RBAC_PERMISSIONS_VIEW },
+  { id: 'delegations', label: 'Delegations', icon: UserCheck, permission: PERMISSIONS.RBAC_DELEGATIONS_VIEW },
+  { id: 'requests', label: 'Requests', icon: FileText, permission: PERMISSIONS.RBAC_REQUESTS_VIEW },
+  { id: 'restrictions', label: 'Restrictions', icon: Lock, permission: PERMISSIONS.ADMIN_SECURITY_VIEW },
+  { id: 'settings', label: 'Settings', icon: Settings, permission: PERMISSIONS.ADMIN_SECURITY_VIEW },
+];
 
 export default function SecurityPage() {
+  const { hasPermission, loading: permissionsLoading } = usePermissions();
+  const [activeTab, setActiveTab] = useState<TabType>('users');
   const [config, setConfig] = useState<SecurityConfig | null>(null);
-  const [editMode, setEditMode] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // Form state
-  const [formConfig, setFormConfig] = useState<SecurityConfig>({
-    edit_mode_enabled: false,
-    allowed_operations: [],
-    audit_logging: true,
-  });
-  const [newAllowedOp, setNewAllowedOp] = useState('');
+  // Get accessible tabs based on permissions
+  const accessibleTabs = TABS.filter(tab => !tab.permission || hasPermission(tab.permission));
+
+  // Set initial tab to first accessible tab
+  useEffect(() => {
+    if (!permissionsLoading && accessibleTabs.length > 0) {
+      const currentTabAccessible = accessibleTabs.some(t => t.id === activeTab);
+      if (!currentTabAccessible) {
+        setActiveTab(accessibleTabs[0].id);
+      }
+    }
+  }, [permissionsLoading, accessibleTabs, activeTab]);
 
   useEffect(() => {
-    fetchSecurityConfig();
-  }, []);
+    if (activeTab === 'settings') {
+      fetchSecurityConfig();
+    }
+  }, [activeTab]);
 
   async function fetchSecurityConfig() {
     try {
       setLoading(true);
-      const [configRes, editModeRes] = await Promise.all([
-        api.security.getConfig(),
-        api.security.getEditMode(),
-      ]);
-
-      const configData = configRes.data;
-      // Ensure allowed_operations is an array
-      if (!configData.allowed_operations) {
-        configData.allowed_operations = [];
-      }
-      setConfig(configData);
-      setFormConfig(configData);
-      setEditMode(editModeRes.data.enabled);
+      const data = await apiClient.getSecurityConfig();
+      setConfig(data);
       setError(null);
-    } catch (err: any) {
-      console.error('Failed to fetch security config:', err);
+    } catch (err) {
+      console.error('Failed to load security configuration:', err);
       setError('Failed to load security configuration');
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleToggleEditMode() {
+  async function handleToggleAuditLogging() {
+    if (!config) return;
     try {
-      const newEditMode = !editMode;
-      await api.security.setEditMode(newEditMode);
-      setEditMode(newEditMode);
-      setSuccess(`Edit mode ${newEditMode ? 'enabled' : 'disabled'} successfully`);
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (err: any) {
-      console.error('Failed to toggle edit mode:', err);
-      setError(err.response?.data?.detail || 'Failed to toggle edit mode');
-    }
-  }
-
-  async function handleSaveConfig() {
-    try {
-      setSaving(true);
       setError(null);
-      await api.security.updateConfig(formConfig);
-      setConfig(formConfig);
-      setSuccess('Security configuration updated successfully');
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (err: any) {
-      console.error('Failed to save config:', err);
-      setError(err.response?.data?.detail || 'Failed to save configuration');
-    } finally {
-      setSaving(false);
+      setSuccess(null);
+      const updated = await apiClient.updateSecurityConfig({ audit_logging: !config.audit_logging });
+      setConfig(updated);
+      setSuccess(`Audit logging ${updated.audit_logging ? 'enabled' : 'disabled'}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update');
     }
   }
 
-  function handleAddAllowedOp() {
-    if (newAllowedOp.trim() && !formConfig.allowed_operations.includes(newAllowedOp.trim())) {
-      setFormConfig({
-        ...formConfig,
-        allowed_operations: [...formConfig.allowed_operations, newAllowedOp.trim()],
-      });
-      setNewAllowedOp('');
+  // Clear alerts after delay
+  useEffect(() => {
+    if (success) {
+      const timer = setTimeout(() => setSuccess(null), 5000);
+      return () => clearTimeout(timer);
     }
-  }
+  }, [success]);
 
-  function handleRemoveAllowedOp(op: string) {
-    setFormConfig({
-      ...formConfig,
-      allowed_operations: formConfig.allowed_operations.filter((item) => item !== op),
-    });
-  }
-
-  function hasChanges() {
-    return JSON.stringify(config) !== JSON.stringify(formConfig);
-  }
+  useEffect(() => {
+    if (error) {
+      const timer = setTimeout(() => setError(null), 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [error]);
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Navigation />
-
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="mb-8">
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Security Settings</h2>
-          <p className="text-gray-600">
-            Configure edit mode and operation permissions for the MCP server
-          </p>
+    <div className="h-full bg-slate-900 overflow-auto">
+      <div className="px-6 py-6">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="text-2xl font-bold text-white">Security & Access Control</h1>
+            <p className="text-sm text-slate-400 mt-0.5">
+              Manage users, roles, permissions, and security policies
+            </p>
+          </div>
         </div>
 
-        {error && (
-          <div className="mb-6 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">
-            {error}
+        {/* Global Alerts (for settings tab) */}
+        {activeTab === 'settings' && error && (
+          <div role="alert" className="mb-4 px-4 py-3 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <XCircle className="w-4 h-4 text-red-400" aria-hidden="true" />
+              <span className="text-sm text-red-400">{error}</span>
+            </div>
             <button
               onClick={() => setError(null)}
-              className="float-right text-red-700 hover:text-red-900"
+              aria-label="Dismiss error message"
+              className="text-red-400 hover:text-red-300 focus:outline-none focus:ring-2 focus:ring-red-500/50 rounded"
             >
-              &times;
+              <XCircle className="w-4 h-4" aria-hidden="true" />
             </button>
           </div>
         )}
 
-        {success && (
-          <div className="mb-6 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-md">
-            {success}
+        {activeTab === 'settings' && success && (
+          <div role="status" className="mb-4 px-4 py-3 bg-green-500/10 border border-green-500/20 rounded-lg flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <CheckCircle className="w-4 h-4 text-green-400" aria-hidden="true" />
+              <span className="text-sm text-green-400">{success}</span>
+            </div>
+            <button
+              onClick={() => setSuccess(null)}
+              aria-label="Dismiss success message"
+              className="text-green-400 hover:text-green-300 focus:outline-none focus:ring-2 focus:ring-green-500/50 rounded"
+            >
+              <XCircle className="w-4 h-4" aria-hidden="true" />
+            </button>
           </div>
         )}
 
-        {loading ? (
-          <div className="text-center py-12">
-            <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-blue-600 border-r-transparent"></div>
-            <p className="mt-2 text-gray-600">Loading security settings...</p>
+        {/* Tabs */}
+        <div className="mb-6">
+          <div
+            role="tablist"
+            aria-label="Security management sections"
+            className="flex gap-1 border-b border-slate-700/50 overflow-x-auto"
+          >
+            {accessibleTabs.map(tab => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  role="tab"
+                  aria-selected={isActive}
+                  aria-controls={`tabpanel-${tab.id}`}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-all border-b-2 -mb-px whitespace-nowrap focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:ring-offset-1 focus:ring-offset-slate-900 ${
+                    isActive
+                      ? 'border-cyan-500 text-cyan-400'
+                      : 'border-transparent text-slate-400 hover:text-slate-300'
+                  }`}
+                >
+                  <Icon className="w-4 h-4" aria-hidden="true" />
+                  {tab.label}
+                </button>
+              );
+            })}
           </div>
-        ) : (
-          <div className="space-y-6">
-            {/* Edit Mode Toggle */}
-            <div className="bg-white rounded-lg shadow p-6">
-              <div className="flex items-center justify-between">
-                <div className="flex-1">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">Edit Mode</h3>
-                  <p className="text-sm text-gray-600">
-                    Enable or disable write operations on Nexus Dashboard clusters. When disabled,
-                    all operations are read-only.
-                  </p>
-                  <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-md">
-                    <div className="flex">
-                      <svg
-                        className="h-5 w-5 text-yellow-400 mr-2"
-                        fill="currentColor"
-                        viewBox="0 0 20 20"
-                      >
-                        <path
-                          fillRule="evenodd"
-                          d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                      <div>
-                        <p className="text-sm font-medium text-yellow-800">Warning</p>
-                        <p className="text-sm text-yellow-700 mt-1">
-                          Enabling edit mode allows write operations that can modify your Nexus
-                          Dashboard configuration. Use with caution.
-                        </p>
+        </div>
+
+        {/* Tab Content */}
+        <div className="min-h-[400px]">
+          {/* Users Tab */}
+          {activeTab === 'users' && (
+            <div role="tabpanel" id="tabpanel-users" aria-labelledby="tab-users">
+              <PermissionGate permission={PERMISSIONS.USERS_VIEW} fallback={<AccessDeniedMessage />}>
+                <UsersTab />
+              </PermissionGate>
+            </div>
+          )}
+
+          {/* Roles Tab */}
+          {activeTab === 'roles' && (
+            <div role="tabpanel" id="tabpanel-roles" aria-labelledby="tab-roles">
+              <PermissionGate permission={PERMISSIONS.RBAC_ROLES_VIEW} fallback={<AccessDeniedMessage />}>
+                <RolesTab />
+              </PermissionGate>
+            </div>
+          )}
+
+          {/* Permissions Tab */}
+          {activeTab === 'permissions' && (
+            <div role="tabpanel" id="tabpanel-permissions" aria-labelledby="tab-permissions">
+              <PermissionGate permission={PERMISSIONS.RBAC_PERMISSIONS_VIEW} fallback={<AccessDeniedMessage />}>
+                <PermissionsTab />
+              </PermissionGate>
+            </div>
+          )}
+
+          {/* Delegations Tab */}
+          {activeTab === 'delegations' && (
+            <div role="tabpanel" id="tabpanel-delegations" aria-labelledby="tab-delegations">
+              <PermissionGate permission={PERMISSIONS.RBAC_DELEGATIONS_VIEW} fallback={<AccessDeniedMessage />}>
+                <DelegationsTab />
+              </PermissionGate>
+            </div>
+          )}
+
+          {/* Requests Tab */}
+          {activeTab === 'requests' && (
+            <div role="tabpanel" id="tabpanel-requests" aria-labelledby="tab-requests">
+              <PermissionGate permission={PERMISSIONS.RBAC_REQUESTS_VIEW} fallback={<AccessDeniedMessage />}>
+                <RequestsTab />
+              </PermissionGate>
+            </div>
+          )}
+
+          {/* Restrictions Tab */}
+          {activeTab === 'restrictions' && (
+            <div role="tabpanel" id="tabpanel-restrictions" aria-labelledby="tab-restrictions">
+              <PermissionGate permission={PERMISSIONS.ADMIN_SECURITY_VIEW} fallback={<AccessDeniedMessage />}>
+                <RestrictionsTab />
+              </PermissionGate>
+            </div>
+          )}
+
+          {/* Settings Tab */}
+          {activeTab === 'settings' && (
+            <div role="tabpanel" id="tabpanel-settings" aria-labelledby="tab-settings">
+              <PermissionGate permission={PERMISSIONS.ADMIN_SECURITY_VIEW} fallback={<AccessDeniedMessage />}>
+                {loading ? (
+                  <LoadingSpinner />
+                ) : config ? (
+                  <div className="space-y-6">
+                    <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">
+                      Security Configuration
+                    </h2>
+
+                    {/* Audit Logging Card */}
+                    <div
+                      className={`rounded-xl border p-6 ${
+                        config.audit_logging
+                          ? 'bg-green-500/5 border-green-500/20'
+                          : 'bg-slate-800/30 border-slate-700/30'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-4">
+                          <div
+                            className={`p-3 rounded-lg ${
+                              config.audit_logging
+                                ? 'bg-green-500/10 text-green-400'
+                                : 'bg-slate-700/50 text-slate-400'
+                            }`}
+                          >
+                            <FileText className="w-6 h-6" aria-hidden="true" />
+                          </div>
+                          <div>
+                            <h3 className="text-lg font-semibold text-white">Audit Logging</h3>
+                            <p className="text-sm text-slate-400 mt-1">
+                              {config.audit_logging
+                                ? 'All API operations are being recorded for compliance.'
+                                : 'No operation history is retained. Enable for production environments.'}
+                            </p>
+                          </div>
+                        </div>
+                        <PermissionGate permission={PERMISSIONS.ADMIN_SECURITY_MANAGE}>
+                          <button
+                            onClick={handleToggleAuditLogging}
+                            aria-label={config.audit_logging ? 'Disable audit logging' : 'Enable audit logging'}
+                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-900 ${
+                              config.audit_logging
+                                ? 'bg-slate-700/50 hover:bg-slate-700 text-slate-300 focus:ring-slate-500'
+                                : 'bg-green-600 hover:bg-green-700 text-white focus:ring-green-500'
+                            }`}
+                          >
+                            {config.audit_logging ? 'Disable' : 'Enable'}
+                          </button>
+                        </PermissionGate>
                       </div>
                     </div>
-                  </div>
-                </div>
-                <div className="ml-6">
-                  <button
-                    onClick={handleToggleEditMode}
-                    className={`relative inline-flex h-8 w-14 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                      editMode ? 'bg-blue-600' : 'bg-gray-200'
-                    }`}
-                    role="switch"
-                    aria-checked={editMode}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-7 w-7 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                        editMode ? 'translate-x-6' : 'translate-x-0'
-                      }`}
-                    />
-                  </button>
-                  <p className="mt-2 text-sm font-medium text-gray-900 text-center">
-                    {editMode ? 'Enabled' : 'Disabled'}
-                  </p>
-                </div>
-              </div>
-            </div>
 
-            {/* Allowed Operations */}
-            <div className="bg-white rounded-lg shadow p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">Allowed Operations</h3>
-              <p className="text-sm text-gray-600 mb-4">
-                Specific operations that are explicitly allowed. Leave empty to allow all operations when edit mode is enabled.
-              </p>
-
-              <div className="flex gap-2 mb-4">
-                <input
-                  type="text"
-                  value={newAllowedOp}
-                  onChange={(e) => setNewAllowedOp(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && handleAddAllowedOp()}
-                  placeholder="e.g., manage_createVlan, analyze_getInsights"
-                  className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 placeholder:text-gray-400"
-                />
-                <button
-                  onClick={handleAddAllowedOp}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
-                >
-                  Add
-                </button>
-              </div>
-
-              {formConfig.allowed_operations.length === 0 ? (
-                <p className="text-sm text-gray-500 italic">All operations allowed (when edit mode is enabled)</p>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  {formConfig.allowed_operations.map((op) => (
-                    <div
-                      key={op}
-                      className="inline-flex items-center px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm"
-                    >
-                      {op}
-                      <button
-                        onClick={() => handleRemoveAllowedOp(op)}
-                        className="ml-2 text-green-600 hover:text-green-900"
-                      >
-                        &times;
-                      </button>
+                    {/* Session Settings Card */}
+                    <div className="bg-slate-800/30 rounded-xl border border-slate-700/30 p-6">
+                      <div className="flex items-center gap-4">
+                        <div className="p-3 rounded-lg bg-slate-700/50 text-slate-400">
+                          <Lock className="w-6 h-6" aria-hidden="true" />
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-semibold text-white">Session Security</h3>
+                          <p className="text-sm text-slate-400 mt-1">
+                            Sessions expire after 24 hours of inactivity. HTTP-only secure cookies are used.
+                          </p>
+                        </div>
+                      </div>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
 
-            {/* Save Button */}
-            {hasChanges() && (
-              <div className="bg-white rounded-lg shadow p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-gray-600">
-                      You have unsaved changes to the security configuration.
-                    </p>
-                  </div>
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() => setFormConfig(config || formConfig)}
-                      className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 transition"
-                    >
-                      Discard Changes
-                    </button>
-                    <button
-                      onClick={handleSaveConfig}
-                      disabled={saving}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition disabled:opacity-50"
-                    >
-                      {saving ? 'Saving...' : 'Save Configuration'}
-                    </button>
+                    {/* Password Policy Card */}
+                    <div className="bg-slate-800/30 rounded-xl border border-slate-700/30 p-6">
+                      <div className="flex items-center gap-4">
+                        <div className="p-3 rounded-lg bg-slate-700/50 text-slate-400">
+                          <Key className="w-6 h-6" aria-hidden="true" />
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-semibold text-white">Password Policy</h3>
+                          <p className="text-sm text-slate-400 mt-1">
+                            Passwords are hashed using bcrypt. Minimum 8 characters required.
+                          </p>
+                        </div>
+                      </div>
                   </div>
                 </div>
-              </div>
-            )}
-
-            {/* Current Configuration Summary */}
-            <div className="bg-white rounded-lg shadow p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Current Configuration</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="border-l-4 border-blue-500 pl-4">
-                  <p className="text-sm font-medium text-gray-600">Edit Mode</p>
-                  <p className="text-2xl font-bold text-gray-900 mt-1">
-                    {editMode ? 'Enabled' : 'Disabled'}
-                  </p>
-                </div>
-                <div className="border-l-4 border-green-500 pl-4">
-                  <p className="text-sm font-medium text-gray-600">Allowed Operations</p>
-                  <p className="text-2xl font-bold text-gray-900 mt-1">
-                    {config?.allowed_operations?.length || 0}
-                  </p>
-                </div>
-              </div>
+              ) : null}
+              </PermissionGate>
             </div>
-          </div>
-        )}
-      </main>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Loading Spinner Component
+function LoadingSpinner() {
+  return (
+    <div className="flex items-center justify-center py-32">
+      <div className="text-center">
+        <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-cyan-500 border-r-transparent"></div>
+        <p className="mt-3 text-slate-400 text-sm">Loading...</p>
+      </div>
+    </div>
+  );
+}
+
+// Access Denied Message Component
+function AccessDeniedMessage() {
+  return (
+    <div className="flex flex-col items-center justify-center py-16 text-center">
+      <div className="p-4 bg-red-500/10 rounded-full mb-4">
+        <AlertCircle className="w-8 h-8 text-red-400" />
+      </div>
+      <h3 className="text-lg font-medium text-white mb-2">Access Denied</h3>
+      <p className="text-sm text-slate-400 max-w-md">
+        You don&apos;t have permission to view this section. Contact your administrator if you believe this is an error.
+      </p>
     </div>
   );
 }

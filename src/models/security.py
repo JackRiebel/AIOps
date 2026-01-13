@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import ARRAY, Boolean, Column, DateTime, Integer, String
+from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, String
 from sqlalchemy.sql import func
 
 from src.config.database import Base
@@ -15,7 +15,7 @@ class SecurityConfig(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     edit_mode_enabled = Column(Boolean, default=False, nullable=False)
-    allowed_operations = Column(ARRAY(String), default=list)
+    allowed_operations = Column(JSON, default=list)
     audit_logging = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=func.now(), nullable=False)
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)

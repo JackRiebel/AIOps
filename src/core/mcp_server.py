@@ -1,4 +1,4 @@
-"""Main Nexus Dashboard MCP Server implementation."""
+"""Main Meraki Dashboard MCP Server implementation."""
 
 import json
 import logging
@@ -20,33 +20,33 @@ from src.middleware.security import SecurityMiddleware
 logger = logging.getLogger(__name__)
 
 
-class NexusDashboardMCP:
-    """Nexus Dashboard MCP Server."""
+class MerakiDashboardMCP:
+    """Meraki Dashboard MCP Server."""
 
-    def __init__(self, cluster_name: str = "default"):
-        """Initialize Nexus Dashboard MCP Server.
+    def __init__(self, organization_name: str = "default"):
+        """Initialize Meraki Dashboard MCP Server.
 
         Args:
-            cluster_name: Name of the Nexus Dashboard cluster to connect to
+            organization_name: Name of the Meraki organization to connect to
         """
-        self.cluster_name = cluster_name
+        self.organization_name = organization_name
         self.settings = get_settings()
 
         # Initialize components
         self.api_loader = APILoader()
-        self.auth_middleware = AuthMiddleware(cluster_name)
+        self.auth_middleware = AuthMiddleware(organization_name)
         self.security_middleware = SecurityMiddleware()
-        self.audit_logger = AuditLogger(cluster_name)
+        self.audit_logger = AuditLogger(organization_name)
 
         # MCP server
-        self.server = Server("nexus-dashboard-mcp")
+        self.server = Server("meraki-dashboard-mcp")
 
         # Loaded specs and tools
         self.loaded_apis: Dict[str, Dict[str, Any]] = {}
         self.operations: List[Dict[str, Any]] = []
 
     async def load_api(self, api_name: str) -> bool:
-        """Load a specific Nexus Dashboard API.
+        """Load a specific Meraki Dashboard API.
 
         Args:
             api_name: Name of the API to load
@@ -363,7 +363,7 @@ class NexusDashboardMCP:
 
             # Start stdio server
             async with stdio_server() as (read_stream, write_stream):
-                logger.info("Nexus Dashboard MCP Server started via stdio")
+                logger.info("Meraki Dashboard MCP Server started via stdio")
                 await self.server.run(
                     read_stream,
                     write_stream,

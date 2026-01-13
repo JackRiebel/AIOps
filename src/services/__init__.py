@@ -1,4 +1,4 @@
 from .credential_manager import CredentialManager
-from .nexus_api import NexusAPIClient
+from .meraki_api import MerakiAPIClient
 
-__all__ = ["CredentialManager", "NexusAPIClient"]
+__all__ = ["CredentialManager", "MerakiAPIClient"]

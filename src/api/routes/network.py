@@ -1,5 +1,6 @@
 # src/api/routes/network.py
 import logging
+import re
 import httpx
 import json
 from fastapi import APIRouter, HTTPException, Request, Depends, Body
@@ -15,6 +16,18 @@ from src.services.meraki_api import MerakiAPIClient
 from src.services.catalyst_api import CatalystCenterClient
 from src.services.thousandeyes_service import ThousandEyesClient
 from src.services.network_cache_service import NetworkCacheService
+from src.services.network_service import (
+    detect_platform_type,
+    get_platform_credentials,
+    list_networks_for_platform,
+    get_aggregated_cache_data,
+    sync_all_organizations as sync_all_orgs_service,
+    get_all_organizations_with_credentials,
+    CredentialsNotFoundError,
+    NetworkServiceError,
+    PlatformType,
+)
+from src.services.credential_pool import get_initialized_pool
 from src.models.ai_cost_log import AICostLog
 from src.models.user import User
 from src.api.dependencies import credential_manager, require_admin, require_editor, require_operator, require_viewer
@@ -25,27 +38,75 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/network", tags=["AI Network Manager"])
 
+# Organization name validation pattern - alphanumeric, spaces, hyphens, underscores, periods
+# Max 100 characters to prevent abuse
+ORGANIZATION_NAME_PATTERN = re.compile(r'^[a-zA-Z0-9\s\-_.]{1,100}$')
 
-def detect_org_type(base_url: str) -> str:
-    """Detect organization type from base URL.
+
+def validate_organization_name(organization: str) -> None:
+    """Validate organization name to prevent injection attacks.
 
     Args:
-        base_url: The API base URL
+        organization: Organization name to validate
+
+    Raises:
+        HTTPException: If validation fails
+    """
+    if not organization:
+        raise HTTPException(status_code=400, detail="Organization name is required")
+
+    if not ORGANIZATION_NAME_PATTERN.match(organization):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid organization name. Only alphanumeric characters, spaces, hyphens, underscores, and periods are allowed (max 100 chars)"
+        )
+
+
+# detect_org_type moved to src/services/network_service.py
+# Keeping a thin wrapper for backwards compatibility
+def detect_org_type(base_url: str) -> str:
+    """Detect organization type from base URL (delegates to network_service)."""
+    return detect_platform_type(base_url).value
+
+
+async def get_meraki_client_from_any_source() -> tuple[MerakiAPIClient | None, str | None]:
+    """Get Meraki API client from clusters or system_config.
+
+    This helper function searches for Meraki credentials in:
+    1. Clusters table (organizations)
+    2. System config (credentials from setup)
 
     Returns:
-        Organization type: 'meraki', 'thousandeyes', 'splunk', or 'catalyst'
+        Tuple of (MerakiAPIClient or None, org_name or None)
     """
-    base_url_lower = base_url.lower()
+    # First check clusters (traditional approach)
+    orgs = await credential_manager.list_organizations()
+    for org in orgs:
+        org_type = detect_org_type(org.get("url", ""))
+        if org_type != "meraki":
+            continue
 
-    if "thousandeyes.com" in base_url_lower:
-        return "thousandeyes"
-    elif ":8089" in base_url_lower or "splunk" in base_url_lower:
-        return "splunk"
-    elif "dnac" in base_url_lower or "catalyst" in base_url_lower:
-        return "catalyst"
-    else:
-        # Default to Meraki
-        return "meraki"
+        creds = await credential_manager.get_credentials(org.get("name"))
+        if creds and creds.get("api_key"):
+            client = MerakiAPIClient(
+                api_key=creds["api_key"],
+                base_url=creds.get("base_url", "https://api.meraki.com/api/v1")
+            )
+            return client, org.get("name")
+
+    # Fall back to credential_pool which includes system_config
+    pool = await get_initialized_pool()
+    meraki_cred = pool.get_for_meraki()
+    if meraki_cred:
+        api_key = meraki_cred.credentials.get("api_key") or meraki_cred.credentials.get("meraki_api_key")
+        if api_key:
+            client = MerakiAPIClient(
+                api_key=api_key,
+                base_url="https://api.meraki.com/api/v1"
+            )
+            return client, meraki_cred.cluster_name
+
+    return None, None
 
 
 async def get_session():
@@ -60,182 +121,35 @@ async def list_networks(
     _: any = Depends(require_viewer)
 ):
     """
-    List networks for an organization using Meraki API.
+    List networks for an organization using multi-platform API.
     Requires: VIEWER role or higher
     """
     organization = request_data.get("organization")
     resource = request_data.get("resource", "networks")
 
-    if not organization:
-        raise HTTPException(status_code=400, detail="Organization required")
+    # Validate organization name to prevent injection attacks
+    validate_organization_name(organization)
 
     try:
-        # Get credentials for the organization
-        creds = await credential_manager.get_credentials(organization)
-        if not creds:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Credentials not configured for organization: {organization}"
-            )
+        # Get credentials and detect platform (business logic in service)
+        creds = await get_platform_credentials(organization)
+        logger.info(f"Organization: {organization}, platform: {creds.platform.value}")
 
-        # Detect organization type
-        org_type = detect_org_type(creds.get("base_url", ""))
-        logger.info(f"Organization: {organization}, base_url: {creds.get('base_url')}, detected type: {org_type}")
+        # List resources using service (handles all platforms)
+        data, message = await list_networks_for_platform(creds, resource)
 
-        # Handle Catalyst Center organizations
-        if org_type == "catalyst":
-            # Support both bearer token and username/password authentication
-            api_token = creds.get("api_token") or creds.get("api_key")  # Check both field names
-            username = creds.get("username")
-            password = creds.get("password")
+        result = {"data": data}
+        if message:
+            result["message"] = message
+        return result
 
-            if not api_token and not (username and password):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Catalyst Center credentials not configured for organization: {organization}. Provide either api_token or (username + password)"
-                )
-
-            # Create Catalyst Center API client
-            catalyst_client = CatalystCenterClient(
-                username=username,
-                password=password,
-                base_url=creds.get("base_url"),
-                verify_ssl=creds.get("verify_ssl", True),
-                api_token=api_token
-            )
-
-            # Fetch the requested resource (sites or devices)
-            if resource == "devices":
-                devices = await catalyst_client.get_devices()
-                await catalyst_client.close()
-                return {"data": devices}
-            else:
-                # Fetch sites for Catalyst Center
-                sites = await catalyst_client.get_sites()
-                await catalyst_client.close()
-                return {"data": sites}
-
-        # Handle ThousandEyes organizations
-        if org_type == "thousandeyes":
-            oauth_token = creds.get("api_key") or creds.get("oauth_token")
-            if not oauth_token:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"ThousandEyes credentials not configured for organization: {organization}"
-                )
-
-            te_client = ThousandEyesClient(
-                oauth_token=oauth_token,
-                base_url=creds.get("base_url", "https://api.thousandeyes.com/v7")
-            )
-
-            # ThousandEyes doesn't have "networks" - return tests or agents based on resource
-            if resource == "devices":
-                # Return agents as "devices" equivalent
-                result = await te_client.get_agents()
-                if result.get("success"):
-                    return {"data": result.get("agents", [])}
-                else:
-                    raise HTTPException(status_code=500, detail=result.get("error", "Failed to fetch ThousandEyes agents"))
-            else:
-                # Return tests as "networks" equivalent
-                result = await te_client.get_tests()
-                if result.get("success"):
-                    return {"data": result.get("tests", [])}
-                else:
-                    raise HTTPException(status_code=500, detail=result.get("error", "Failed to fetch ThousandEyes tests"))
-
-        # Handle Splunk organizations
-        if org_type == "splunk":
-            # Splunk doesn't have a networks/devices concept in the same way
-            # Return a message indicating this is a log aggregation platform
-            return {
-                "data": [],
-                "message": "Splunk is a log aggregation platform and does not have network/device inventory. Use the AI chat to query Splunk logs."
-            }
-
-        # Handle Meraki organizations (default)
-        if not creds.get("api_key"):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Meraki credentials not configured for organization: {organization}"
-            )
-
-        # Create Meraki API client
-        meraki_client = MerakiAPIClient(
-            api_key=creds["api_key"],
-            base_url=creds.get("base_url", "https://api.meraki.com/api/v1")
-        )
-
-        # Get organization ID first
-        # Note: base_url already includes /api/v1, so paths should be relative
-        orgs_response = await meraki_client.request("GET", "/organizations")
-        orgs = orgs_response.json()
-
-        # Find the matching organization (by name or use first one)
-        org_id = None
-        if isinstance(orgs, list) and len(orgs) > 0:
-            org_id = orgs[0]["id"]  # Use first org for now
-
-        if not org_id:
-            raise HTTPException(status_code=404, detail="No organizations found")
-
-        # Fetch the requested resource (networks or devices)
-        if resource == "devices":
-            # Fetch all devices for the organization
-            devices_response = await meraki_client.request(
-                "GET",
-                f"/organizations/{org_id}/devices"
-            )
-            devices = devices_response.json()
-
-            # Fetch device statuses and merge them in
-            try:
-                statuses_response = await meraki_client.request(
-                    "GET",
-                    f"/organizations/{org_id}/devices/statuses"
-                )
-                statuses = statuses_response.json()
-
-                # Create a lookup dict for statuses by serial number
-                status_lookup = {}
-                if statuses and isinstance(statuses, list):
-                    for status_item in statuses:
-                        serial = status_item.get('serial')
-                        if serial:
-                            status_lookup[serial] = status_item.get('status', 'unknown')
-
-                # Merge status into each device
-                if devices and isinstance(devices, list):
-                    for device in devices:
-                        serial = device.get('serial')
-                        if serial and serial in status_lookup:
-                            device['status'] = status_lookup[serial]
-                        else:
-                            device['status'] = 'unknown'
-            except Exception as e:
-                logger.warning(f"Failed to fetch device statuses: {e}")
-                # If status fetch fails, set all devices to unknown
-                if devices and isinstance(devices, list):
-                    for device in devices:
-                        device['status'] = 'unknown'
-
-            await meraki_client.client.aclose()
-            return {"data": devices}
-        else:
-            # Fetch networks for the organization
-            networks_response = await meraki_client.request(
-                "GET",
-                f"/organizations/{org_id}/networks"
-            )
-            networks = networks_response.json()
-            await meraki_client.client.aclose()
-            return {"data": networks}
-
+    except CredentialsNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except NetworkServiceError as e:
+        raise HTTPException(status_code=500, detail=str(e))
     except httpx.HTTPStatusError as e:
-        logger.error(f"Meraki API error: {e}")
+        logger.error(f"Upstream API error: {e}")
         # Return 502 Bad Gateway for upstream API errors to avoid triggering frontend logout
-        # (401 from Meraki API is NOT a session auth failure)
         raise HTTPException(
             status_code=502,
             detail=f"Upstream API error ({e.response.status_code}): {e.response.text}"
@@ -259,77 +173,8 @@ async def get_cached_data(
     Requires: VIEWER role or higher
     """
     try:
-        cache_service = NetworkCacheService()
-        orgs = await credential_manager.list_organizations()
-
-        all_networks = []
-        all_devices = []
-        orgs_data = []
-
-        for org in orgs:
-            org_type = detect_org_type(org.get("url", ""))
-            if org_type not in ("meraki", "catalyst"):
-                continue
-
-            org_name = org.get("name")
-            display_name = org.get("display_name", org_name)
-
-            networks = await cache_service.get_cached_networks(org_name)
-            devices = await cache_service.get_cached_devices(org_name)
-
-            # Add organization metadata to networks
-            for net in networks:
-                net["organizationName"] = org_name
-                net["organizationDisplayName"] = display_name
-                net["organizationType"] = org_type
-                # Find devices for this network
-                net["devices"] = [d for d in devices if d.get("networkId") == net.get("id")]
-
-            # Add organization metadata to devices
-            for dev in devices:
-                dev["organizationName"] = org_name
-                dev["organizationDisplayName"] = display_name
-                # Find network name
-                matching_net = next((n for n in networks if n.get("id") == dev.get("networkId")), None)
-                dev["networkName"] = matching_net.get("name") if matching_net else None
-
-            all_networks.extend(networks)
-            all_devices.extend(devices)
-
-            # Build org stats
-            online_count = sum(1 for d in devices if d.get("status", "").lower() == "online")
-            orgs_data.append({
-                "name": org_name,
-                "displayName": display_name,
-                "type": org_type,
-                "networkCount": len(networks),
-                "deviceCount": len(devices),
-                "onlineCount": online_count,
-                "offlineCount": len(devices) - online_count,
-                "isStale": any(n.get("_is_stale") for n in networks) if networks else False
-            })
-
-        # Get cache age from first network
-        cache_age = None
-        if all_networks:
-            cached_at = all_networks[0].get("_cached_at")
-            if cached_at:
-                from datetime import datetime
-                try:
-                    cache_time = datetime.fromisoformat(cached_at.replace('Z', '+00:00'))
-                    cache_age = (datetime.utcnow() - cache_time.replace(tzinfo=None)).total_seconds()
-                except:
-                    pass
-
-        return {
-            "networks": all_networks,
-            "devices": all_devices,
-            "organizations": orgs_data,
-            "cache_age_seconds": cache_age,
-            "total_networks": len(all_networks),
-            "total_devices": len(all_devices),
-        }
-
+        # Business logic moved to network_service
+        return await get_aggregated_cache_data()
     except Exception as e:
         logger.error(f"Error fetching cached data: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -342,50 +187,11 @@ async def sync_all_organizations(
     """
     Trigger a sync for all organizations.
     This updates the cache with fresh data from APIs.
-    Returns immediately, sync happens in background.
     Requires: VIEWER role or higher
     """
-    import asyncio
-
     try:
-        cache_service = NetworkCacheService()
-        orgs = await credential_manager.list_organizations()
-
-        # Filter to supported orgs
-        supported_orgs = []
-        for org in orgs:
-            org_type = detect_org_type(org.get("url", ""))
-            if org_type in ("meraki", "catalyst"):
-                supported_orgs.append(org)
-
-        if not supported_orgs:
-            return {"message": "No supported organizations found", "synced": 0}
-
-        # Sync all orgs in parallel
-        results = []
-        sync_tasks = [
-            cache_service.sync_organization(org.get("name"), force=True)
-            for org in supported_orgs
-        ]
-
-        sync_results = await asyncio.gather(*sync_tasks, return_exceptions=True)
-
-        success_count = 0
-        for org, result in zip(supported_orgs, sync_results):
-            if isinstance(result, Exception):
-                results.append({"organization": org.get("name"), "success": False, "error": str(result)})
-            else:
-                results.append({"organization": org.get("name"), **result})
-                if result.get("success"):
-                    success_count += 1
-
-        return {
-            "message": f"Synced {success_count}/{len(supported_orgs)} organizations",
-            "synced": success_count,
-            "total": len(supported_orgs),
-            "results": results
-        }
-
+        # Business logic moved to network_service
+        return await sync_all_orgs_service(force=True)
     except Exception as e:
         logger.error(f"Error syncing organizations: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -407,54 +213,36 @@ async def get_rf_analysis(
     """
     try:
         # Get organization credentials (find org that has this network)
-        orgs = await credential_manager.list_organizations()
-        meraki_client = None
+        # First try clusters, then fall back to system_config via helper
+        meraki_client, org_name = await get_meraki_client_from_any_source()
         org_id = None
 
-        for org in orgs:
-            org_type = detect_org_type(org.get("url", ""))
-            if org_type != "meraki":
-                continue
-
-            creds = await credential_manager.get_credentials(org.get("name"))
-            if not creds or not creds.get("api_key"):
-                continue
-
+        if meraki_client:
             try:
-                meraki_client = MerakiAPIClient(
-                    api_key=creds["api_key"],
-                    base_url=creds.get("base_url", "https://api.meraki.com/api/v1")
-                )
-
                 # Check if this org has the network
-                orgs_response = await meraki_client.request("GET", "/organizations")
-                orgs_data = orgs_response.json()
+                orgs_data = await meraki_client.request("GET", "/organizations")
                 if orgs_data:
                     org_id = orgs_data[0]["id"]
-                    networks_response = await meraki_client.request("GET", f"/organizations/{org_id}/networks")
-                    networks = networks_response.json()
-                    if any(n["id"] == network_id for n in networks):
-                        break
-                await meraki_client.client.aclose()
-                meraki_client = None
-            except:
+                    networks = await meraki_client.request("GET", f"/organizations/{org_id}/networks")
+                    if not any(n["id"] == network_id for n in networks):
+                        # Network not found in this org
+                        await meraki_client.client.aclose()
+                        meraki_client = None
+            except (httpx.HTTPError, json.JSONDecodeError, KeyError, ValueError):
                 if meraki_client:
                     await meraki_client.client.aclose()
                 meraki_client = None
-                continue
 
         if not meraki_client:
-            raise HTTPException(status_code=404, detail=f"Network {network_id} not found")
+            raise HTTPException(status_code=404, detail=f"Network {network_id} not found or no Meraki credentials configured")
 
         try:
-            # Get network name
-            network_response = await meraki_client.request("GET", f"/networks/{network_id}")
-            network_data = network_response.json()
+            # Get network name (request() returns parsed JSON)
+            network_data = await meraki_client.request("GET", f"/networks/{network_id}")
             network_name = network_data.get("name", "Unknown")
 
             # Get wireless devices (APs)
-            devices_response = await meraki_client.request("GET", f"/networks/{network_id}/devices")
-            devices = devices_response.json()
+            devices = await meraki_client.request("GET", f"/networks/{network_id}/devices")
             wireless_devices = [d for d in devices if d.get("model", "").startswith(("MR", "CW"))]
 
             if not wireless_devices:
@@ -470,13 +258,12 @@ async def get_rf_analysis(
             channel_util_data = {}
 
             try:
-                # Get channel utilization for the network
-                util_response = await meraki_client.request(
+                # Get channel utilization for the network (request() returns parsed JSON)
+                util_data = await meraki_client.request(
                     "GET",
                     f"/networks/{network_id}/networkHealth/channelUtilization",
                     params={"timespan": 3600}  # Last hour
                 )
-                util_data = util_response.json()
                 for item in util_data:
                     serial = item.get("serial")
                     if serial:
@@ -565,57 +352,38 @@ async def get_health_summary(
 
     try:
         # Find the organization that owns this network
-        orgs = await credential_manager.list_organizations()
-        meraki_client = None
+        # First try clusters, then fall back to system_config via helper
+        meraki_client, org_name = await get_meraki_client_from_any_source()
         org_id = None
 
-        for org in orgs:
-            org_type = detect_org_type(org.get("url", ""))
-            if org_type != "meraki":
-                continue
-
-            creds = await credential_manager.get_credentials(org.get("name"))
-            if not creds or not creds.get("api_key"):
-                continue
-
+        if meraki_client:
             try:
-                meraki_client = MerakiAPIClient(
-                    api_key=creds["api_key"],
-                    base_url=creds.get("base_url", "https://api.meraki.com/api/v1")
-                )
-
-                orgs_response = await meraki_client.request("GET", "/organizations")
-                orgs_data = orgs_response.json()
+                orgs_data = await meraki_client.request("GET", "/organizations")
                 if orgs_data:
                     org_id = orgs_data[0]["id"]
-                    networks_response = await meraki_client.request("GET", f"/organizations/{org_id}/networks")
-                    networks = networks_response.json()
-                    if any(n["id"] == network_id for n in networks):
-                        break
-                await meraki_client.client.aclose()
-                meraki_client = None
-            except:
+                    networks = await meraki_client.request("GET", f"/organizations/{org_id}/networks")
+                    if not any(n["id"] == network_id for n in networks):
+                        await meraki_client.client.aclose()
+                        meraki_client = None
+            except (httpx.HTTPError, json.JSONDecodeError, KeyError, ValueError):
                 if meraki_client:
                     await meraki_client.client.aclose()
                 meraki_client = None
-                continue
 
         if not meraki_client:
-            raise HTTPException(status_code=404, detail=f"Network {network_id} not found")
+            raise HTTPException(status_code=404, detail=f"Network {network_id} not found or no Meraki credentials configured")
 
         try:
             # Get network name
-            network_response = await meraki_client.request("GET", f"/networks/{network_id}")
-            network_data = network_response.json()
+            network_data = await meraki_client.request("GET", f"/networks/{network_id}")
             network_name = network_data.get("name", "Unknown")
 
             # Get device statuses
-            devices_response = await meraki_client.request("GET", f"/networks/{network_id}/devices")
-            devices = devices_response.json()
+            devices = await meraki_client.request("GET", f"/networks/{network_id}/devices")
 
             # Get device statuses from org level
-            statuses_response = await meraki_client.request("GET", f"/organizations/{org_id}/devices/statuses")
-            statuses = {s["serial"]: s for s in statuses_response.json()}
+            statuses_data = await meraki_client.request("GET", f"/organizations/{org_id}/devices/statuses")
+            statuses = {s["serial"]: s for s in statuses_data}
 
             # Calculate health score from device status
             total_devices = len(devices)
@@ -717,56 +485,37 @@ async def get_network_overview(
     """
     try:
         # Find the organization that owns this network
-        orgs = await credential_manager.list_organizations()
-        meraki_client = None
+        # First try clusters, then fall back to system_config via helper
+        meraki_client, org_name = await get_meraki_client_from_any_source()
         org_id = None
 
-        for org in orgs:
-            org_type = detect_org_type(org.get("url", ""))
-            if org_type != "meraki":
-                continue
-
-            creds = await credential_manager.get_credentials(org.get("name"))
-            if not creds or not creds.get("api_key"):
-                continue
-
+        if meraki_client:
             try:
-                meraki_client = MerakiAPIClient(
-                    api_key=creds["api_key"],
-                    base_url=creds.get("base_url", "https://api.meraki.com/api/v1")
-                )
-
-                orgs_response = await meraki_client.request("GET", "/organizations")
-                orgs_data = orgs_response.json()
+                orgs_data = await meraki_client.request("GET", "/organizations")
                 if orgs_data:
                     org_id = orgs_data[0]["id"]
-                    networks_response = await meraki_client.request("GET", f"/organizations/{org_id}/networks")
-                    networks = networks_response.json()
-                    if any(n["id"] == network_id for n in networks):
-                        break
-                await meraki_client.client.aclose()
-                meraki_client = None
-            except:
+                    networks = await meraki_client.request("GET", f"/organizations/{org_id}/networks")
+                    if not any(n["id"] == network_id for n in networks):
+                        await meraki_client.client.aclose()
+                        meraki_client = None
+            except (httpx.HTTPError, json.JSONDecodeError, KeyError, ValueError):
                 if meraki_client:
                     await meraki_client.client.aclose()
                 meraki_client = None
-                continue
 
         if not meraki_client:
-            raise HTTPException(status_code=404, detail=f"Network {network_id} not found")
+            raise HTTPException(status_code=404, detail=f"Network {network_id} not found or no Meraki credentials configured")
 
         try:
             # Get network info
-            network_response = await meraki_client.request("GET", f"/networks/{network_id}")
-            network_data = network_response.json()
+            network_data = await meraki_client.request("GET", f"/networks/{network_id}")
 
             # Get devices for this network
-            devices_response = await meraki_client.request("GET", f"/networks/{network_id}/devices")
-            devices = devices_response.json()
+            devices = await meraki_client.request("GET", f"/networks/{network_id}/devices")
 
             # Get device statuses from org level
-            statuses_response = await meraki_client.request("GET", f"/organizations/{org_id}/devices/statuses")
-            statuses = {s["serial"]: s for s in statuses_response.json()}
+            statuses_data = await meraki_client.request("GET", f"/organizations/{org_id}/devices/statuses")
+            statuses = {s["serial"]: s for s in statuses_data}
 
             # Calculate device stats
             network_device_serials = {d.get("serial") for d in devices}
@@ -897,52 +646,34 @@ async def get_network_devices(
     """
     try:
         # Find the organization that owns this network
-        orgs = await credential_manager.list_organizations()
-        meraki_client = None
+        # First try clusters, then fall back to system_config via helper
+        meraki_client, org_name = await get_meraki_client_from_any_source()
         org_id = None
 
-        for org in orgs:
-            org_type = detect_org_type(org.get("url", ""))
-            if org_type != "meraki":
-                continue
-
-            creds = await credential_manager.get_credentials(org.get("name"))
-            if not creds or not creds.get("api_key"):
-                continue
-
+        if meraki_client:
             try:
-                meraki_client = MerakiAPIClient(
-                    api_key=creds["api_key"],
-                    base_url=creds.get("base_url", "https://api.meraki.com/api/v1")
-                )
-
-                orgs_response = await meraki_client.request("GET", "/organizations")
-                orgs_data = orgs_response.json()
+                orgs_data = await meraki_client.request("GET", "/organizations")
                 if orgs_data:
                     org_id = orgs_data[0]["id"]
-                    networks_response = await meraki_client.request("GET", f"/organizations/{org_id}/networks")
-                    networks = networks_response.json()
-                    if any(n["id"] == network_id for n in networks):
-                        break
-                await meraki_client.client.aclose()
-                meraki_client = None
-            except:
+                    networks = await meraki_client.request("GET", f"/organizations/{org_id}/networks")
+                    if not any(n["id"] == network_id for n in networks):
+                        await meraki_client.client.aclose()
+                        meraki_client = None
+            except (httpx.HTTPError, json.JSONDecodeError, KeyError, ValueError):
                 if meraki_client:
                     await meraki_client.client.aclose()
                 meraki_client = None
-                continue
 
         if not meraki_client:
-            raise HTTPException(status_code=404, detail=f"Network {network_id} not found")
+            raise HTTPException(status_code=404, detail=f"Network {network_id} not found or no Meraki credentials configured")
 
         try:
             # Get devices for this network
-            devices_response = await meraki_client.request("GET", f"/networks/{network_id}/devices")
-            devices = devices_response.json()
+            devices = await meraki_client.request("GET", f"/networks/{network_id}/devices")
 
             # Get device statuses from org level
-            statuses_response = await meraki_client.request("GET", f"/organizations/{org_id}/devices/statuses")
-            statuses = {s["serial"]: s for s in statuses_response.json()}
+            statuses_data = await meraki_client.request("GET", f"/organizations/{org_id}/devices/statuses")
+            statuses = {s["serial"]: s for s in statuses_data}
 
             # Enrich devices with status
             result = []
@@ -982,63 +713,44 @@ async def get_network_alerts(
     """
     try:
         # Find the organization that owns this network
-        orgs = await credential_manager.list_organizations()
-        meraki_client = None
+        # First try clusters, then fall back to system_config via helper
+        meraki_client, org_name = await get_meraki_client_from_any_source()
         org_id = None
 
-        for org in orgs:
-            org_type = detect_org_type(org.get("url", ""))
-            if org_type != "meraki":
-                continue
-
-            creds = await credential_manager.get_credentials(org.get("name"))
-            if not creds or not creds.get("api_key"):
-                continue
-
+        if meraki_client:
             try:
-                meraki_client = MerakiAPIClient(
-                    api_key=creds["api_key"],
-                    base_url=creds.get("base_url", "https://api.meraki.com/api/v1")
-                )
-
-                orgs_response = await meraki_client.request("GET", "/organizations")
-                orgs_data = orgs_response.json()
+                orgs_data = await meraki_client.request("GET", "/organizations")
                 if orgs_data:
                     org_id = orgs_data[0]["id"]
-                    networks_response = await meraki_client.request("GET", f"/organizations/{org_id}/networks")
-                    networks = networks_response.json()
-                    if any(n["id"] == network_id for n in networks):
-                        break
-                await meraki_client.client.aclose()
-                meraki_client = None
-            except:
+                    networks = await meraki_client.request("GET", f"/organizations/{org_id}/networks")
+                    if not any(n["id"] == network_id for n in networks):
+                        await meraki_client.client.aclose()
+                        meraki_client = None
+            except (httpx.HTTPError, json.JSONDecodeError, KeyError, ValueError):
                 if meraki_client:
                     await meraki_client.client.aclose()
                 meraki_client = None
-                continue
 
         if not meraki_client:
-            raise HTTPException(status_code=404, detail=f"Network {network_id} not found")
+            raise HTTPException(status_code=404, detail=f"Network {network_id} not found or no Meraki credentials configured")
 
         try:
             # Try to get alerts from assurance API
             try:
-                alerts_response = await meraki_client.request(
+                alerts_data = await meraki_client.request(
                     "GET",
                     f"/organizations/{org_id}/assurance/alerts",
                     params={"networkId": network_id, "perPage": 100}
                 )
-                alerts_data = alerts_response.json()
                 alerts = alerts_data.get("items", []) if isinstance(alerts_data, dict) else alerts_data
             except Exception as e:
                 logger.warning(f"Could not fetch assurance alerts, trying events: {e}")
                 # Fallback to network events
-                events_response = await meraki_client.request(
+                events_data = await meraki_client.request(
                     "GET",
                     f"/networks/{network_id}/events",
                     params={"perPage": 50, "productType": "appliance"}
                 )
-                events_data = events_response.json()
                 alerts = events_data.get("events", []) if isinstance(events_data, dict) else events_data
 
             await meraki_client.client.aclose()
@@ -1096,7 +808,7 @@ async def get_network_topology(
                         break
                 await meraki_client.client.aclose()
                 meraki_client = None
-            except:
+            except (httpx.HTTPError, json.JSONDecodeError, KeyError, ValueError):
                 if meraki_client:
                     await meraki_client.client.aclose()
                 meraki_client = None
@@ -1210,7 +922,7 @@ async def get_device_details(
                         break
                 await meraki_client.client.aclose()
                 meraki_client = None
-            except:
+            except (httpx.HTTPError, json.JSONDecodeError, KeyError, ValueError):
                 if meraki_client:
                     await meraki_client.client.aclose()
                 meraki_client = None
@@ -1872,9 +1584,21 @@ async def network_chat_stream(
         raise HTTPException(status_code=400, detail="Message required")
 
     # Get user's preferred model and settings
-    preferred_model = user.preferred_model if user and user.preferred_model else "claude-sonnet-4-5-20250929"
+    preferred_model = user.preferred_model if user and user.preferred_model else None
     temperature = user.ai_temperature if user and user.ai_temperature else 0.7
     max_tokens = user.ai_max_tokens if user and user.ai_max_tokens else 4096
+
+    # If no user preference, get default from configured provider
+    if not preferred_model:
+        from src.services.config_service import get_configured_ai_provider_sync
+        provider_config = get_configured_ai_provider_sync()
+        if provider_config:
+            preferred_model = provider_config["model"]
+        else:
+            raise HTTPException(
+                status_code=503,
+                detail="No AI provider configured - please configure an AI provider in Admin > System Config"
+            )
 
     # Build user API keys dict for all providers
     user_api_keys = {}
@@ -2143,7 +1867,7 @@ async def network_chat_stream(
                             statuses = {s["serial"]: s.get("status", "unknown") for s in statuses_response.json()}
                             for d in devices:
                                 d["status"] = statuses.get(d.get("serial"), "unknown")
-                        except:
+                        except (httpx.HTTPError, json.JSONDecodeError, KeyError, TypeError):
                             pass
 
                         await meraki_client.client.aclose()
@@ -2239,7 +1963,7 @@ async def network_chat_stream(
                             if creds and creds.get("base_url", "").startswith("https://") and "splunk" in creds.get("base_url", "").lower():
                                 splunk_org = org_id
                                 break
-                        except:
+                        except (KeyError, ValueError, TypeError):
                             continue
 
                 if not splunk_org:
@@ -2526,34 +2250,21 @@ IMPORTANT: Do NOT say you lack credentials or access - USE THE TOOLS to fetch da
 
 Format responses using markdown for better readability. When listing devices or networks, format them in a clear, readable way."""
 
-            # For Cisco Circuit models, replace system prompt since they don't support tool calling
+            # For Cisco Circuit models, use ReAct-style tool calling
             if is_cisco_model:
-                system_prompt = f"""You are a Cisco networking expert assistant powered by Cisco Circuit.
+                system_prompt = f"""You are a Cisco networking expert assistant powered by Cisco Circuit with full tool access.
 
 {org_context}
 {cached_context}
 
-**IMPORTANT LIMITATION**: You are running on Cisco Circuit which does NOT support executing API calls to fetch live network data.
+You have access to the same network management tools as other AI models including:
+- Meraki Dashboard API for network, device, and client management
+- Splunk queries for logs and security events
+- ThousandEyes for network performance monitoring
+- Knowledge Base for Cisco documentation and best practices
 
-WHAT YOU CAN DO:
-- Answer questions about Cisco technologies (Meraki, Catalyst, ThousandEyes, SD-WAN, etc.)
-- Provide best practices and troubleshooting guidance
-- Explain networking concepts and Cisco features
-- Use the cached data shown above to answer questions about networks and devices
-
-WHAT YOU CANNOT DO:
-- Execute live API calls to Meraki, Catalyst Center, or ThousandEyes
-- Fetch real-time device status or network data
-- Make configuration changes
-
-If the user asks for live network data (like "get my networks" or "show devices"), respond with:
-"I'm currently using Cisco Circuit which is optimized for knowledge queries and doesn't support live API calls. To execute network API calls and see live data, please switch to Claude or GPT-4o in the model selector.
-
-However, I can help you with:
-- Cisco networking best practices
-- Troubleshooting guidance
-- Explaining features and configurations
-- Questions about the cached network data shown in my context"
+When the user asks about network data, devices, or status, USE THE TOOLS provided to fetch live data.
+Do not say you cannot access live data - you have full tool access via ReAct pattern.
 
 Format responses using markdown for better readability."""
 
@@ -2570,12 +2281,12 @@ Format responses using markdown for better readability."""
             messages.append({"role": "user", "content": message})
 
             # Stream with multi-provider support
-            # Don't pass tools to Cisco models since they don't support function calling
+            # Cisco models can use tools via ReAct pattern or native function calling
             async for event in streaming_provider.stream_chat(
                 messages=messages,
                 system_prompt=system_prompt,
-                tools=None if is_cisco_model else network_tools,
-                tool_executor=None if is_cisco_model else execute_tool,
+                tools=network_tools,
+                tool_executor=execute_tool,
             ):
                 # Intercept "done" events for cost logging
                 if isinstance(event, str) and '"type": "done"' in event:

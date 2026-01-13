@@ -12,6 +12,7 @@ import httpx
 from src.config.settings import get_settings
 from src.services.ai_service import BaseNetworkAssistant, get_model_costs
 from src.services.security_service import SecurityConfigService
+from src.services.config_service import get_config_or_env
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,62 @@ Final Answer: [Your complete response to the user, formatted nicely with the dat
 - Only call ONE tool at a time, wait for the Observation before continuing
 - If a tool returns an error, explain what went wrong in your Final Answer
 """
+
+
+def _extract_balanced_json(text: str) -> Optional[str]:
+    """Extract a balanced JSON object from the start of text.
+
+    Handles nested objects and arrays by counting brackets.
+
+    Args:
+        text: Text starting with '{' (should be stripped of leading whitespace)
+
+    Returns:
+        The extracted JSON string, or None if no valid JSON found
+    """
+    if not text.startswith('{'):
+        return None
+
+    brace_count = 0
+    bracket_count = 0
+    in_string = False
+    escape_next = False
+
+    for i, char in enumerate(text):
+        if escape_next:
+            escape_next = False
+            continue
+
+        if char == '\\' and in_string:
+            escape_next = True
+            continue
+
+        if char == '"' and not escape_next:
+            in_string = not in_string
+            continue
+
+        if in_string:
+            continue
+
+        if char == '{':
+            brace_count += 1
+        elif char == '}':
+            brace_count -= 1
+            if brace_count == 0:
+                return text[:i + 1]
+        elif char == '[':
+            bracket_count += 1
+        elif char == ']':
+            bracket_count -= 1
+
+        # Stop if we hit a clear end marker (newline after balanced JSON is common)
+        if brace_count == 0 and bracket_count == 0 and char == '\n' and i > 0:
+            # Check if we've captured a complete JSON
+            potential_json = text[:i]
+            if potential_json.strip().endswith('}'):
+                return potential_json.strip()
+
+    return None
 
 
 def parse_react_response(text: str) -> Dict[str, Any]:
@@ -101,20 +158,41 @@ def parse_react_response(text: str) -> Dict[str, Any]:
         result["has_action"] = True
 
     # Parse Action Input (JSON parameters)
-    # Look for JSON object after "Action Input:"
-    input_match = re.search(r'Action Input:\s*(\{[^}]+\})', text, re.DOTALL | re.IGNORECASE)
-    if input_match:
-        try:
-            result["action_input"] = json.loads(input_match.group(1))
-        except json.JSONDecodeError:
-            # Try to fix common JSON issues (single quotes, unquoted keys)
-            json_str = input_match.group(1)
-            json_str = re.sub(r"'", '"', json_str)  # Replace single quotes
-            try:
-                result["action_input"] = json.loads(json_str)
-            except json.JSONDecodeError:
-                logger.warning(f"[ReAct] Failed to parse Action Input: {input_match.group(1)}")
-                result["action_input"] = {}
+    # Look for JSON object after "Action Input:" - handle nested objects
+    # First find where Action Input starts
+    input_start = re.search(r'Action Input:\s*', text, re.IGNORECASE)
+    if input_start and result["has_action"]:
+        # Find the JSON starting from after "Action Input:"
+        json_start_pos = input_start.end()
+        remaining_text = text[json_start_pos:]
+
+        # Try to extract balanced JSON
+        if remaining_text.strip().startswith('{'):
+            json_str = _extract_balanced_json(remaining_text.strip())
+            if json_str:
+                try:
+                    result["action_input"] = json.loads(json_str)
+                except json.JSONDecodeError:
+                    # Try to fix common JSON issues (single quotes, unquoted keys)
+                    fixed_json = re.sub(r"'", '"', json_str)  # Replace single quotes
+                    try:
+                        result["action_input"] = json.loads(fixed_json)
+                    except json.JSONDecodeError:
+                        logger.warning(f"[ReAct] Failed to parse Action Input: {json_str[:200]}")
+                        result["action_input"] = {}
+            else:
+                # Fallback to simple regex for flat JSON
+                input_match = re.search(r'\{[^}]+\}', remaining_text)
+                if input_match:
+                    try:
+                        result["action_input"] = json.loads(input_match.group(0))
+                    except json.JSONDecodeError:
+                        logger.warning(f"[ReAct] Failed to parse fallback Action Input")
+                        result["action_input"] = {}
+                else:
+                    result["action_input"] = {}
+        else:
+            result["action_input"] = {}
     elif result["has_action"]:
         # Action without input - use empty dict
         result["action_input"] = {}
@@ -164,11 +242,28 @@ def format_tools_for_react(tools: List[Dict]) -> str:
 class CiscoCircuitAIService(BaseNetworkAssistant):
     """Cisco Circuit AI provider using Cisco's internal API.
 
-    Supports multiple models:
+    Supports multiple models via Cisco Circuit:
+
+    Free Tier (120K tokens):
     - gpt-4.1: GPT-4.1 (120K free tier, 1M pay-as-you-use)
     - gpt-4o: GPT-4o (120K tokens)
     - gpt-4o-mini: GPT-4o Mini (120K tokens)
-    - o4-mini: o4-mini (200K tokens)
+
+    Premium Tier:
+    - o4-mini: o4-mini reasoning model (200K tokens)
+    - o3: o3 advanced reasoning model (200K tokens)
+    - gpt-5: GPT-5 flagship model (270K tokens)
+    - gpt-5-chat: GPT-5 optimized for chat (120K tokens)
+    - gpt-5-mini: GPT-5 Mini (1M tokens)
+    - gpt-5-nano: GPT-5 Nano fast model (1M tokens)
+    - gpt-4.1-mini: GPT-4.1 Mini (1M tokens)
+    - gemini-2.5-flash: Google Gemini 2.5 Flash (1M tokens)
+    - gemini-2.5-pro: Google Gemini 2.5 Pro (1M tokens)
+    - claude-sonnet-4-5: Anthropic Claude Sonnet 4.5 (1M tokens)
+    - claude-sonnet-4: Anthropic Claude Sonnet 4 (1M tokens)
+    - claude-opus-4-1: Anthropic Claude Opus 4.1 (200K tokens)
+    - claude-opus-4-5: Anthropic Claude Opus 4.5 (200K tokens)
+    - claude-haiku-4-5: Anthropic Claude Haiku 4.5 (200K tokens)
     """
 
     TOKEN_URL = "https://id.cisco.com/oauth2/default/v1/token"
@@ -176,11 +271,27 @@ class CiscoCircuitAIService(BaseNetworkAssistant):
     API_VERSION = "2025-04-01-preview"
 
     # Model endpoint mapping (internal model ID -> API endpoint)
+    # Maps the model name (after stripping cisco- prefix) to the Circuit API endpoint
     MODEL_ENDPOINTS = {
+        # Free tier models
         "gpt-4.1": "gpt-4.1",
         "gpt-4o": "gpt-4o",
         "gpt-4o-mini": "gpt-4o-mini",
+        # Premium tier models
         "o4-mini": "o4-mini",
+        "o3": "o3",
+        "gpt-5": "gpt-5",
+        "gpt-5-chat": "gpt-5-chat",
+        "gpt-5-mini": "gpt-5-mini",
+        "gpt-5-nano": "gpt-5-nano",
+        "gpt-4.1-mini": "gpt-4.1-mini",
+        "gemini-2.5-flash": "gemini-2.5-flash",
+        "gemini-2.5-pro": "gemini-2.5-pro",
+        "claude-sonnet-4-5": "claude-sonnet-4-5",
+        "claude-sonnet-4": "claude-sonnet-4",
+        "claude-opus-4-1": "claude-opus-4-1",
+        "claude-opus-4-5": "claude-opus-4-5",
+        "claude-haiku-4-5": "claude-haiku-4-5",
     }
 
     def _get_api_model_name(self) -> str:
@@ -365,8 +476,13 @@ class CiscoCircuitAIService(BaseNetworkAssistant):
 
         # Create a temporary Claude assistant just to get tools and execute them
         settings = get_settings()
+        anthropic_key = (
+            get_config_or_env("anthropic_api_key", "ANTHROPIC_API_KEY") or
+            settings.anthropic_api_key or
+            "dummy"
+        )
         tool_executor = ClaudeNetworkAssistant(
-            api_key=settings.anthropic_api_key or "dummy",
+            api_key=anthropic_key,
             model="claude-3-5-haiku-20241022"
         )
 
@@ -645,8 +761,13 @@ class CiscoCircuitAIService(BaseNetworkAssistant):
         from src.services.claude_service import ClaudeNetworkAssistant
 
         settings = get_settings()
+        anthropic_key = (
+            get_config_or_env("anthropic_api_key", "ANTHROPIC_API_KEY") or
+            settings.anthropic_api_key or
+            "dummy"
+        )
         tool_executor = ClaudeNetworkAssistant(
-            api_key=settings.anthropic_api_key or "dummy",
+            api_key=anthropic_key,
             model="claude-3-5-haiku-20241022"
         )
 

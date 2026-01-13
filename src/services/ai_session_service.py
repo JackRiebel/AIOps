@@ -101,33 +101,114 @@ class AISessionService:
         ai_session: AISession,
         events: List[AISessionEvent]
     ) -> None:
-        """Calculate and store ROI metrics for the session."""
+        """
+        Calculate and store ROI metrics for the session.
+
+        Uses AI-based analysis to accurately determine what work was done
+        and how long it would have taken manually, then falls back to
+        heuristic-based calculation if AI analysis fails.
+        """
         try:
-            from src.services.roi_calculator import get_roi_calculator
+            # First, try AI-based ROI analysis (more accurate)
+            from src.services.ai_roi_analyzer import analyze_session_roi
 
-            calculator = get_roi_calculator()
-            metrics = calculator.calculate_session_roi(ai_session, events)
+            ai_analysis = await analyze_session_roi(ai_session, events)
 
-            # Store calculated ROI fields
-            ai_session.time_saved_minutes = Decimal(str(metrics.time_saved_minutes))
-            ai_session.roi_percentage = Decimal(str(metrics.roi_percentage))
-            ai_session.manual_cost_estimate_usd = Decimal(str(metrics.manual_cost_usd))
-            ai_session.session_type = metrics.session_type
-            ai_session.complexity_score = metrics.complexity_score
-            ai_session.efficiency_score = metrics.efficiency_score
-            ai_session.avg_response_time_ms = metrics.avg_response_time_ms
-            ai_session.slowest_query_ms = metrics.slowest_query_ms
-            ai_session.total_duration_ms = metrics.total_duration_ms
-            ai_session.cost_breakdown = metrics.cost_breakdown
+            if ai_analysis:
+                # Use AI-analyzed ROI (more accurate)
+                ai_session.time_saved_minutes = Decimal(str(ai_analysis.time_saved_minutes))
+                ai_session.roi_percentage = Decimal(str(min(ai_analysis.roi_percentage, 999999)))  # Cap for storage
+                ai_session.manual_cost_estimate_usd = Decimal(str(ai_analysis.manual_cost_usd))
+                ai_session.session_type = ai_analysis.primary_task_type
+                ai_session.efficiency_score = ai_analysis.efficiency_score
 
-            logger.info(
-                f"Session {ai_session.id} ROI: {metrics.roi_percentage:.1f}%, "
-                f"time saved: {metrics.time_saved_minutes:.1f}min, "
-                f"efficiency: {metrics.efficiency_score}/100"
-            )
+                # Store complexity as 1-5 scale
+                complexity_map = {"simple": 2, "moderate": 3, "complex": 5}
+                ai_session.complexity_score = complexity_map.get(ai_analysis.complexity_level, 3)
+
+                # Store detailed analysis in cost_breakdown for UI access
+                ai_session.cost_breakdown = {
+                    "ai_queries": float(ai_session.total_cost_usd) - float(ai_session.summary_cost_usd or 0),
+                    "summary": float(ai_session.summary_cost_usd or 0),
+                    "analysis_method": "ai",
+                    "tasks_completed": ai_analysis.tasks_completed,
+                    "confidence": ai_analysis.confidence_score,
+                    "reasoning": ai_analysis.reasoning,
+                }
+
+                logger.info(
+                    f"Session {ai_session.id} AI-analyzed ROI: {ai_analysis.roi_percentage:.0f}%, "
+                    f"time saved: {ai_analysis.time_saved_minutes:.1f}min (estimated {ai_analysis.estimated_manual_minutes:.1f}min manual), "
+                    f"efficiency: {ai_analysis.efficiency_score}/100, "
+                    f"confidence: {ai_analysis.confidence_score:.0%}"
+                )
+            else:
+                # Fall back to heuristic-based calculation
+                await self._calculate_roi_heuristic(ai_session, events)
+
+            # Always calculate performance metrics
+            self._calculate_performance_metrics(ai_session, events)
 
         except Exception as e:
             logger.error(f"Error calculating ROI for session {ai_session.id}: {e}")
+            # Try heuristic fallback
+            try:
+                await self._calculate_roi_heuristic(ai_session, events)
+            except Exception as e2:
+                logger.error(f"Heuristic ROI also failed for session {ai_session.id}: {e2}")
+
+    async def _calculate_roi_heuristic(
+        self,
+        ai_session: AISession,
+        events: List[AISessionEvent]
+    ) -> None:
+        """Fallback heuristic-based ROI calculation using keyword matching."""
+        from src.services.roi_calculator import get_roi_calculator
+
+        calculator = get_roi_calculator()
+        metrics = calculator.calculate_session_roi(ai_session, events)
+
+        ai_session.time_saved_minutes = Decimal(str(metrics.time_saved_minutes))
+        ai_session.roi_percentage = Decimal(str(metrics.roi_percentage))
+        ai_session.manual_cost_estimate_usd = Decimal(str(metrics.manual_cost_usd))
+        ai_session.session_type = metrics.session_type
+        ai_session.complexity_score = metrics.complexity_score
+        ai_session.efficiency_score = metrics.efficiency_score
+        ai_session.cost_breakdown = {
+            **metrics.cost_breakdown,
+            "analysis_method": "heuristic",
+        }
+
+        logger.info(
+            f"Session {ai_session.id} heuristic ROI: {metrics.roi_percentage:.1f}%, "
+            f"time saved: {metrics.time_saved_minutes:.1f}min"
+        )
+
+    def _calculate_performance_metrics(
+        self,
+        ai_session: AISession,
+        events: List[AISessionEvent]
+    ) -> None:
+        """Calculate performance metrics for the session."""
+        response_times = []
+
+        for event in events:
+            if event.event_type in ("ai_query", "ai_response") and event.duration_ms:
+                response_times.append(event.duration_ms)
+            elif event.api_duration_ms:
+                response_times.append(event.api_duration_ms)
+
+        if response_times:
+            ai_session.avg_response_time_ms = int(sum(response_times) / len(response_times))
+            ai_session.slowest_query_ms = max(response_times)
+
+        # Calculate total duration
+        if ai_session.ended_at and ai_session.started_at:
+            delta = ai_session.ended_at - ai_session.started_at
+            ai_session.total_duration_ms = int(delta.total_seconds() * 1000)
+        elif ai_session.last_activity_at and ai_session.started_at:
+            delta = ai_session.last_activity_at - ai_session.started_at
+            ai_session.total_duration_ms = int(delta.total_seconds() * 1000)
 
     async def _detect_and_link_incident(
         self,

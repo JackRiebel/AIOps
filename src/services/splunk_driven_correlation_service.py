@@ -2,6 +2,9 @@
 
 This service uses Splunk as the primary source for identifying issues, then
 enriches those issues with context from Meraki and ThousandEyes.
+
+Supports multiple AI providers: Anthropic, OpenAI, Google, and Cisco Circuit.
+Uses whatever provider is configured in the system settings.
 """
 
 import json
@@ -10,7 +13,6 @@ import re
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Set, Union
 import httpx
-from anthropic import Anthropic
 
 from src.models.incident import Event, Incident, EventSeverity, IncidentStatus, EventSource
 from src.config.database import Database, get_settings
@@ -22,7 +24,10 @@ logger = logging.getLogger(__name__)
 
 
 class SplunkDrivenCorrelationService:
-    """Correlate incidents starting from Splunk, enriched with Meraki and ThousandEyes."""
+    """Correlate incidents starting from Splunk, enriched with Meraki and ThousandEyes.
+
+    Supports multiple AI providers based on system configuration.
+    """
 
     # Event types/keywords that indicate routine, normal operations (not incidents)
     ROUTINE_EVENT_PATTERNS = [
@@ -57,8 +62,8 @@ class SplunkDrivenCorrelationService:
         r"configuration.*(?:applied|saved|loaded)",
     ]
 
-    def __init__(self, anthropic_api_key: str):
-        self.client = Anthropic(api_key=anthropic_api_key)
+    def __init__(self):
+        """Initialize service. AI provider is determined at runtime from config."""
         settings = get_settings()
         self.db = Database(settings.database_url)
         self.credential_manager = CredentialManager()
@@ -156,8 +161,8 @@ class SplunkDrivenCorrelationService:
                                         network_ids.add(parsed["networkId"])
                                     if parsed.get("type"):
                                         event_types.add(parsed["type"].lower())
-                                except:
-                                    pass
+                                except (json.JSONDecodeError, ValueError, TypeError, KeyError):
+                                    pass  # Skip malformed JSON in raw event data
 
                 existing.append({
                     "id": incident.id,
@@ -712,31 +717,76 @@ class SplunkDrivenCorrelationService:
         """
         events = []
 
-        # Get all active organizations
-        clusters = await self.credential_manager.list_clusters(active_only=True)
+        # Try to get Splunk credentials from system_config first
+        from src.services.config_service import ConfigService
+        config_service = ConfigService()
 
-        for cluster in clusters:
-            credentials = await self.credential_manager.get_credentials(cluster.name)
-            if not credentials:
-                continue
+        splunk_api_url = await config_service.get_config("splunk_api_url")
+        splunk_bearer_token = await config_service.get_config("splunk_bearer_token")
+        splunk_username = await config_service.get_config("splunk_username")
+        splunk_password = await config_service.get_config("splunk_password")
 
-            # Check if this is a Splunk instance
-            base_url = credentials["base_url"].lower()
-            if not (":8089" in base_url or "splunk" in base_url):
-                continue  # Skip non-Splunk organizations
+        credentials_list = []
 
-            logger.info(f"    Querying Splunk: {cluster.name}")
+        # Add system_config Splunk if configured
+        if splunk_api_url and (splunk_bearer_token or (splunk_username and splunk_password)):
+            credentials_list.append({
+                "name": "system_config",
+                "base_url": splunk_api_url,
+                "api_key": splunk_bearer_token,
+                "username": splunk_username,
+                "password": splunk_password,
+                "verify_ssl": False,
+            })
+
+        # Also check clusters table for backward compatibility
+        try:
+            clusters = await self.credential_manager.list_clusters(active_only=True)
+            for cluster in clusters:
+                try:
+                    creds = await self.credential_manager.get_credentials(cluster.name)
+                    if creds:
+                        base_url = creds.get("base_url", "").lower()
+                        if ":8089" in base_url or "splunk" in base_url:
+                            credentials_list.append({
+                                "name": cluster.name,
+                                **creds
+                            })
+                except Exception as e:
+                    logger.warning(f"      Skipping cluster {cluster.name}: {e}")
+        except Exception as e:
+            logger.debug(f"      Could not check clusters table: {e}")
+
+        if not credentials_list:
+            logger.warning("No Splunk credentials found in system_config or clusters")
+            return events
+
+        for credentials in credentials_list:
+            logger.info(f"    Querying Splunk: {credentials['name']}")
 
             try:
                 token = credentials.get("api_key")
-                if not token:
-                    logger.warning(f"      No API key for {cluster.name}")
+                username = credentials.get("username")
+                password = credentials.get("password")
+
+                if not token and not (username and password):
+                    logger.warning(f"      No credentials for {credentials['name']}")
                     continue
 
+                # Build auth headers - prefer token, fall back to basic auth
                 headers = {
-                    "Authorization": f"Bearer {token}",
                     "Content-Type": "application/x-www-form-urlencoded",
                 }
+
+                auth = None
+                if token:
+                    # Splunk uses "Splunk {token}" format for token auth
+                    headers["Authorization"] = f"Splunk {token}"
+                elif username and password:
+                    # Use basic auth
+                    import base64
+                    auth_string = base64.b64encode(f"{username}:{password}".encode()).decode()
+                    headers["Authorization"] = f"Basic {auth_string}"
 
                 earliest_time = f"-{hours}h"
 
@@ -756,7 +806,7 @@ class SplunkDrivenCorrelationService:
                         try:
                             error_body = create_job_response.json()
                             logger.error(f"      Failed to create Splunk search job: HTTP {create_job_response.status_code}, body: {error_body}")
-                        except:
+                        except (ValueError, json.JSONDecodeError):
                             logger.error(f"      Failed to create Splunk search job: HTTP {create_job_response.status_code}, body: {create_job_response.text}")
                         continue
 
@@ -801,7 +851,7 @@ class SplunkDrivenCorrelationService:
                         try:
                             error_body = results_response.json()
                             logger.error(f"      Failed to fetch results: HTTP {results_response.status_code}, body: {error_body}")
-                        except:
+                        except (ValueError, json.JSONDecodeError):
                             logger.error(f"      Failed to fetch results: HTTP {results_response.status_code}, body: {results_response.text}")
                         continue
 
@@ -827,7 +877,7 @@ class SplunkDrivenCorrelationService:
                                 # If that fails, try parsing as ISO format string
                                 try:
                                     event_time = datetime.fromisoformat(event["_time"].replace("Z", "+00:00"))
-                                except:
+                                except (ValueError, TypeError, AttributeError):
                                     pass  # Fall back to current time
 
                         # Parse _raw for structured data - it may be JSON or key=value format
@@ -1045,13 +1095,17 @@ class SplunkDrivenCorrelationService:
         clusters = await self.credential_manager.list_clusters(active_only=True)
 
         for cluster in clusters:
-            credentials = await self.credential_manager.get_credentials(cluster.name)
-            if not credentials:
-                continue
+            try:
+                credentials = await self.credential_manager.get_credentials(cluster.name)
+                if not credentials:
+                    continue
 
-            # Check if this is Meraki
-            base_url = credentials["base_url"].lower()
-            if "meraki" not in base_url:
+                # Check if this is Meraki
+                base_url = credentials["base_url"].lower()
+                if "meraki" not in base_url:
+                    continue
+            except Exception as e:
+                logger.debug(f"Skipping cluster {cluster.name}: {e}")
                 continue
 
             try:
@@ -1410,22 +1464,26 @@ Respond in JSON format:
 """
 
         try:
-            response = self.client.messages.create(
-                model="claude-sonnet-4-5-20250929",
+            from src.services.multi_provider_ai import generate_text
+
+            # Use multi-provider AI
+            result = await generate_text(
+                prompt=prompt,
                 max_tokens=8192,
-                messages=[{"role": "user", "content": prompt}],
             )
 
-            response_text = response.content[0].text
+            if not result:
+                logger.warning("No AI provider configured for Splunk correlation")
+                return []
 
-            # Calculate AI cost based on token usage
-            # Claude Sonnet 4.5 pricing: $3/MTok input, $15/MTok output
-            input_tokens = response.usage.input_tokens
-            output_tokens = response.usage.output_tokens
+            response_text = result["text"]
+            input_tokens = result["input_tokens"]
+            output_tokens = result["output_tokens"]
             total_tokens = input_tokens + output_tokens
-            ai_cost = (input_tokens / 1_000_000 * 3.0) + (output_tokens / 1_000_000 * 15.0)
+            ai_cost = result["cost_usd"]
+            model = result["model"]
 
-            logger.info(f"AI API usage - Input: {input_tokens} tokens, Output: {output_tokens} tokens, Cost: ${ai_cost:.4f}")
+            logger.info(f"AI API usage ({model}) - Input: {input_tokens} tokens, Output: {output_tokens} tokens, Cost: ${ai_cost:.4f}")
 
             # Log cost to database for telemetry
             try:
@@ -1433,7 +1491,7 @@ Respond in JSON format:
                 import asyncio
                 asyncio.create_task(
                     cost_logger.log_incident_correlation(
-                        model="claude-sonnet-4-5-20250929",
+                        model=model,
                         input_tokens=input_tokens,
                         output_tokens=output_tokens,
                         alert_count=len(enriched_events),
@@ -1442,12 +1500,8 @@ Respond in JSON format:
             except Exception as cost_error:
                 logger.warning(f"Failed to log splunk correlation cost: {cost_error}")
 
-            # Parse JSON response
-            import json
-            import re
-
             # Log raw response for debugging
-            logger.info(f"Claude raw response (first 500 chars): {response_text[:500]}")
+            logger.info(f"AI raw response (first 500 chars): {response_text[:500]}")
 
             # Try to extract JSON from markdown code blocks
             json_match = re.search(r"```json\n(.*?)\n```", response_text, re.DOTALL)

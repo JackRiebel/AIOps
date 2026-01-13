@@ -1,26 +1,1093 @@
 @import "tailwindcss";
 
+/* Enable class-based dark mode for Tailwind v4 */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Light mode (default) */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Backgrounds */
+  --bg-primary: #f8fafc;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f1f5f9;
+  --bg-hover: #e2e8f0;
+  --bg-active: #e0f2fe;
+
+  /* Sidebar/Navigation */
+  --sidebar-bg: #ffffff;
+  --sidebar-border: #e2e8f0;
+  --sidebar-hover: #f1f5f9;
+  --sidebar-active-bg: rgba(14, 165, 233, 0.1);
+  --sidebar-active-border: rgba(14, 165, 233, 0.3);
+
+  /* Text */
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-tertiary: #64748b;
+  --text-muted: #94a3b8;
+
+  /* Borders */
+  --border-primary: #e2e8f0;
+  --border-secondary: #cbd5e1;
+
+  /* Cards */
+  --card-bg: #ffffff;
+  --card-border: #e2e8f0;
+  --card-hover: #f8fafc;
+
+  /* Inputs */
+  --input-bg: #ffffff;
+  --input-border: #cbd5e1;
+  --input-focus-border: #0ea5e9;
+
+  /* Status colors stay the same */
+  --status-online: #22c55e;
+  --status-offline: #ef4444;
+  --status-warning: #f59e0b;
+
+  /* Accent colors */
+  --accent-cyan: #0ea5e9;
+  --accent-purple: #a855f7;
+  --accent-cyan-muted: rgba(14, 165, 233, 0.1);
+  --accent-purple-muted: rgba(168, 85, 247, 0.1);
+}
+
+/* Dark mode */
+.dark {
+  /* Backgrounds */
+  --bg-primary: #0f172a;
+  --bg-secondary: #1e293b;
+  --bg-tertiary: #334155;
+  --bg-hover: #334155;
+  --bg-active: rgba(14, 165, 233, 0.1);
+
+  /* Sidebar/Navigation */
+  --sidebar-bg: rgba(15, 23, 42, 0.95);
+  --sidebar-border: rgba(71, 85, 105, 0.5);
+  --sidebar-hover: rgba(51, 65, 85, 0.5);
+  --sidebar-active-bg: rgba(14, 165, 233, 0.1);
+  --sidebar-active-border: rgba(14, 165, 233, 0.2);
+
+  /* Text */
+  --text-primary: #f1f5f9;
+  --text-secondary: #cbd5e1;
+  --text-tertiary: #94a3b8;
+  --text-muted: #64748b;
+
+  /* Borders */
+  --border-primary: rgba(71, 85, 105, 0.5);
+  --border-secondary: #475569;
+
+  /* Cards */
+  --card-bg: rgba(30, 41, 59, 0.5);
+  --card-border: rgba(71, 85, 105, 0.5);
+  --card-hover: rgba(51, 65, 85, 0.5);
+
+  /* Inputs */
+  --input-bg: rgba(30, 41, 59, 0.5);
+  --input-border: #475569;
+  --input-focus-border: #0ea5e9;
+
+  /* Accent colors (same as light) */
+  --accent-cyan: #22d3ee;
+  --accent-purple: #c084fc;
+  --accent-cyan-muted: rgba(14, 165, 233, 0.1);
+  --accent-purple-muted: rgba(168, 85, 247, 0.1);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-background: var(--bg-primary);
+  --color-foreground: var(--text-primary);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: Arial, Helvetica, sans-serif;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Theme-aware utility classes */
+.theme-bg-primary {
+  background-color: var(--bg-primary);
+}
+
+.theme-bg-secondary {
+  background-color: var(--bg-secondary);
+}
+
+.theme-bg-tertiary {
+  background-color: var(--bg-tertiary);
+}
+
+.theme-text-primary {
+  color: var(--text-primary);
+}
+
+.theme-text-secondary {
+  color: var(--text-secondary);
+}
+
+.theme-text-tertiary {
+  color: var(--text-tertiary);
+}
+
+.theme-text-muted {
+  color: var(--text-muted);
+}
+
+.theme-border {
+  border-color: var(--border-primary);
+}
+
+.theme-card {
+  background-color: var(--card-bg);
+  border-color: var(--card-border);
+}
+
+.theme-input {
+  background-color: var(--input-bg);
+  border-color: var(--input-border);
+}
+
+.theme-sidebar {
+  background-color: var(--sidebar-bg);
+  border-color: var(--sidebar-border);
+}
+
+/* ============================================
+   GLOBAL SCROLLBAR STYLING
+   ============================================ */
+
+/* Firefox scrollbar */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 116, 139, 0.4) transparent;
+}
+
+.dark html,
+html.dark {
+  scrollbar-color: rgba(71, 85, 105, 0.5) transparent;
+}
+
+/* WebKit scrollbar (Chrome, Safari, Edge) - Light Mode */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(241, 245, 249, 0.5);
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.6);
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.8);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* WebKit scrollbar - Dark Mode */
+.dark ::-webkit-scrollbar-track,
+html.dark ::-webkit-scrollbar-track {
+  background: rgba(30, 41, 59, 0.5);
+}
+
+.dark ::-webkit-scrollbar-thumb,
+html.dark ::-webkit-scrollbar-thumb {
+  background: rgba(71, 85, 105, 0.7);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover,
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.9);
+}
+
+/* Thin scrollbar variant for sidebars */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.5);
+  border-radius: 3px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.7);
+}
+
+.dark .scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(71, 85, 105, 0.6);
+}
+
+.dark .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.8);
+}
+
+/* Hide scrollbar but keep functionality */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* ============================================
+   AGENT FLOW VISUALIZATION ANIMATIONS
+   ============================================ */
+
+/* Animated edge flow effect */
+@keyframes flow {
+  0% {
+    stroke-dashoffset: 24;
+  }
+  100% {
+    stroke-dashoffset: 0;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+.animate-flow {
+  stroke-dasharray: 6 6;
+  animation: flow 0.5s linear infinite;
+}
+
+/* Animated particle along edge path */
+@keyframes flow-particle {
+  0% {
+    offset-distance: 0%;
+    opacity: 1;
+  }
+  100% {
+    offset-distance: 100%;
+    opacity: 0.3;
+  }
+}
+
+.animate-flow-particle {
+  animation: flow-particle 1.5s ease-in-out infinite;
+}
+
+/* Node pulse animation for active state */
+@keyframes node-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(59, 130, 246, 0);
+  }
+}
+
+.animate-node-pulse {
+  animation: node-pulse 2s ease-in-out infinite;
+}
+
+/* Glow effect for active nodes */
+@keyframes glow {
+  0%, 100% {
+    filter: drop-shadow(0 0 2px currentColor);
+  }
+  50% {
+    filter: drop-shadow(0 0 8px currentColor);
+  }
+}
+
+.animate-glow {
+  animation: glow 2s ease-in-out infinite;
+}
+
+/* Animated dashed line flow */
+@keyframes dash-flow {
+  0% {
+    stroke-dashoffset: 0;
+  }
+  100% {
+    stroke-dashoffset: -24;
+  }
+}
+
+.animate-dash {
+  stroke-dasharray: 8 4;
+  animation: dash-flow 1s linear infinite;
+}
+
+.animate-dash-flow {
+  stroke-dasharray: 8 4;
+  animation: dash-flow 0.8s linear infinite;
+}
+
+/* React Flow custom styling */
+.react-flow__node {
+  transition: transform 0.2s ease, box-shadow 0.3s ease;
+}
+
+.react-flow__node:hover {
+  z-index: 10;
+}
+
+.react-flow__edge-path {
+  transition: stroke 0.3s ease, stroke-width 0.3s ease;
+}
+
+/* Agent Flow Controls - Custom styling */
+/* Target all possible React Flow control button selectors */
+.agent-flow-controls.react-flow__controls,
+.agent-flow-controls[class*="controls"] {
+  background: white !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 8px !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1) !important;
+  padding: 4px !important;
+}
+
+.dark .agent-flow-controls.react-flow__controls,
+.dark .agent-flow-controls[class*="controls"] {
+  background: #1e293b !important;
+  border-color: #334155 !important;
+}
+
+/* Target buttons with multiple selector patterns */
+.agent-flow-controls .react-flow__controls-button,
+.agent-flow-controls button,
+.agent-flow-controls [class*="button"] {
+  background: #f8fafc !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 6px !important;
+  width: 32px !important;
+  height: 32px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer !important;
+  transition: all 0.2s ease !important;
+  margin: 2px !important;
+  color: #1e293b !important;
+}
+
+.agent-flow-controls .react-flow__controls-button:hover,
+.agent-flow-controls button:hover,
+.agent-flow-controls [class*="button"]:hover {
+  background: #e2e8f0 !important;
+  border-color: #cbd5e1 !important;
+}
+
+.dark .agent-flow-controls .react-flow__controls-button,
+.dark .agent-flow-controls button,
+.dark .agent-flow-controls [class*="button"] {
+  background: #334155 !important;
+  border-color: #475569 !important;
+  color: #e2e8f0 !important;
+}
+
+.dark .agent-flow-controls .react-flow__controls-button:hover,
+.dark .agent-flow-controls button:hover,
+.dark .agent-flow-controls [class*="button"]:hover {
+  background: #475569 !important;
+  border-color: #64748b !important;
+}
+
+/* Target SVG icons with comprehensive selectors */
+.agent-flow-controls .react-flow__controls-button svg,
+.agent-flow-controls button svg,
+.agent-flow-controls [class*="button"] svg,
+.agent-flow-controls svg {
+  fill: #1e293b !important;
+  color: #1e293b !important;
+  width: 14px !important;
+  height: 14px !important;
+}
+
+.dark .agent-flow-controls .react-flow__controls-button svg,
+.dark .agent-flow-controls button svg,
+.dark .agent-flow-controls [class*="button"] svg,
+.dark .agent-flow-controls svg {
+  fill: #e2e8f0 !important;
+  color: #e2e8f0 !important;
+}
+
+/* Target SVG paths explicitly */
+.agent-flow-controls .react-flow__controls-button svg path,
+.agent-flow-controls button svg path,
+.agent-flow-controls [class*="button"] svg path,
+.agent-flow-controls svg path {
+  fill: #1e293b !important;
+}
+
+.dark .agent-flow-controls .react-flow__controls-button svg path,
+.dark .agent-flow-controls button svg path,
+.dark .agent-flow-controls [class*="button"] svg path,
+.dark .agent-flow-controls svg path {
+  fill: #e2e8f0 !important;
+}
+
+/* Also target polylines, lines, rects (for +/- icons) */
+.agent-flow-controls svg line,
+.agent-flow-controls svg polyline,
+.agent-flow-controls svg rect,
+.agent-flow-controls svg circle {
+  stroke: #1e293b !important;
+}
+
+.dark .agent-flow-controls svg line,
+.dark .agent-flow-controls svg polyline,
+.dark .agent-flow-controls svg rect,
+.dark .agent-flow-controls svg circle {
+  stroke: #e2e8f0 !important;
+}
+
+.react-flow__controls {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.react-flow__controls-button {
+  border-radius: 6px !important;
+  width: 28px !important;
+  height: 28px !important;
+}
+
+.react-flow__minimap {
+  border-radius: 8px !important;
+  overflow: hidden;
+}
+
+/* Custom scrollbar for chat messages area */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.4) transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+  border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.6);
+}
+
+.dark .custom-scrollbar {
+  scrollbar-color: rgba(71, 85, 105, 0.5) transparent;
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(71, 85, 105, 0.5);
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(71, 85, 105, 0.7);
+}
+
+/* ============================================
+   NETWORK TOPOLOGY VISUALIZATION STYLES
+   ============================================ */
+
+/* Animated edge - data flow effect */
+@keyframes topology-edge-flow {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+
+.topology-edge-animated {
+  stroke-dasharray: 10 5;
+  animation: topology-edge-flow 1s linear infinite;
+}
+
+.topology-edge-animated-slow {
+  stroke-dasharray: 10 5;
+  animation: topology-edge-flow 2s linear infinite;
+}
+
+.topology-edge-animated-fast {
+  stroke-dasharray: 10 5;
+  animation: topology-edge-flow 0.5s linear infinite;
+}
+
+/* Edge health-based colors */
+.topology-edge-healthy {
+  stroke: #22c55e;
+}
+
+.topology-edge-warning {
+  stroke: #f59e0b;
+}
+
+.topology-edge-critical {
+  stroke: #ef4444;
+}
+
+.topology-edge-inactive {
+  stroke: #64748b;
+  opacity: 0.5;
+}
+
+/* Edge hover glow effect */
+.topology-edge-glow {
+  filter: drop-shadow(0 0 3px currentColor);
+  transition: filter 0.2s ease;
+}
+
+.topology-edge-glow:hover {
+  filter: drop-shadow(0 0 6px currentColor);
+}
+
+/* Node status pulse animations */
+@keyframes topology-node-pulse-online {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(34, 197, 94, 0);
+  }
+}
+
+@keyframes topology-node-pulse-alerting {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(245, 158, 11, 0);
+  }
+}
+
+@keyframes topology-node-pulse-offline {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+  }
+}
+
+.topology-node-online {
+  animation: topology-node-pulse-online 2s ease-in-out infinite;
+}
+
+.topology-node-alerting {
+  animation: topology-node-pulse-alerting 1.5s ease-in-out infinite;
+}
+
+.topology-node-offline {
+  animation: topology-node-pulse-offline 3s ease-in-out infinite;
+}
+
+/* Node selection/highlight effects */
+.topology-node-selected {
+  outline: 2px solid #0ea5e9;
+  outline-offset: 2px;
+}
+
+.topology-node-highlighted {
+  filter: brightness(1.1);
+  box-shadow: 0 0 12px rgba(14, 165, 233, 0.5);
+}
+
+.topology-node-dimmed {
+  opacity: 0.4;
+  filter: grayscale(0.3);
+}
+
+/* SVG-specific ring pulse for topology nodes */
+@keyframes svg-ring-pulse-online {
+  0%, 100% {
+    r: 24;
+    opacity: 0.6;
+  }
+  50% {
+    r: 30;
+    opacity: 0;
+  }
+}
+
+@keyframes svg-ring-pulse-alerting {
+  0%, 100% {
+    r: 24;
+    opacity: 0.7;
+  }
+  50% {
+    r: 32;
+    opacity: 0;
+  }
+}
+
+.svg-pulse-ring-online {
+  animation: svg-ring-pulse-online 2s ease-out infinite;
+}
+
+.svg-pulse-ring-alerting {
+  animation: svg-ring-pulse-alerting 1.2s ease-out infinite;
+}
+
+/* ============================================================================
+   Canvas Card Entrance Animation - Clean scale from center
+   ============================================================================ */
+
+@keyframes cardEntrance {
+  from {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.canvas-card-entrance {
+  animation: cardEntrance 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  transform-origin: center center;
+}
+
+/* ============================================================================
+   Auto-add card notification animations
+   ============================================================================ */
+
+@keyframes slideInUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeInScale {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes shrinkWidth {
+  from {
+    width: 100%;
+  }
+  to {
+    width: 0%;
+  }
+}
+
+/* Gentle bounce animation for the arrow */
+.animate-bounce-gentle {
+  animation: bounceGentle 2s ease-in-out infinite;
+}
+
+@keyframes bounceGentle {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(4px);
+  }
+}
+
+/* Scale utility for exit animation */
+.scale-98 {
+  --tw-scale-x: 0.98;
+  --tw-scale-y: 0.98;
+  transform: translate(var(--tw-translate-x), var(--tw-translate-y)) rotate(var(--tw-rotate)) skewX(var(--tw-skew-x)) skewY(var(--tw-skew-y)) scaleX(var(--tw-scale-x)) scaleY(var(--tw-scale-y));
+}
+
+/* Topology zoom controls styling */
+.topology-controls {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dark .topology-controls {
+  background: #1e293b;
+  border-color: #334155;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.topology-controls button {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.topology-controls button:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.dark .topology-controls button {
+  color: #94a3b8;
+}
+
+.dark .topology-controls button:hover {
+  background: #334155;
+  color: #e2e8f0;
+}
+
+/* Topology minimap styling */
+.topology-minimap {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+}
+
+.dark .topology-minimap {
+  background: #1e293b;
+  border-color: #334155;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* Topology detail panel styling */
+.topology-detail-panel {
+  background: white;
+  border-left: 1px solid #e2e8f0;
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.05);
+}
+
+.dark .topology-detail-panel {
+  background: #1e293b;
+  border-color: #334155;
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.2);
+}
+
+/* Smooth transitions for topology interactions */
+.topology-transition {
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+/* Hide topology elements when printing */
+@media print {
+  .topology-controls,
+  .topology-minimap {
+    display: none !important;
+  }
+}
+
+/* ============================================================================
+   Accessibility Styles
+   ============================================================================ */
+
+/* Focus-visible styles for keyboard navigation */
+.canvas-card-wrapper:focus-visible article,
+article:focus-visible {
+  outline: 3px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  :root {
+    --text-primary: #000000;
+    --text-secondary: #1a1a1a;
+    --border-primary: #000000;
+    --border-secondary: #333333;
+    --card-border: #000000;
+  }
+
+  .dark {
+    --text-primary: #ffffff;
+    --text-secondary: #f0f0f0;
+    --border-primary: #ffffff;
+    --border-secondary: #cccccc;
+    --card-border: #ffffff;
+  }
+
+  /* Stronger focus indicator in high contrast */
+  *:focus-visible {
+    outline: 3px solid currentColor !important;
+    outline-offset: 2px !important;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  /* Keep minimal transitions for focus states */
+  *:focus-visible {
+    transition-duration: 100ms !important;
+  }
+}
+
+/* Skip link for keyboard users */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 9999;
+  padding: 0.5rem 1rem;
+  background: var(--accent-cyan);
+  color: white;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.skip-link:focus {
+  left: 0;
+}
+
+/* Improved focus for canvas workspace */
+.canvas-card-wrapper:focus-within {
+  z-index: 10;
+}
+
+/* ============================================================================
+   React Grid Layout - Custom Resize Handle Styling
+   ============================================================================ */
+
+/* Override the default red placeholder during resize/drag */
+.react-grid-item.react-grid-placeholder {
+  background: rgba(14, 165, 233, 0.15) !important;
+  border: 2px dashed rgba(14, 165, 233, 0.5) !important;
+  border-radius: 12px !important;
+  opacity: 1 !important;
+  transition: none !important;
+}
+
+.dark .react-grid-item.react-grid-placeholder {
+  background: rgba(34, 211, 238, 0.1) !important;
+  border-color: rgba(34, 211, 238, 0.4) !important;
+}
+
+/* Style the resize handles */
+.react-resizable-handle {
+  position: absolute;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  z-index: 10;
+}
+
+/* Show handles on hover */
+.react-grid-item:hover .react-resizable-handle {
+  opacity: 1;
+}
+
+/* Corner handles */
+.react-resizable-handle-se,
+.react-resizable-handle-sw,
+.react-resizable-handle-ne,
+.react-resizable-handle-nw {
+  width: 16px !important;
+  height: 16px !important;
+  background: transparent !important;
+}
+
+.react-resizable-handle-se::after,
+.react-resizable-handle-sw::after,
+.react-resizable-handle-ne::after,
+.react-resizable-handle-nw::after {
+  content: '';
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: rgba(14, 165, 233, 0.8);
+  border-radius: 2px;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.react-resizable-handle-se::after {
+  bottom: 4px;
+  right: 4px;
+}
+
+.react-resizable-handle-sw::after {
+  bottom: 4px;
+  left: 4px;
+}
+
+.react-resizable-handle-ne::after {
+  top: 4px;
+  right: 4px;
+}
+
+.react-resizable-handle-nw::after {
+  top: 4px;
+  left: 4px;
+}
+
+/* Edge handles */
+.react-resizable-handle-n,
+.react-resizable-handle-s {
+  width: 100% !important;
+  height: 10px !important;
+  left: 0 !important;
+  background: transparent !important;
+  cursor: ns-resize !important;
+}
+
+.react-resizable-handle-e,
+.react-resizable-handle-w {
+  width: 10px !important;
+  height: 100% !important;
+  top: 0 !important;
+  background: transparent !important;
+  cursor: ew-resize !important;
+}
+
+.react-resizable-handle-n {
+  top: -5px !important;
+}
+
+.react-resizable-handle-s {
+  bottom: -5px !important;
+}
+
+.react-resizable-handle-e {
+  right: -5px !important;
+}
+
+.react-resizable-handle-w {
+  left: -5px !important;
+}
+
+/* Edge handle hover indicators */
+.react-resizable-handle-n::after,
+.react-resizable-handle-s::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 40px;
+  height: 4px;
+  background: rgba(14, 165, 233, 0.7);
+  border-radius: 2px;
+  transition: width 0.15s ease;
+}
+
+.react-resizable-handle-n::after {
+  top: 3px;
+}
+
+.react-resizable-handle-s::after {
+  bottom: 3px;
+}
+
+.react-resizable-handle-e::after,
+.react-resizable-handle-w::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 4px;
+  height: 40px;
+  background: rgba(14, 165, 233, 0.7);
+  border-radius: 2px;
+  transition: height 0.15s ease;
+}
+
+.react-resizable-handle-e::after {
+  right: 3px;
+}
+
+.react-resizable-handle-w::after {
+  left: 3px;
+}
+
+/* Hover states for handles */
+.react-resizable-handle:hover::after {
+  background: rgba(14, 165, 233, 1);
+}
+
+.react-resizable-handle-se:hover::after,
+.react-resizable-handle-sw:hover::after,
+.react-resizable-handle-ne:hover::after,
+.react-resizable-handle-nw:hover::after {
+  transform: scale(1.3);
+}
+
+.react-resizable-handle-n:hover::after,
+.react-resizable-handle-s:hover::after {
+  width: 60px;
+}
+
+.react-resizable-handle-e:hover::after,
+.react-resizable-handle-w:hover::after {
+  height: 60px;
+}
+
+/* Dark mode adjustments */
+.dark .react-resizable-handle-se::after,
+.dark .react-resizable-handle-sw::after,
+.dark .react-resizable-handle-ne::after,
+.dark .react-resizable-handle-nw::after,
+.dark .react-resizable-handle-n::after,
+.dark .react-resizable-handle-s::after,
+.dark .react-resizable-handle-e::after,
+.dark .react-resizable-handle-w::after {
+  background: rgba(34, 211, 238, 0.7);
+}
+
+.dark .react-resizable-handle:hover::after {
+  background: rgba(34, 211, 238, 1);
+}
+
+/* Active/resizing state - add glow */
+.react-grid-item.resizing .react-resizable-handle::after {
+  background: rgba(14, 165, 233, 1) !important;
+  box-shadow: 0 0 8px rgba(14, 165, 233, 0.6);
+}
+
+.dark .react-grid-item.resizing .react-resizable-handle::after {
+  background: rgba(34, 211, 238, 1) !important;
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.6);
+}
+
+/* Card being resized - subtle indicator */
+.react-grid-item.resizing {
+  outline: 2px solid rgba(14, 165, 233, 0.5);
+  outline-offset: 2px;
+  border-radius: 14px;
+}
+
+.dark .react-grid-item.resizing {
+  outline-color: rgba(34, 211, 238, 0.5);
 }

@@ -58,10 +58,10 @@ class CostLogger:
         Returns:
             The created AICostLog record, or None if logging failed
         """
-        try:
-            cost_usd = calculate_cost(model, input_tokens, output_tokens)
-            total_tokens = input_tokens + output_tokens
+        cost_usd = calculate_cost(model, input_tokens, output_tokens)
+        total_tokens = input_tokens + output_tokens
 
+        try:
             async with self.db.session() as session:
                 # Create cost log record
                 cost_log = AICostLog(
