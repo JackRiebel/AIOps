@@ -413,17 +413,13 @@ async def meraki_analyze_network_topology(
 ):
     """Return topology data for network visualization.
     Falls back to building from devices if link layer API unavailable."""
-    credentials = await credential_manager.get_credentials(organization)
-    if not credentials:
-        raise HTTPException(status_code=400, detail=f"No credentials found for organization: {organization}")
-
+    # Note: get_async_dashboard handles credential lookup with fallback to system_config
     async with (await get_async_dashboard(organization)) as aiomeraki:
-        # Get org_id from credentials or fetch from API
-        org_id = credentials.get("org_id")
-        if not org_id:
-            orgs = await aiomeraki.organizations.getOrganizations()
-            if orgs:
-                org_id = orgs[0]["id"]
+        # Get org_id from API
+        org_id = None
+        orgs = await aiomeraki.organizations.getOrganizations()
+        if orgs:
+            org_id = orgs[0]["id"]
 
         # Always fetch devices from the network to ensure we have all devices
         # (link layer topology may not include MT sensors, MV cameras, etc.)
@@ -492,7 +488,7 @@ async def meraki_analyze_network_topology(
         # Categorize devices by type for proper hierarchy
         mx_devices = [n for n in nodes if n["model"].upper().startswith("MX") or n["model"].upper().startswith("Z")]
         ms_devices = [n for n in nodes if n["model"].upper().startswith("MS")]
-        mr_devices = [n for n in nodes if n["model"].upper().startswith("MR") or n["model"].upper().startswith("CW")]
+        mr_devices = [n for n in nodes if n["model"].upper().startswith(("MR", "CW", "GR"))]
         mt_devices = [n for n in nodes if n["model"].upper().startswith("MT")]  # IoT sensors - connect via wireless
         mv_devices = [n for n in nodes if n["model"].upper().startswith("MV")]  # Cameras - connect via ethernet
         mg_devices = [n for n in nodes if n["model"].upper().startswith("MG")]  # Cellular gateways
@@ -760,9 +756,11 @@ async def meraki_get_org_vpn_topology(
                 if not isinstance(result, Exception):
                     vpn_configs[net["id"]] = result
 
-        # Build topology nodes (networks)
+        # Build topology nodes — ONLY include networks with VPN configured (hub or spoke)
+        # Standalone networks (mode=none) are excluded to avoid clutter
         nodes = []
         hub_networks = set()
+        vpn_node_ids = set()  # Track which networks are in the VPN topology
 
         for net in networks:
             net_id = net.get("id")
@@ -773,8 +771,14 @@ async def meraki_get_org_vpn_topology(
             is_hub = mode == "hub"
             is_spoke = mode == "spoke"
 
+            # Only include networks actively participating in site-to-site VPN
+            if not is_hub and not is_spoke:
+                continue
+
             if is_hub:
                 hub_networks.add(net_id)
+
+            vpn_node_ids.add(net_id)
 
             # Determine node status based on actual device statuses (not VPN peer data)
             peers = vpn_status.get("vpnPeers", [])
@@ -799,16 +803,18 @@ async def meraki_get_org_vpn_topology(
             # Extract hub connections for spokes
             hubs = vpn_config.get("hubs", [])
 
+            # Filter VPN peers to only include peers that are also in the VPN topology
+            # (they'll be filtered again after all nodes are built)
             nodes.append({
                 "id": net_id,
                 "name": net.get("name", "Unnamed Network"),
-                "type": "hub" if is_hub else "spoke" if is_spoke else "standalone",
+                "type": "hub" if is_hub else "spoke",
                 "vpnMode": mode,
                 "status": node_status,
                 "productTypes": net.get("productTypes", []),
                 "timeZone": net.get("timeZone"),
                 "peerCount": len(peers),
-                "connectedHubs": [h.get("hubId") for h in hubs],
+                "connectedHubs": [h.get("hubId") for h in hubs if h.get("hubId") in vpn_configs],
                 "subnets": vpn_config.get("subnets", []),
                 "merakiVpnPeers": [
                     {
@@ -820,13 +826,26 @@ async def meraki_get_org_vpn_topology(
                 ],
             })
 
-        # Build topology edges (VPN tunnels)
+        # Filter merakiVpnPeers to only include peers in the VPN topology
+        for node in nodes:
+            node["merakiVpnPeers"] = [
+                p for p in node["merakiVpnPeers"]
+                if p.get("networkId") in vpn_node_ids
+            ]
+            node["peerCount"] = len(node["merakiVpnPeers"])
+
+        # Build topology edges — ONLY from explicit hub/spoke configurations
+        # Do NOT add phantom edges from VPN peer discovery
         edges = []
         seen_edges = set()
 
         for node in nodes:
             if node["type"] == "spoke" and node["connectedHubs"]:
                 for hub_id in node["connectedHubs"]:
+                    # Only create edge if hub is actually in our topology
+                    if hub_id not in vpn_node_ids:
+                        continue
+
                     # Create a canonical edge key to avoid duplicates
                     edge_key = tuple(sorted([node["id"], hub_id]))
                     if edge_key not in seen_edges:
@@ -838,8 +857,6 @@ async def meraki_get_org_vpn_topology(
                             {}
                         )
 
-                        # Default to "reachable" for configured connections without status data
-                        # (the VPN status API may not return data for all connections)
                         reachability = peer_status.get("reachability")
                         if not reachability:
                             # Check if both endpoints have online devices
@@ -858,20 +875,6 @@ async def meraki_get_org_vpn_topology(
                             "status": reachability,
                         })
 
-            # Also add edges from VPN peers that might not be explicit hub connections
-            for peer in node.get("merakiVpnPeers", []):
-                peer_id = peer.get("networkId")
-                if peer_id:
-                    edge_key = tuple(sorted([node["id"], peer_id]))
-                    if edge_key not in seen_edges:
-                        seen_edges.add(edge_key)
-                        edges.append({
-                            "source": node["id"],
-                            "target": peer_id,
-                            "type": "vpn",
-                            "status": peer.get("reachability", "unknown"),
-                        })
-
         return {
             "organizationId": organization_id,
             "nodes": nodes,
@@ -880,7 +883,7 @@ async def meraki_get_org_vpn_topology(
                 "totalNetworks": len(networks),
                 "hubCount": len(hub_networks),
                 "spokeCount": sum(1 for n in nodes if n["type"] == "spoke"),
-                "standaloneCount": sum(1 for n in nodes if n["type"] == "standalone"),
+                "standaloneCount": 0,
                 "totalVpnTunnels": len(edges),
             }
         }

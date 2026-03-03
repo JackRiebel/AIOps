@@ -9,6 +9,7 @@ interface WorkflowDetailPanelProps {
   workflow: Workflow;
   onUpdate: (workflow: Workflow) => void;
   onClose: () => void;
+  onEditCanvas?: (workflow: Workflow) => void;
 }
 
 const POLL_INTERVALS_LIST = [
@@ -40,6 +41,7 @@ export const WorkflowDetailPanel = memo(({
   workflow,
   onUpdate,
   onClose,
+  onEditCanvas,
 }: WorkflowDetailPanelProps) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedWorkflow, setEditedWorkflow] = useState(workflow);
@@ -174,7 +176,7 @@ export const WorkflowDetailPanel = memo(({
                 )}
               </button>
               <button
-                onClick={() => setIsEditing(true)}
+                onClick={() => onEditCanvas ? onEditCanvas(workflow) : setIsEditing(true)}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
               >
                 <Edit2 className="w-4 h-4" />

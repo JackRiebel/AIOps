@@ -4,7 +4,7 @@ import { memo, useState, useEffect, useCallback } from 'react';
 import {
   X, Play, Check, AlertTriangle, Loader2, Clock, RefreshCw,
   ChevronDown, ChevronUp, Terminal, Zap, StopCircle, RotateCcw,
-  AlertCircle, CheckCircle, Circle, Timer
+  AlertCircle, CheckCircle, Circle, Timer, Edit3
 } from 'lucide-react';
 import { WorkflowExecution, ExecutionStep, RiskLevel } from './types';
 
@@ -16,6 +16,7 @@ interface ExecutionMonitorProps {
   executionId: number;
   onClose: () => void;
   onRetry?: () => void;
+  onEdit?: (workflowId: number) => void;
   initialExecution?: WorkflowExecution;
 }
 
@@ -149,6 +150,7 @@ export const ExecutionMonitor = memo(({
   executionId,
   onClose,
   onRetry,
+  onEdit,
   initialExecution
 }: ExecutionMonitorProps) => {
   const [execution, setExecution] = useState<WorkflowExecution | null>(initialExecution || null);
@@ -168,15 +170,77 @@ export const ExecutionMonitor = memo(({
       const data = await response.json();
       setExecution(data);
 
-      // Parse executed actions into steps
-      if (data.executed_actions) {
-        const executedSteps: ExecutionStep[] = data.executed_actions.map((action: { tool: string; status?: string; error?: string; output?: unknown; duration_ms?: number }, idx: number) => ({
+      // Build steps from workflow flow_data (canvas nodes) or fall back to actions
+      const flowData = data.workflow_flow_data;
+      const executedActions = data.result?.actions || data.executed_actions || [];
+
+      if (flowData?.nodes) {
+        // Extract all nodes from flow_data sorted by x position
+        const nodes = [...flowData.nodes].sort(
+          (a: { position?: { x: number } }, b: { position?: { x: number } }) =>
+            (a.position?.x || 0) - (b.position?.x || 0)
+        );
+
+        // Create a map of action results by tool name for matching
+        const actionResultMap = new Map<string, { success: boolean; error?: string; data?: unknown; duration_ms?: number }>();
+        executedActions.forEach((action: { action: string; success: boolean; error?: string; data?: unknown; duration_ms?: number }) => {
+          actionResultMap.set(action.action, action);
+        });
+
+        // Convert nodes to execution steps
+        const flowSteps: ExecutionStep[] = nodes.map((node: { id: string; type: string; data?: { label?: string; actionId?: string; tool?: string } }, idx: number) => {
+          const nodeType = node.type;
+          const nodeData = node.data || {};
+          const label = nodeData.label || nodeType;
+
+          // For action nodes, find the matching execution result
+          if (nodeType === 'action') {
+            const actionId = nodeData.actionId || nodeData.tool || 'unknown';
+            const result = actionResultMap.get(actionId);
+
+            if (result) {
+              return {
+                id: node.id || `step-${idx}`,
+                name: actionId,
+                status: result.success ? 'success' as const : 'failed' as const,
+                error: result.error,
+                output: result.data,
+                duration_ms: result.duration_ms,
+              };
+            } else {
+              // Action not yet executed
+              return {
+                id: node.id || `step-${idx}`,
+                name: actionId,
+                status: data.status === 'executing' ? 'pending' as const :
+                       data.status === 'completed' ? 'success' as const :
+                       data.status === 'failed' ? 'failed' as const : 'pending' as const,
+              };
+            }
+          }
+
+          // For non-action nodes (trigger, condition, ai, notify, approval)
+          // Mark as completed if workflow reached completion
+          const isCompleted = data.status === 'completed' || data.status === 'failed';
+          const isExecuting = data.status === 'executing';
+
+          return {
+            id: node.id || `step-${idx}`,
+            name: label,
+            status: isCompleted ? 'success' as const :
+                   isExecuting ? 'running' as const : 'pending' as const,
+          };
+        });
+
+        setSteps(flowSteps);
+      } else if (executedActions.length > 0) {
+        // Fall back to showing executed actions
+        const executedSteps: ExecutionStep[] = executedActions.map((action: { action: string; success?: boolean; error?: string; data?: unknown; duration_ms?: number }, idx: number) => ({
           id: `step-${idx}`,
-          name: action.tool,
-          status: action.status || (data.status === 'completed' ? 'success' :
-                   data.status === 'failed' ? 'failed' : 'pending'),
+          name: action.action,
+          status: action.success ? 'success' as const : 'failed' as const,
           error: action.error,
-          output: action.output,
+          output: action.data,
           duration_ms: action.duration_ms,
         }));
         setSteps(executedSteps);
@@ -451,15 +515,27 @@ export const ExecutionMonitor = memo(({
         <div className="flex items-center justify-between px-6 py-4 border-t border-slate-700 bg-slate-900/30">
           <div className="text-xs text-slate-500">
             {execution.created_at && (
-              <span>Started: {new Date(execution.created_at).toLocaleString()}</span>
+              <span>Started: {new Date(execution.created_at.endsWith('Z') ? execution.created_at : execution.created_at + 'Z').toLocaleString()}</span>
             )}
             {execution.completed_at && (
               <span className="ml-3">
-                Completed: {new Date(execution.completed_at).toLocaleString()}
+                Completed: {new Date(execution.completed_at.endsWith('Z') ? execution.completed_at : execution.completed_at + 'Z').toLocaleString()}
               </span>
             )}
           </div>
           <div className="flex gap-3">
+            {onEdit && execution.workflow_id && (
+              <button
+                onClick={() => {
+                  console.log('[ExecutionMonitor] Edit button clicked, workflow_id:', execution.workflow_id);
+                  onEdit(execution.workflow_id);
+                }}
+                className="px-4 py-2 bg-slate-700 text-slate-300 rounded-lg hover:bg-slate-600 transition-colors flex items-center gap-2"
+              >
+                <Edit3 className="w-4 h-4" />
+                Edit
+              </button>
+            )}
             {execution.status === 'failed' && onRetry && (
               <button
                 onClick={onRetry}

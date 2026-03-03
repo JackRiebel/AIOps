@@ -1,4 +1,4 @@
-"""Cluster model for storing Lumen connection information."""
+"""Cluster model for storing Cisco AIOps Hub connection information."""
 
 from datetime import datetime
 from typing import Optional
@@ -10,7 +10,7 @@ from src.config.database import Base
 
 
 class Cluster(Base):
-    """Model for Lumen cluster credentials."""
+    """Model for Cisco AIOps Hub cluster credentials."""
 
     __tablename__ = "clusters"
 

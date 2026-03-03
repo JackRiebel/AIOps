@@ -14,6 +14,17 @@ from src.services.meraki_api import MerakiAPIClient
 
 logger = logging.getLogger(__name__)
 
+
+def _validate_context(context: Any) -> Dict:
+    """Validate that context has a Meraki client configured."""
+    if not hasattr(context, 'client') or context.client is None:
+        return {
+            "success": False,
+            "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+        }
+    return None
+
+
 # =============================================================================
 # HANDLERS
 # =============================================================================
@@ -21,9 +32,18 @@ logger = logging.getLogger(__name__)
 async def handle_networks_list(params: Dict, context: Any) -> Dict:
     """Handler for List Networks."""
     try:
+        if err := _validate_context(context): return err
+        # Validate required parameter
+        organization_id = params.get("organization_id") or params.get("organizationId")
+        if not organization_id:
+            # Try to get from context
+            if hasattr(context, 'org_id'):
+                organization_id = context.org_id
+        if not organization_id:
+            return {"success": False, "error": "Missing required parameter: organization_id. Specify the Meraki organization ID."}
+
         # Build API path
-        path = "/organizations/{organization_id}/networks"
-        path = path.replace("{organization_id}", params.get("organization_id", ""))
+        path = f"/organizations/{organization_id}/networks"
 
         # Make API request
         result = await context.client.request("GET", path, params=params)
@@ -35,6 +55,7 @@ async def handle_networks_list(params: Dict, context: Any) -> Dict:
 async def handle_networks_get(params: Dict, context: Any) -> Dict:
     """Handler for Get Network."""
     try:
+        if err := _validate_context(context): return err
         # Validate required parameter
         network_id = params.get("network_id", "")
         if not network_id:
@@ -53,9 +74,21 @@ async def handle_networks_get(params: Dict, context: Any) -> Dict:
 async def handle_networks_create(params: Dict, context: Any) -> Dict:
     """Handler for Create Network."""
     try:
-        # Build API path - create network in organization
-        path = "/organizations/{organization_id}/networks"
-        path = path.replace("{organization_id}", params.get("organization_id", ""))
+        if err := _validate_context(context): return err
+        # Validate required parameter
+        organization_id = params.get("organization_id") or params.get("organizationId")
+        if not organization_id:
+            if hasattr(context, 'org_id'):
+                organization_id = context.org_id
+        if not organization_id:
+            return {"success": False, "error": "Missing required parameter: organization_id. Specify the Meraki organization ID to create the network in."}
+
+        # Validate name is provided
+        if not params.get("name"):
+            return {"success": False, "error": "Missing required parameter: name. Specify a name for the new network."}
+
+        # Build API path
+        path = f"/organizations/{organization_id}/networks"
 
         # Make API request
         result = await context.client.request("POST", path, json_data=params)
@@ -67,9 +100,17 @@ async def handle_networks_create(params: Dict, context: Any) -> Dict:
 async def handle_networks_update(params: Dict, context: Any) -> Dict:
     """Handler for Update Network."""
     try:
-        # Build API path - update network by ID
-        path = "/networks/{network_id}"
-        path = path.replace("{network_id}", params.get("network_id", ""))
+        if err := _validate_context(context): return err
+        # Validate required parameter
+        network_id = params.get("network_id") or params.get("networkId")
+        if not network_id:
+            if hasattr(context, 'network_id'):
+                network_id = context.network_id
+        if not network_id:
+            return {"success": False, "error": "Missing required parameter: network_id. Specify the network ID to update."}
+
+        # Build API path
+        path = f"/networks/{network_id}"
 
         # Make API request
         result = await context.client.request("PUT", path, json_data=params)
@@ -81,9 +122,14 @@ async def handle_networks_update(params: Dict, context: Any) -> Dict:
 async def handle_networks_delete(params: Dict, context: Any) -> Dict:
     """Handler for Delete Network."""
     try:
-        # Build API path - delete network by ID
-        path = "/networks/{network_id}"
-        path = path.replace("{network_id}", params.get("network_id", ""))
+        if err := _validate_context(context): return err
+        # Validate required parameter
+        network_id = params.get("network_id") or params.get("networkId")
+        if not network_id:
+            return {"success": False, "error": "Missing required parameter: network_id. Specify the network ID to delete."}
+
+        # Build API path
+        path = f"/networks/{network_id}"
 
         # Make API request
         result = await context.client.request("DELETE", path)
@@ -95,6 +141,7 @@ async def handle_networks_delete(params: Dict, context: Any) -> Dict:
 async def handle_networks_bind_to_template(params: Dict, context: Any) -> Dict:
     """Handler for Bind Network to Template."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/networks/{network_id}/bind"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -109,6 +156,7 @@ async def handle_networks_bind_to_template(params: Dict, context: Any) -> Dict:
 async def handle_networks_unbind_from_template(params: Dict, context: Any) -> Dict:
     """Handler for Unbind Network from Template."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/networks/{network_id}/unbind"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -123,6 +171,7 @@ async def handle_networks_unbind_from_template(params: Dict, context: Any) -> Di
 async def handle_networks_split(params: Dict, context: Any) -> Dict:
     """Handler for Split Combined Network."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/networks/{network_id}/split"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -137,9 +186,17 @@ async def handle_networks_split(params: Dict, context: Any) -> Dict:
 async def handle_networks_list_devices(params: Dict, context: Any) -> Dict:
     """Handler for List Network Devices."""
     try:
+        if err := _validate_context(context): return err
+        # Validate required parameter
+        network_id = params.get("network_id") or params.get("networkId")
+        if not network_id:
+            if hasattr(context, 'network_id'):
+                network_id = context.network_id
+        if not network_id:
+            return {"success": False, "error": "Missing required parameter: network_id. Specify the network ID to list devices for."}
+
         # Build API path
-        path = "/networks/{network_id}/devices"
-        path = path.replace("{network_id}", params.get("network_id", ""))
+        path = f"/networks/{network_id}/devices"
 
         # Make API request
         result = await context.client.request("GET", path, params=params)
@@ -151,6 +208,7 @@ async def handle_networks_list_devices(params: Dict, context: Any) -> Dict:
 async def handle_networks_combine(params: Dict, context: Any) -> Dict:
     """Handler for Combine Networks."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/networks/{network_id}/combine"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -165,12 +223,23 @@ async def handle_networks_combine(params: Dict, context: Any) -> Dict:
 async def handle_networks_list_clients(params: Dict, context: Any) -> Dict:
     """Handler for List Network Clients."""
     try:
-        # Build API path - Meraki API: GET /networks/{networkId}/clients
-        network_id = params.pop("network_id", "")
+        if err := _validate_context(context): return err
+        # Validate required parameter (use get, not pop, to preserve params)
+        network_id = params.get("network_id") or params.get("networkId")
+        if not network_id:
+            if hasattr(context, 'network_id'):
+                network_id = context.network_id
+        if not network_id:
+            return {"success": False, "error": "Missing required parameter: network_id. Specify the network ID to list clients for."}
+
+        # Build API path
         path = f"/networks/{network_id}/clients"
 
+        # Remove network_id from params to avoid sending it as query param
+        query_params = {k: v for k, v in params.items() if k not in ('network_id', 'networkId')}
+
         # Make API request
-        result = await context.client.request("GET", path, params=params)
+        result = await context.client.request("GET", path, params=query_params)
         return {"success": True, "data": result}
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -179,13 +248,24 @@ async def handle_networks_list_clients(params: Dict, context: Any) -> Dict:
 async def handle_networks_get_client(params: Dict, context: Any) -> Dict:
     """Handler for Get Network Client."""
     try:
-        # Build API path - Meraki API: GET /networks/{networkId}/clients/{clientId}
-        network_id = params.pop("network_id", "")
-        client_id = params.pop("client_id", "")
+        if err := _validate_context(context): return err
+        # Validate required parameters
+        network_id = params.get("network_id") or params.get("networkId")
+        client_id = params.get("client_id") or params.get("clientId")
+
+        if not network_id:
+            if hasattr(context, 'network_id'):
+                network_id = context.network_id
+        if not network_id:
+            return {"success": False, "error": "Missing required parameter: network_id. Specify the network ID."}
+        if not client_id:
+            return {"success": False, "error": "Missing required parameter: client_id. Specify the client ID or MAC address."}
+
+        # Build API path
         path = f"/networks/{network_id}/clients/{client_id}"
 
         # Make API request
-        result = await context.client.request("GET", path, params=params)
+        result = await context.client.request("GET", path)
         return {"success": True, "data": result}
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -194,6 +274,7 @@ async def handle_networks_get_client(params: Dict, context: Any) -> Dict:
 async def handle_networks_get_client_policy(params: Dict, context: Any) -> Dict:
     """Handler for Get Client Policy."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: GET /networks/{networkId}/clients/{clientId}/policy
         network_id = params.pop("network_id", "")
         client_id = params.pop("client_id", "")
@@ -209,6 +290,7 @@ async def handle_networks_get_client_policy(params: Dict, context: Any) -> Dict:
 async def handle_networks_update_client_policy(params: Dict, context: Any) -> Dict:
     """Handler for Update Client Policy."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: PUT /networks/{networkId}/clients/{clientId}/policy
         network_id = params.pop("network_id", "")
         client_id = params.pop("client_id", "")
@@ -224,6 +306,7 @@ async def handle_networks_update_client_policy(params: Dict, context: Any) -> Di
 async def handle_networks_provision_clients(params: Dict, context: Any) -> Dict:
     """Handler for Provision Clients."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: POST /networks/{networkId}/clients/provision
         network_id = params.pop("network_id", "")
         path = f"/networks/{network_id}/clients/provision"
@@ -238,6 +321,7 @@ async def handle_networks_provision_clients(params: Dict, context: Any) -> Dict:
 async def handle_networks_get_client_traffic(params: Dict, context: Any) -> Dict:
     """Handler for Get Client Traffic History."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: GET /networks/{networkId}/clients/{clientId}/trafficHistory
         network_id = params.pop("network_id", "")
         client_id = params.pop("client_id", "")
@@ -253,6 +337,7 @@ async def handle_networks_get_client_traffic(params: Dict, context: Any) -> Dict
 async def handle_networks_get_client_usage(params: Dict, context: Any) -> Dict:
     """Handler for Get Client Usage History."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: GET /networks/{networkId}/clients/{clientId}/usageHistory
         network_id = params.pop("network_id", "")
         client_id = params.pop("client_id", "")
@@ -268,12 +353,23 @@ async def handle_networks_get_client_usage(params: Dict, context: Any) -> Dict:
 async def handle_networks_get_events(params: Dict, context: Any) -> Dict:
     """Handler for Get Network Events."""
     try:
-        # Build API path - Meraki API: GET /networks/{networkId}/events
-        network_id = params.pop("network_id", "")
+        if err := _validate_context(context): return err
+        # Validate required parameter
+        network_id = params.get("network_id") or params.get("networkId")
+        if not network_id:
+            if hasattr(context, 'network_id'):
+                network_id = context.network_id
+        if not network_id:
+            return {"success": False, "error": "Missing required parameter: network_id. Specify the network ID to get events for."}
+
+        # Build API path
         path = f"/networks/{network_id}/events"
 
+        # Remove network_id from params
+        query_params = {k: v for k, v in params.items() if k not in ('network_id', 'networkId')}
+
         # Make API request
-        result = await context.client.request("GET", path, params=params)
+        result = await context.client.request("GET", path, params=query_params)
         return {"success": True, "data": result}
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -282,6 +378,7 @@ async def handle_networks_get_events(params: Dict, context: Any) -> Dict:
 async def handle_networks_get_event_types(params: Dict, context: Any) -> Dict:
     """Handler for Get Network Event Types."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: GET /networks/{networkId}/events/eventTypes
         network_id = params.pop("network_id", "")
         path = f"/networks/{network_id}/events/eventTypes"
@@ -296,6 +393,7 @@ async def handle_networks_get_event_types(params: Dict, context: Any) -> Dict:
 async def handle_networks_get_alerts_history(params: Dict, context: Any) -> Dict:
     """Handler for Get Alerts History."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: GET /networks/{networkId}/alerts/history
         network_id = params.pop("network_id", "")
         path = f"/networks/{network_id}/alerts/history"
@@ -310,6 +408,7 @@ async def handle_networks_get_alerts_history(params: Dict, context: Any) -> Dict
 async def handle_networks_get_alerts_settings(params: Dict, context: Any) -> Dict:
     """Handler for Get Alerts Settings."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: GET /networks/{networkId}/alerts/settings
         network_id = params.pop("network_id", "")
         path = f"/networks/{network_id}/alerts/settings"
@@ -324,6 +423,7 @@ async def handle_networks_get_alerts_settings(params: Dict, context: Any) -> Dic
 async def handle_networks_update_alerts_settings(params: Dict, context: Any) -> Dict:
     """Handler for Update Alerts Settings."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: PUT /networks/{networkId}/alerts/settings
         network_id = params.pop("network_id", "")
         path = f"/networks/{network_id}/alerts/settings"
@@ -338,12 +438,33 @@ async def handle_networks_update_alerts_settings(params: Dict, context: Any) -> 
 async def handle_networks_get_health_alerts(params: Dict, context: Any) -> Dict:
     """Handler for Get Health Alerts."""
     try:
+        # Validate execution context has a Meraki client
+        if not hasattr(context, 'client') or context.client is None:
+            return {
+                "success": False,
+                "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+            }
+
+        # Get network_id from params or context
+        network_id = params.get("network_id") or params.get("networkId")
+
+        # Try to get from context if not in params
+        if not network_id and hasattr(context, 'network_id'):
+            network_id = context.network_id
+
+        # Validate network_id is present
+        if not network_id:
+            return {
+                "success": False,
+                "error": "Missing required parameter: network_id. Please specify a network ID to get health alerts for."
+            }
+
         # Build API path - Meraki API: GET /networks/{networkId}/health/alerts
-        network_id = params.pop("network_id", "")
         path = f"/networks/{network_id}/health/alerts"
 
-        # Make API request
-        result = await context.client.request("GET", path, params=params)
+        # Make API request (don't modify params dict)
+        query_params = {k: v for k, v in params.items() if k not in ('network_id', 'networkId')}
+        result = await context.client.request("GET", path, params=query_params)
         return {"success": True, "data": result}
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -352,6 +473,7 @@ async def handle_networks_get_health_alerts(params: Dict, context: Any) -> Dict:
 async def handle_networks_get_firmware_upgrades(params: Dict, context: Any) -> Dict:
     """Handler for Get Firmware Upgrades."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: GET /networks/{networkId}/firmwareUpgrades
         network_id = params.pop("network_id", "")
         path = f"/networks/{network_id}/firmwareUpgrades"
@@ -366,6 +488,7 @@ async def handle_networks_get_firmware_upgrades(params: Dict, context: Any) -> D
 async def handle_networks_update_firmware_upgrades(params: Dict, context: Any) -> Dict:
     """Handler for Update Firmware Upgrades."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: PUT /networks/{networkId}/firmwareUpgrades
         network_id = params.pop("network_id", "")
         path = f"/networks/{network_id}/firmwareUpgrades"
@@ -380,6 +503,7 @@ async def handle_networks_update_firmware_upgrades(params: Dict, context: Any) -
 async def handle_networks_create_firmware_rollback(params: Dict, context: Any) -> Dict:
     """Handler for Rollback Firmware."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: POST /networks/{networkId}/firmwareUpgrades/rollbacks
         network_id = params.pop("network_id", "")
         path = f"/networks/{network_id}/firmwareUpgrades/rollbacks"
@@ -394,6 +518,7 @@ async def handle_networks_create_firmware_rollback(params: Dict, context: Any) -
 async def handle_networks_get_firmware_staged_events(params: Dict, context: Any) -> Dict:
     """Handler for Get Staged Firmware Events."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: GET /networks/{networkId}/firmwareUpgrades/staged/events
         network_id = params.pop("network_id", "")
         path = f"/networks/{network_id}/firmwareUpgrades/staged/events"
@@ -408,6 +533,7 @@ async def handle_networks_get_firmware_staged_events(params: Dict, context: Any)
 async def handle_networks_list_group_policies(params: Dict, context: Any) -> Dict:
     """Handler for List Group Policies."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: GET /networks/{networkId}/groupPolicies
         network_id = params.pop("network_id", "")
         path = f"/networks/{network_id}/groupPolicies"
@@ -422,6 +548,7 @@ async def handle_networks_list_group_policies(params: Dict, context: Any) -> Dic
 async def handle_networks_create_group_policy(params: Dict, context: Any) -> Dict:
     """Handler for Create Group Policy."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: POST /networks/{networkId}/groupPolicies
         network_id = params.pop("network_id", "")
         path = f"/networks/{network_id}/groupPolicies"
@@ -436,6 +563,7 @@ async def handle_networks_create_group_policy(params: Dict, context: Any) -> Dic
 async def handle_networks_get_group_policy(params: Dict, context: Any) -> Dict:
     """Handler for Get Group Policy."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: GET /networks/{networkId}/groupPolicies/{groupPolicyId}
         network_id = params.pop("network_id", "")
         group_policy_id = params.pop("group_policy_id", "")
@@ -451,6 +579,7 @@ async def handle_networks_get_group_policy(params: Dict, context: Any) -> Dict:
 async def handle_networks_update_group_policy(params: Dict, context: Any) -> Dict:
     """Handler for Update Group Policy."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: PUT /networks/{networkId}/groupPolicies/{groupPolicyId}
         network_id = params.pop("network_id", "")
         group_policy_id = params.pop("group_policy_id", "")
@@ -466,6 +595,7 @@ async def handle_networks_update_group_policy(params: Dict, context: Any) -> Dic
 async def handle_networks_delete_group_policy(params: Dict, context: Any) -> Dict:
     """Handler for Delete Group Policy."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: DELETE /networks/{networkId}/groupPolicies/{groupPolicyId}
         network_id = params.pop("network_id", "")
         group_policy_id = params.pop("group_policy_id", "")
@@ -481,6 +611,7 @@ async def handle_networks_delete_group_policy(params: Dict, context: Any) -> Dic
 async def handle_networks_list_meraki_auth_users(params: Dict, context: Any) -> Dict:
     """Handler for List Meraki Auth Users."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: GET /networks/{networkId}/merakiAuthUsers
         network_id = params.pop("network_id", "")
         path = f"/networks/{network_id}/merakiAuthUsers"
@@ -495,6 +626,7 @@ async def handle_networks_list_meraki_auth_users(params: Dict, context: Any) -> 
 async def handle_networks_create_meraki_auth_user(params: Dict, context: Any) -> Dict:
     """Handler for Create Meraki Auth User."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: POST /networks/{networkId}/merakiAuthUsers
         network_id = params.pop("network_id", "")
         path = f"/networks/{network_id}/merakiAuthUsers"
@@ -509,6 +641,7 @@ async def handle_networks_create_meraki_auth_user(params: Dict, context: Any) ->
 async def handle_networks_get_meraki_auth_user(params: Dict, context: Any) -> Dict:
     """Handler for Get Meraki Auth User."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: GET /networks/{networkId}/merakiAuthUsers/{merakiAuthUserId}
         network_id = params.pop("network_id", "")
         meraki_auth_user_id = params.pop("meraki_auth_user_id", "")
@@ -524,6 +657,7 @@ async def handle_networks_get_meraki_auth_user(params: Dict, context: Any) -> Di
 async def handle_networks_update_meraki_auth_user(params: Dict, context: Any) -> Dict:
     """Handler for Update Meraki Auth User."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: PUT /networks/{networkId}/merakiAuthUsers/{merakiAuthUserId}
         network_id = params.pop("network_id", "")
         meraki_auth_user_id = params.pop("meraki_auth_user_id", "")
@@ -539,6 +673,7 @@ async def handle_networks_update_meraki_auth_user(params: Dict, context: Any) ->
 async def handle_networks_delete_meraki_auth_user(params: Dict, context: Any) -> Dict:
     """Handler for Delete Meraki Auth User."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: DELETE /networks/{networkId}/merakiAuthUsers/{merakiAuthUserId}
         network_id = params.pop("network_id", "")
         meraki_auth_user_id = params.pop("meraki_auth_user_id", "")
@@ -554,6 +689,7 @@ async def handle_networks_delete_meraki_auth_user(params: Dict, context: Any) ->
 async def handle_networks_list_webhooks(params: Dict, context: Any) -> Dict:
     """Handler for List Webhooks."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: GET /networks/{networkId}/webhooks/httpServers
         network_id = params.pop("network_id", "")
         path = f"/networks/{network_id}/webhooks/httpServers"
@@ -568,6 +704,7 @@ async def handle_networks_list_webhooks(params: Dict, context: Any) -> Dict:
 async def handle_networks_create_webhook(params: Dict, context: Any) -> Dict:
     """Handler for Create Webhook."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: POST /networks/{networkId}/webhooks/httpServers
         network_id = params.pop("network_id", "")
         path = f"/networks/{network_id}/webhooks/httpServers"
@@ -582,6 +719,7 @@ async def handle_networks_create_webhook(params: Dict, context: Any) -> Dict:
 async def handle_networks_get_webhook(params: Dict, context: Any) -> Dict:
     """Handler for Get Webhook."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: GET /networks/{networkId}/webhooks/httpServers/{httpServerId}
         network_id = params.pop("network_id", "")
         http_server_id = params.pop("http_server_id", "")
@@ -597,6 +735,7 @@ async def handle_networks_get_webhook(params: Dict, context: Any) -> Dict:
 async def handle_networks_update_webhook(params: Dict, context: Any) -> Dict:
     """Handler for Update Webhook."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: PUT /networks/{networkId}/webhooks/httpServers/{httpServerId}
         network_id = params.pop("network_id", "")
         http_server_id = params.pop("http_server_id", "")
@@ -612,6 +751,7 @@ async def handle_networks_update_webhook(params: Dict, context: Any) -> Dict:
 async def handle_networks_delete_webhook(params: Dict, context: Any) -> Dict:
     """Handler for Delete Webhook."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: DELETE /networks/{networkId}/webhooks/httpServers/{httpServerId}
         network_id = params.pop("network_id", "")
         http_server_id = params.pop("http_server_id", "")
@@ -627,6 +767,7 @@ async def handle_networks_delete_webhook(params: Dict, context: Any) -> Dict:
 async def handle_networks_test_webhook(params: Dict, context: Any) -> Dict:
     """Handler for Test Webhook."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: POST /networks/{networkId}/webhooks/webhookTests
         network_id = params.pop("network_id", "")
         path = f"/networks/{network_id}/webhooks/webhookTests"
@@ -641,6 +782,7 @@ async def handle_networks_test_webhook(params: Dict, context: Any) -> Dict:
 async def handle_networks_list_floor_plans(params: Dict, context: Any) -> Dict:
     """Handler for List Floor Plans."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: GET /networks/{networkId}/floorPlans
         network_id = params.pop("network_id", "")
         path = f"/networks/{network_id}/floorPlans"
@@ -655,6 +797,7 @@ async def handle_networks_list_floor_plans(params: Dict, context: Any) -> Dict:
 async def handle_networks_get_floor_plan(params: Dict, context: Any) -> Dict:
     """Handler for Get Floor Plan."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: GET /networks/{networkId}/floorPlans/{floorPlanId}
         network_id = params.pop("network_id", "")
         floor_plan_id = params.pop("floor_plan_id", "")
@@ -670,6 +813,7 @@ async def handle_networks_get_floor_plan(params: Dict, context: Any) -> Dict:
 async def handle_networks_update_floor_plan(params: Dict, context: Any) -> Dict:
     """Handler for Update Floor Plan."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: PUT /networks/{networkId}/floorPlans/{floorPlanId}
         network_id = params.pop("network_id", "")
         floor_plan_id = params.pop("floor_plan_id", "")
@@ -685,6 +829,7 @@ async def handle_networks_update_floor_plan(params: Dict, context: Any) -> Dict:
 async def handle_networks_delete_floor_plan(params: Dict, context: Any) -> Dict:
     """Handler for Delete Floor Plan."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: DELETE /networks/{networkId}/floorPlans/{floorPlanId}
         network_id = params.pop("network_id", "")
         floor_plan_id = params.pop("floor_plan_id", "")
@@ -700,6 +845,7 @@ async def handle_networks_delete_floor_plan(params: Dict, context: Any) -> Dict:
 async def handle_networks_get_traffic_analysis(params: Dict, context: Any) -> Dict:
     """Handler for Get Traffic Analysis Settings."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: GET /networks/{networkId}/trafficAnalysis
         network_id = params.pop("network_id", "")
         path = f"/networks/{network_id}/trafficAnalysis"
@@ -714,6 +860,7 @@ async def handle_networks_get_traffic_analysis(params: Dict, context: Any) -> Di
 async def handle_networks_update_traffic_analysis(params: Dict, context: Any) -> Dict:
     """Handler for Update Traffic Analysis."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: PUT /networks/{networkId}/trafficAnalysis
         network_id = params.pop("network_id", "")
         path = f"/networks/{network_id}/trafficAnalysis"
@@ -728,6 +875,7 @@ async def handle_networks_update_traffic_analysis(params: Dict, context: Any) ->
 async def handle_networks_get_traffic(params: Dict, context: Any) -> Dict:
     """Handler for Get Network Traffic."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: GET /networks/{networkId}/traffic
         network_id = params.pop("network_id", "")
         path = f"/networks/{network_id}/traffic"
@@ -742,6 +890,7 @@ async def handle_networks_get_traffic(params: Dict, context: Any) -> Dict:
 async def handle_networks_get_settings(params: Dict, context: Any) -> Dict:
     """Handler for Get Network Settings."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: GET /networks/{networkId}/settings
         network_id = params.pop("network_id", "")
         path = f"/networks/{network_id}/settings"
@@ -756,6 +905,7 @@ async def handle_networks_get_settings(params: Dict, context: Any) -> Dict:
 async def handle_networks_update_settings(params: Dict, context: Any) -> Dict:
     """Handler for Update Network Settings."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: PUT /networks/{networkId}/settings
         network_id = params.pop("network_id", "")
         path = f"/networks/{network_id}/settings"
@@ -770,6 +920,7 @@ async def handle_networks_update_settings(params: Dict, context: Any) -> Dict:
 async def handle_networks_get_snmp(params: Dict, context: Any) -> Dict:
     """Handler for Get SNMP Settings."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: GET /networks/{networkId}/snmp
         network_id = params.pop("network_id", "")
         path = f"/networks/{network_id}/snmp"
@@ -784,6 +935,7 @@ async def handle_networks_get_snmp(params: Dict, context: Any) -> Dict:
 async def handle_networks_update_snmp(params: Dict, context: Any) -> Dict:
     """Handler for Update SNMP Settings."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: PUT /networks/{networkId}/snmp
         network_id = params.pop("network_id", "")
         path = f"/networks/{network_id}/snmp"
@@ -798,6 +950,7 @@ async def handle_networks_update_snmp(params: Dict, context: Any) -> Dict:
 async def handle_networks_get_syslog_servers(params: Dict, context: Any) -> Dict:
     """Handler for Get Syslog Servers."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: GET /networks/{networkId}/syslogServers
         network_id = params.pop("network_id", "")
         path = f"/networks/{network_id}/syslogServers"
@@ -812,6 +965,7 @@ async def handle_networks_get_syslog_servers(params: Dict, context: Any) -> Dict
 async def handle_networks_update_syslog_servers(params: Dict, context: Any) -> Dict:
     """Handler for Update Syslog Servers."""
     try:
+        if err := _validate_context(context): return err
         # Build API path - Meraki API: PUT /networks/{networkId}/syslogServers
         network_id = params.pop("network_id", "")
         path = f"/networks/{network_id}/syslogServers"

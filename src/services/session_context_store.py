@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 class EntityType(str, Enum):
     """Types of entities that can be discovered and tracked."""
+    ORGANIZATION = "organization"
     NETWORK = "network"
     DEVICE = "device"
     VLAN = "vlan"
@@ -246,7 +247,7 @@ class SessionContext:
     )
 
     # Conversation state
-    current_focus: Optional[str] = None  # e.g., "network:Riebel Home"
+    current_focus: Optional[str] = None  # e.g., "network:Demo Home"
     current_focus_type: Optional[EntityType] = None
     current_focus_id: Optional[str] = None
 
@@ -283,6 +284,11 @@ class SessionContext:
     # Track card types added in this session to prevent duplicates
     # Format: ["card_type:network_id", "card_type:org_id", ...]
     active_card_types: List[str] = field(default_factory=list)
+
+    # Track incident analysis to detect context switches
+    # This prevents cardable_data_cache pollution across different incidents
+    _last_incident_id: Optional[int] = None
+    _last_incident_network_id: Optional[str] = None
 
     def get_org_context(self, org_type: OrgType) -> Optional[OrgContext]:
         """Get organization context by type."""
@@ -550,6 +556,27 @@ class SessionContext:
         """Clear the cardable data cache."""
         self.cardable_data_cache = []
         logger.debug("[CardableCache] Cleared cache")
+
+    def set_incident_context(self, incident_id: int, network_id: Optional[str] = None):
+        """Set the current incident context and clear cache if incident changed.
+
+        This prevents cardable_data_cache pollution when switching between incidents.
+        When a new incident is detected (different ID), the cardable cache is cleared.
+
+        Args:
+            incident_id: The incident ID being analyzed
+            network_id: Optional network ID associated with the incident
+        """
+        # Check if this is a different incident than last analyzed
+        if self._last_incident_id != incident_id:
+            # New incident - clear stale cache to prevent pollution
+            self.clear_cardable_cache()
+            logger.info(f"[SessionContext] New incident detected (#{incident_id}), cleared cardable cache (was incident #{self._last_incident_id})")
+
+        # Update incident tracking
+        self._last_incident_id = incident_id
+        self._last_incident_network_id = network_id
+        self.last_updated = datetime.utcnow()
 
     def to_context_summary(self) -> str:
         """Generate a context summary for inclusion in prompts."""
@@ -850,6 +877,10 @@ class SessionContextStore:
         This stores automatically-fetched platform data (organizations, networks,
         sites, tests, etc.) that was retrieved before the AI responded.
 
+        Also extracts entities (orgs, networks) and adds them to discovered_entities
+        so that name resolution works for AI providers like Circuit that may use
+        names instead of IDs.
+
         Args:
             session_id: Session identifier
             bootstrap_data: Dict of platform data keyed by platform name
@@ -859,9 +890,65 @@ class SessionContextStore:
         ctx.bootstrap_timestamp = datetime.utcnow()
         ctx.last_updated = datetime.utcnow()
 
+        # Extract entities from bootstrap data for name resolution
+        # This is critical for Circuit AI which may output names instead of IDs
+        entities_added = 0
+
+        # Process Meraki data
+        meraki_data = bootstrap_data.get("meraki", {})
+
+        # Add organizations
+        for org in meraki_data.get("organizations", []):
+            org_id = str(org.get("id", ""))
+            org_name = org.get("name", "")
+            if org_id and org_name:
+                ctx.discovered_entities[EntityType.ORGANIZATION][org_id] = DiscoveredEntity(
+                    entity_type=EntityType.ORGANIZATION,
+                    id=org_id,
+                    name=org_name,
+                    data={"url": org.get("url", "")},
+                    source_tool="bootstrap",
+                )
+                entities_added += 1
+
+        # Add networks (nested by org_id)
+        networks_by_org = meraki_data.get("networks", {})
+        for org_id, networks in networks_by_org.items():
+            for network in networks:
+                network_id = network.get("id", "")
+                network_name = network.get("name", "")
+                if network_id and network_name:
+                    ctx.discovered_entities[EntityType.NETWORK][network_id] = DiscoveredEntity(
+                        entity_type=EntityType.NETWORK,
+                        id=network_id,
+                        name=network_name,
+                        data={
+                            "organizationId": org_id,
+                            "productTypes": network.get("productTypes", []),
+                            "timeZone": network.get("timeZone", ""),
+                        },
+                        source_tool="bootstrap",
+                    )
+                    entities_added += 1
+
+        # Process Catalyst sites
+        catalyst_data = bootstrap_data.get("catalyst", {})
+        for site in catalyst_data.get("sites", []):
+            site_id = site.get("id", "") or site.get("siteId", "")
+            site_name = site.get("name", "") or site.get("siteName", "")
+            if site_id and site_name:
+                ctx.discovered_entities[EntityType.SITE][str(site_id)] = DiscoveredEntity(
+                    entity_type=EntityType.SITE,
+                    id=str(site_id),
+                    name=site_name,
+                    data={},
+                    source_tool="bootstrap",
+                )
+                entities_added += 1
+
         logger.info(
             f"[SessionContextStore] Updated bootstrap context for session {session_id}: "
-            f"platforms={list(bootstrap_data.keys())}"
+            f"platforms={list(bootstrap_data.keys())}, entities_added={entities_added}"
         )
 
         await self._persist_context(ctx)
@@ -1096,6 +1183,9 @@ class SessionContextStore:
     ) -> None:
         """Set the current focus entity for the session.
 
+        Also adds the entity to discovered_entities so that name resolution works.
+        This is critical for Circuit AI which may use names instead of IDs.
+
         Args:
             session_id: Session identifier
             entity_type: Type of entity being focused on
@@ -1108,6 +1198,20 @@ class SessionContextStore:
         ctx.current_focus_id = entity_id
         ctx.current_focus = f"{entity_type.value}:{display_name or entity_id}"
         ctx.last_updated = datetime.utcnow()
+
+        # Also add to discovered_entities so name resolution works
+        # This is essential for Circuit AI which may output names instead of IDs
+        if display_name and display_name != entity_id:
+            ctx.add_entity(
+                entity_type=entity_type,
+                entity_id=entity_id,
+                name=display_name,
+                data={}
+            )
+            logger.debug(
+                f"[SessionContextStore] Added focus entity to discovered: "
+                f"{entity_type.value} '{display_name}' ({entity_id})"
+            )
 
         logger.debug(f"[SessionContextStore] Focus set to: {ctx.current_focus}")
 
@@ -1365,6 +1469,9 @@ class SessionContextStore:
         ctx = await self.get_or_create(session_id)
         enriched = tool_input.copy()
 
+        # Always add session_id for tools that need context access (like canvas tools)
+        enriched["session_id"] = session_id
+
         # Get appropriate org context
         org_type = self._detect_org_type_from_tool(tool_name)
         org_ctx = ctx.get_org_context(org_type) if org_type else ctx.get_primary_org_context()
@@ -1383,10 +1490,39 @@ class SessionContextStore:
             network = ctx.get_entity_by_name(EntityType.NETWORK, enriched["network_name"])
             if network:
                 enriched["networkId"] = network.id
+                enriched["network_id"] = network.id  # Also set snake_case for compatibility
                 logger.debug(
                     f"[SessionContextStore] Resolved network '{enriched['network_name']}' "
                     f"to ID: {network.id}"
                 )
+
+        # IMPORTANT: Check if network_id contains a name (not an actual ID) and resolve it
+        # This handles cases where AI outputs network_id: "Demo Home" instead of network_id: "L_123..."
+        network_id_value = enriched.get("network_id") or enriched.get("networkId")
+        if network_id_value and isinstance(network_id_value, str):
+            # Check if this looks like a network name rather than an ID
+            # Valid Meraki network IDs start with L_ or N_ followed by digits
+            is_network_id = (
+                network_id_value.startswith("L_") or
+                network_id_value.startswith("N_")
+            ) and len(network_id_value) > 10
+
+            if not is_network_id:
+                # Try to resolve as a network name
+                network = ctx.get_entity_by_name(EntityType.NETWORK, network_id_value)
+                if network:
+                    enriched["networkId"] = network.id
+                    enriched["network_id"] = network.id
+                    logger.info(
+                        f"[SessionContextStore] Resolved network name '{network_id_value}' "
+                        f"(from network_id field) to ID: {network.id}"
+                    )
+                else:
+                    logger.warning(
+                        f"[SessionContextStore] network_id '{network_id_value}' looks like a name "
+                        f"but no matching network found in session context. "
+                        f"Available networks: {[e.name for e in ctx.entities.values() if e.entity_type == EntityType.NETWORK]}"
+                    )
 
         # Resolve device_name to serial
         if "device_name" in enriched and "serial" not in enriched:
@@ -1400,16 +1536,27 @@ class SessionContextStore:
 
         # Use current focus if no explicit target
         if ctx.current_focus_type == EntityType.NETWORK:
-            if "networkId" not in enriched and ctx.current_focus_id:
-                # Only auto-fill for tools that need networkId
+            # Auto-fill network_id for tools that don't already have it
+            has_network_id = (
+                "networkId" in enriched or
+                "network_id" in enriched
+            )
+            if not has_network_id and ctx.current_focus_id:
+                # Expanded list: include wireless, latency, channel, signal, health, clients, etc.
+                # These tools commonly need network_id for wireless analysis
                 network_tools = [
                     "get_network", "list_devices", "list_ssids", "list_vlans",
-                    "get_clients", "get_events"
+                    "get_clients", "get_events", "wireless", "latency",
+                    "channel", "signal", "health", "client", "connection",
+                    "bandwidth", "traffic", "ssid", "rf", "radio",
+                    "uplink", "appliance", "switch", "camera", "sensor"
                 ]
                 if any(t in tool_name.lower() for t in network_tools):
                     enriched["networkId"] = ctx.current_focus_id
-                    logger.debug(
-                        f"[SessionContextStore] Using focused network: {ctx.current_focus_id}"
+                    enriched["network_id"] = ctx.current_focus_id  # Also set snake_case
+                    logger.info(
+                        f"[SessionContextStore] Auto-filled network from focus: "
+                        f"{ctx.current_focus_id} for {tool_name}"
                     )
 
         return enriched

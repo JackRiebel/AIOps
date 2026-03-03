@@ -19,7 +19,7 @@ Usage:
         api_key="sk-...",
     )
     result = await service.chat(
-        message="List devices on Riebel Home",
+        message="List devices on Demo Home",
         conversation_history=history,
         credentials=meraki_credentials,
         session_id="conv-123",
@@ -29,6 +29,7 @@ Usage:
 import asyncio
 import logging
 import json
+import os
 import re
 from typing import List, Dict, Any, Optional, AsyncGenerator, Tuple
 from dataclasses import dataclass, field
@@ -385,6 +386,43 @@ def count_tokens(text: str) -> int:
         return len(text) // 4
 
 
+def truncate_tool_result(result: Any, max_chars: int = 8000) -> str:
+    """Truncate large tool results to prevent token overflow.
+
+    For large results (device lists, log entries, etc.), we keep the first
+    portion and add a truncation notice. This prevents a single API call
+    from consuming 20-50K tokens.
+
+    Args:
+        result: The tool result (dict, list, or other)
+        max_chars: Maximum characters to keep (default 8000 = ~2000 tokens)
+
+    Returns:
+        JSON string of the result, truncated if necessary
+    """
+    result_str = json.dumps(result, default=str)
+
+    if len(result_str) <= max_chars:
+        return result_str
+
+    # For lists, try to keep a meaningful subset with count info
+    if isinstance(result, list) and len(result) > 0:
+        total_items = len(result)
+        # Calculate how many items we can keep
+        sample_item = json.dumps(result[0], default=str)
+        items_to_keep = max(1, (max_chars - 100) // max(len(sample_item), 100))
+        items_to_keep = min(items_to_keep, total_items)
+
+        truncated_result = result[:items_to_keep]
+        truncated_str = json.dumps(truncated_result, default=str)
+
+        # Add truncation notice
+        return f'{truncated_str[:-1]}, {{"_truncated": true, "_total_items": {total_items}, "_shown_items": {items_to_keep}}}]'
+
+    # For other types, just truncate the string
+    return result_str[:max_chars] + '\n... [result truncated, showing first 8000 chars]'
+
+
 from src.services.tool_registry import get_tool_registry, AIProvider
 from src.services.tool_selector import get_tool_selector, select_tools_for_query
 from src.services.tool_cache import get_tool_cache
@@ -394,6 +432,7 @@ from src.services.session_context_store import (
     get_session_context_store,
     SessionContext,
     OrgType,
+    EntityType,
 )
 from src.services.knowledge_rag_service import (
     get_knowledge_rag_service,
@@ -495,6 +534,775 @@ DATA_TYPE_MAP = {
     "splunk_list_saved_searches": "saved_searches",
     "splunk_get_events": "events",
 }
+
+# ============================================================================
+# Tool → SmartCard Type Mapping for Auto-Generated Canvas Cards
+# ============================================================================
+# Maps tool names to SmartCard types (from web-ui/src/app/chat-v2/cards/types.ts)
+# When a tool returns successful data, we emit a card_suggestion event with this type
+
+TOOL_CARD_MAPPING = {
+    # Device Inventory & Status → Table card
+    # NOTE: Only network-scoped tools generate auto-cards. Org-level tools (like
+    # meraki_organizations_list_devices) return ALL devices across ALL networks,
+    # which creates confusing cards during incident analysis.
+    "meraki_get_device": "meraki_device_table",
+    "meraki_list_devices": "meraki_device_table",
+    "meraki_list_network_devices": "meraki_device_table",
+    "meraki_networks_list_devices": "meraki_device_table",
+    "meraki_devices_get": "meraki_device_table",
+    # Org-level device tools excluded: meraki_list_organization_devices,
+    # meraki_organizations_list_devices, meraki_organizations_get_devices_statuses,
+    # meraki_organizations_get_inventory_devices
+
+    # Network Health → Donut chart (org-level but shows summary, not confusing)
+    "meraki_organizations_get_devices_availabilities": "meraki_network_health",
+
+    # Clients → Top clients bar chart
+    "meraki_get_network_clients": "meraki_top_clients",
+    "meraki_list_network_clients": "meraki_top_clients",
+    "meraki_networks_get_clients": "meraki_top_clients",
+    "meraki_devices_get_clients": "meraki_top_clients",
+
+    # Traffic & Bandwidth → Area chart
+    "meraki_get_network_traffic": "meraki_bandwidth_usage",
+    "meraki_networks_get_traffic": "meraki_bandwidth_usage",
+
+    # WAN Uplinks → Status grid
+    "meraki_get_uplinks": "meraki_uplink_status",
+    "meraki_appliance_get_uplinks": "meraki_uplink_status",
+    "meraki_get_device_uplinks": "meraki_uplink_status",
+    # Org-level excluded: meraki_organizations_get_devices_uplinks_addresses
+
+    # Latency & Loss → Multi-gauge
+    "meraki_get_device_loss_latency": "meraki_latency_loss",
+
+    # SSIDs → Client distribution donut
+    "meraki_list_ssids": "meraki_ssid_clients",
+    "meraki_get_ssid": "meraki_ssid_clients",
+    "meraki_wireless_list_ssids": "meraki_ssid_clients",
+    "meraki_wireless_get_ssid": "meraki_ssid_clients",
+
+    # Switch Ports → Status grid
+    "meraki_list_switch_ports": "meraki_switch_ports",
+    "meraki_get_switch_port": "meraki_switch_ports",
+    "meraki_switch_list_ports": "meraki_switch_ports",
+    "meraki_switch_get_port": "meraki_switch_ports",
+
+    # VPN → Status grid
+    "meraki_get_site_to_site_vpn": "meraki_vpn_status",
+    "meraki_appliance_get_vpn_settings": "meraki_vpn_status",
+
+    # Alerts → Badge list
+    "meraki_get_network_alerts": "meraki_alert_summary",
+    "meraki_networks_get_alerts": "meraki_alert_summary",
+    "meraki_get_organization_alerts": "meraki_alert_summary",
+
+    # Events → Timeline/Security events
+    "meraki_networks_get_events": "meraki_security_events",
+
+    # Wireless Stats → Latency/connection metrics
+    "meraki_wireless_get_connection_stats": "meraki_wireless_stats",
+    "meraki_wireless_get_clients_connection_stats": "meraki_wireless_stats",
+    "meraki_wireless_get_device_connection_stats": "meraki_wireless_stats",
+    "meraki_wireless_get_failed_connections": "meraki_wireless_stats",
+    "meraki_wireless_get_latency_stats": "meraki_latency_loss",
+    "meraki_wireless_get_latency_history": "meraki_latency_loss",
+    "meraki_wireless_get_client_latency_stats": "meraki_latency_loss",
+    "meraki_wireless_get_channel_utilization": "meraki_rf_health",
+    "meraki_wireless_get_device_channel_utilization": "meraki_rf_health",
+    "meraki_wireless_get_signal_quality_history": "meraki_rf_health",
+    "meraki_wireless_get_usage_history": "meraki_bandwidth_usage",
+    "meraki_wireless_get_data_rate_history": "meraki_bandwidth_usage",
+    "meraki_wireless_get_client_count_history": "meraki_client_count",
+    "meraki_wireless_list_ssids": "meraki_ssid_clients",
+    "meraki_wireless_get_ssid": "meraki_ssid_clients",
+    "meraki_wireless_get_mesh_statuses": "meraki_device_table",
+
+    # ThousandEyes
+    "thousandeyes_list_tests": "te_test_results",
+    "thousandeyes_get_test": "te_test_results",
+    "thousandeyes_get_test_results": "te_test_results",
+    "thousandeyes_get_path_visualization": "te_path_visualization",
+    "thousandeyes_list_alerts": "te_alert_summary",
+    "thousandeyes_list_agents": "te_agent_health",
+
+    # Meraki Appliance - Firewall & Security
+    "meraki_appliance_get_l3_firewall_rules": "meraki_firewall_rules",
+    "meraki_appliance_get_l7_firewall_rules": "meraki_firewall_rules",
+    "meraki_appliance_get_inbound_firewall_rules": "meraki_firewall_rules",
+    "meraki_appliance_get_cellular_firewall_rules": "meraki_firewall_rules",
+    "meraki_appliance_get_security_events": "meraki_security_events",
+    "meraki_appliance_get_org_security_events": "meraki_security_events",
+    "meraki_appliance_get_security_intrusion": "meraki_security_events",
+    "meraki_appliance_get_security_malware": "meraki_security_events",
+    "meraki_appliance_get_content_filtering": "meraki_firewall_rules",
+
+    # Meraki Appliance - VLANs
+    "meraki_appliance_list_vlans": "meraki_vlan_list",
+    "meraki_appliance_get_vlan": "meraki_vlan_list",
+    "meraki_list_vlans": "meraki_vlan_list",
+
+    # Meraki Appliance - VPN (reuse existing vpn_status)
+    "meraki_appliance_get_vpn_statuses": "meraki_vpn_status",
+    "meraki_appliance_get_vpn_stats": "meraki_vpn_status",
+    "meraki_appliance_get_vpn_bgp": "meraki_vpn_status",
+    "meraki_appliance_get_site_to_site_vpn": "meraki_vpn_status",
+
+    # Meraki Appliance - Uplinks (reuse existing uplink_status)
+    "meraki_appliance_get_uplink_statuses": "meraki_uplink_status",
+    "meraki_appliance_get_uplinks_usage": "meraki_uplink_status",
+    "meraki_appliance_list_ports": "meraki_switch_ports",
+    "meraki_appliance_get_port": "meraki_switch_ports",
+
+    # Meraki Appliance - Traffic & Performance
+    "meraki_appliance_get_traffic_shaping": "meraki_bandwidth_usage",
+    "meraki_appliance_get_traffic_shaping_rules": "meraki_bandwidth_usage",
+    "meraki_appliance_get_performance": "meraki_latency_loss",
+
+    # Splunk
+    "splunk_run_search": "splunk_search_results",
+    "splunk_get_events": "splunk_event_count",
+    "splunk_search_run_splunk_query": "splunk_search_results",
+    "splunk_get_search_results": "splunk_search_results",
+    "splunk_run_saved_search": "splunk_search_results",
+    "splunk_knowledge_get_saved_searches": "splunk_search_results",
+    "splunk_knowledge_get_alerts": "splunk_event_count",
+
+    # Catalyst
+    "catalyst_get_devices": "catalyst_device_inventory",
+    "catalyst_list_devices": "catalyst_device_inventory",
+    "catalyst_get_device_health": "catalyst_site_health",
+    "catalyst_get_network_health": "catalyst_site_health",
+    "catalyst_get_client_health": "catalyst_client_health",
+    "catalyst_get_client_detail": "catalyst_client_health",
+    "catalyst_get_client_enrichment": "catalyst_client_health",
+    "catalyst_get_issues": "catalyst_issue_summary",
+    "catalyst_get_issue_enrichment": "catalyst_issue_summary",
+    "catalyst_get_compliance_status": "catalyst_compliance",
+    "catalyst_get_compliance_detail": "catalyst_compliance",
+    "catalyst_get_interface_by_id": "catalyst_interfaces",
+    "catalyst_get_interface_by_ip": "catalyst_interfaces",
+
+    # ThousandEyes (additional)
+    "thousandeyes_get_bgp_results": "te_test_results",
+    "thousandeyes_get_http_results": "te_test_results",
+}
+
+# Card title templates based on card type
+# These should match what the AI says it's adding and the frontend registry titles
+CARD_TITLE_TEMPLATES = {
+    "meraki_device_table": "Device Inventory",
+    "meraki_network_health": "Network Health",
+    "meraki_top_clients": "Top Clients",
+    "meraki_bandwidth_usage": "Bandwidth Usage",
+    "meraki_uplink_status": "Uplink Status",
+    "meraki_latency_loss": "Latency & Packet Loss",
+    "meraki_ssid_clients": "SSID Clients",
+    "meraki_switch_ports": "Switch Ports",
+    "meraki_vpn_status": "VPN Status",
+    "meraki_alert_summary": "Alert Summary",
+    "meraki_security_events": "Security Events",
+    "meraki_wireless_stats": "Wireless Stats",
+    "meraki_rf_health": "RF Health",
+    "meraki_client_count": "Client Count",
+    "te_test_results": "Test Results",
+    "te_path_visualization": "Path Visualization",
+    "te_alert_summary": "ThousandEyes Alerts",
+    "te_agent_health": "Agent Health",
+    "splunk_search_results": "Search Results",
+    "splunk_event_count": "Event Count",
+    "catalyst_device_inventory": "Catalyst Devices",
+    "catalyst_site_health": "Site Health",
+    "meraki_firewall_rules": "Firewall Rules",
+    "meraki_vlan_list": "VLANs",
+    "catalyst_client_health": "Client Health",
+    "catalyst_issue_summary": "Network Issues",
+    "catalyst_interfaces": "Interfaces",
+}
+
+
+def _transform_card_data(card_type: str, raw_data: Any, tool_name: str) -> Any:
+    """Transform raw API data to the format expected by the card visualization.
+
+    Each card type expects data in a specific shape. This function normalizes
+    raw API responses to match those expected formats.
+
+    Args:
+        card_type: The target card type
+        raw_data: Raw data from the tool result
+        tool_name: Name of the tool (for context)
+
+    Returns:
+        Transformed data suitable for the card visualization
+    """
+    if raw_data is None:
+        return None
+
+    try:
+        # Wireless connection stats → WirelessOverviewData format for wireless_overview viz
+        if card_type == "meraki_wireless_stats":
+            if isinstance(raw_data, dict):
+                success = raw_data.get("success", 0)
+                assoc = raw_data.get("assoc", 0)
+                auth = raw_data.get("auth", 0)
+                dhcp = raw_data.get("dhcp", 0)
+                dns = raw_data.get("dns", 0)
+                total = success + assoc + auth + dhcp + dns
+                success_rate = round((success / total * 100) if total > 0 else 0, 1)
+                failures = assoc + auth + dhcp + dns
+                return {
+                    "summary": [
+                        {"status": "healthy", "label": "Success", "count": success},
+                        {"status": "critical" if failures > 0 else "healthy", "label": "Failed", "count": failures},
+                    ],
+                    "metrics": [
+                        {"label": "Success Rate", "value": f"{success_rate}%"},
+                        {"label": "Auth Fail", "value": auth},
+                        {"label": "DHCP Fail", "value": dhcp},
+                        {"label": "DNS Fail", "value": dns},
+                    ],
+                }
+            return raw_data
+
+        # Latency stats → multi_gauge format
+        if card_type == "meraki_latency_loss":
+            if isinstance(raw_data, dict):
+                # Extract latency values for different traffic types
+                gauges = []
+                for traffic_type in ["backgroundTraffic", "bestEffortTraffic", "videoTraffic", "voiceTraffic"]:
+                    traffic_data = raw_data.get(traffic_type, {})
+                    if isinstance(traffic_data, dict):
+                        # Calculate average latency from distribution
+                        avg_latency = traffic_data.get("avg", 0)
+                        if not avg_latency:
+                            # Try to calculate from distribution buckets
+                            total_samples = 0
+                            weighted_sum = 0
+                            for bucket, count in traffic_data.items():
+                                if bucket.isdigit() and isinstance(count, (int, float)):
+                                    ms = int(bucket)
+                                    total_samples += count
+                                    weighted_sum += ms * count
+                            avg_latency = round(weighted_sum / total_samples, 2) if total_samples > 0 else 0
+                        label = traffic_type.replace("Traffic", "").title()
+                        gauges.append({
+                            "label": label,
+                            "value": avg_latency,
+                            "unit": "ms",
+                        })
+                return gauges if gauges else raw_data
+            return raw_data
+
+        # Client count → big_number format
+        if card_type == "meraki_client_count":
+            if isinstance(raw_data, list):
+                # Client count history - get most recent count
+                if len(raw_data) > 0:
+                    latest = raw_data[-1] if isinstance(raw_data[-1], dict) else raw_data[0]
+                    count = latest.get("clientCount", latest.get("count", len(raw_data)))
+                    return {"value": count, "label": "Clients"}
+                return {"value": len(raw_data), "label": "Clients"}
+            elif isinstance(raw_data, dict):
+                count = raw_data.get("clientCount", raw_data.get("count", raw_data.get("total", 0)))
+                return {"value": count, "label": "Clients"}
+            elif isinstance(raw_data, (int, float)):
+                return {"value": int(raw_data), "label": "Clients"}
+            return raw_data
+
+        # Device table → ensure list format with required fields
+        if card_type == "meraki_device_table":
+            if isinstance(raw_data, list):
+                return raw_data
+            elif isinstance(raw_data, dict):
+                return [raw_data]
+            return raw_data
+
+        # Top clients → TrafficAnalyticsViz format (TopClient[])
+        if card_type == "meraki_top_clients":
+            if isinstance(raw_data, list):
+                # Transform to TopClient format expected by traffic_analytics viz
+                clients = []
+                for client in raw_data[:10]:  # Top 10
+                    usage = client.get("usage", {})
+                    if isinstance(usage, dict):
+                        sent = usage.get("sent", 0) or 0
+                        recv = usage.get("recv", usage.get("received", 0)) or 0
+                        total = usage.get("total", sent + recv) or (sent + recv)
+                    else:
+                        sent = client.get("sent", 0) or 0
+                        recv = client.get("recv", 0) or 0
+                        total = sent + recv
+                    clients.append({
+                        "id": client.get("id") or client.get("mac") or str(len(clients)),
+                        "name": client.get("description") or client.get("mac") or client.get("ip", "Unknown"),
+                        "ip": client.get("ip"),
+                        "mac": client.get("mac"),
+                        "manufacturer": client.get("manufacturer") or client.get("os"),
+                        "usage": {
+                            "sent": sent,
+                            "received": recv,
+                            "total": total,
+                        },
+                    })
+                return clients
+            return raw_data
+
+        # ThousandEyes path visualization → hops format for TEPathVisualizationViz
+        if card_type == "te_path_visualization":
+            if isinstance(raw_data, dict):
+                # Extract hops from TE path-vis response formats:
+                # v7 detailed: { results: [{ pathTraces: [{ hops: [...] }], agent }] }
+                # v7 routes:   { results: [{ routes: [{ hops: [...] }] }] }
+                # legacy:      { pathVis: [{ routes: [{ hops: [...] }] }] }
+                hops = []
+                results_list = raw_data.get("results") or raw_data.get("_embedded", {}).get("results") or []
+                if isinstance(results_list, list):
+                    # Find the longest trace across all agents
+                    best_trace_hops = []
+                    source_agent = None
+                    for result in results_list:
+                        agent_info = result.get("agent", {})
+                        # Try pathTraces first (v7 detailed format)
+                        for trace in (result.get("pathTraces") or []):
+                            trace_hops = trace.get("hops") or []
+                            if len(trace_hops) > len(best_trace_hops):
+                                best_trace_hops = trace_hops
+                                source_agent = agent_info.get("agentName")
+                        # Fallback: routes format
+                        if not best_trace_hops:
+                            for route in (result.get("routes") or []):
+                                route_hops = route.get("hops") or []
+                                if len(route_hops) > len(best_trace_hops):
+                                    best_trace_hops = route_hops
+                                    source_agent = agent_info.get("agentName")
+
+                    for idx, hop in enumerate(best_trace_hops):
+                        hops.append({
+                            "hopNumber": hop.get("hop", idx + 1),
+                            "ipAddress": hop.get("ipAddress") or hop.get("ip") or hop.get("prefix") or "N/A",
+                            "hostname": hop.get("rdns") or hop.get("hostname") or hop.get("prefix"),
+                            "latency": float(hop.get("responseTime") or hop.get("delay") or hop.get("latency") or 0),
+                            "loss": float(hop.get("loss") or 0),
+                            "prefix": hop.get("prefix"),
+                            "network": hop.get("network"),
+                        })
+
+                if hops:
+                    result_data = {"hops": hops}
+                    if source_agent:
+                        result_data["source"] = source_agent
+                    return result_data
+
+                # If raw_data already has hops key, pass through
+                if "hops" in raw_data:
+                    return raw_data
+
+            return raw_data
+
+        # Alert summary → badge_list format {severity: count}
+        if card_type == "meraki_alert_summary":
+            if isinstance(raw_data, list):
+                # Count alerts by severity
+                severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+                for alert in raw_data:
+                    if isinstance(alert, dict):
+                        severity = str(alert.get("severity", alert.get("type", "info"))).lower()
+                        # Normalize severity names
+                        if severity in severity_counts:
+                            severity_counts[severity] += 1
+                        elif severity in ("warning", "warn"):
+                            severity_counts["medium"] += 1
+                        elif severity in ("error", "err"):
+                            severity_counts["high"] += 1
+                        else:
+                            severity_counts["info"] += 1
+                return severity_counts
+            elif isinstance(raw_data, dict):
+                # Already in {severity: count} format or close enough
+                return raw_data
+            return raw_data
+
+        # Network health → aggregate device availabilities into {online, offline, alerting, dormant, total}
+        if card_type == "meraki_network_health":
+            if isinstance(raw_data, list):
+                counts = {"online": 0, "offline": 0, "alerting": 0, "dormant": 0}
+                for device in raw_data:
+                    if isinstance(device, dict):
+                        status = str(device.get("status", device.get("availability", ""))).lower()
+                        if status in counts:
+                            counts[status] += 1
+                        elif status in ("active", "up", "reachable"):
+                            counts["online"] += 1
+                        elif status in ("down", "unreachable"):
+                            counts["offline"] += 1
+                        else:
+                            counts["dormant"] += 1
+                counts["total"] = sum(counts.values())
+                return counts
+            return raw_data
+
+        # SSID clients → donut format [{ssid, clientCount}]
+        if card_type == "meraki_ssid_clients":
+            if isinstance(raw_data, list):
+                segments = []
+                for ssid in raw_data:
+                    if isinstance(ssid, dict):
+                        name = ssid.get("name") or ssid.get("ssid") or f"SSID {ssid.get('number', '?')}"
+                        # clientCount may not exist in config responses — use 0 as fallback
+                        count = ssid.get("clientCount", ssid.get("numClients", 0)) or 0
+                        if ssid.get("enabled", True):  # Only show enabled SSIDs
+                            segments.append({"ssid": name, "clientCount": count})
+                return segments if segments else raw_data
+            return raw_data
+
+        # VPN status → status_grid format [{networkName, status, mode}]
+        if card_type == "meraki_vpn_status":
+            if isinstance(raw_data, dict):
+                # Config response: {mode, hubs, subnets}
+                mode = raw_data.get("mode", "unknown")
+                hubs = raw_data.get("hubs", [])
+                subnets = raw_data.get("subnets", [])
+                items = []
+                if hubs:
+                    for hub in hubs:
+                        items.append({
+                            "networkName": hub.get("hubId", "Hub"),
+                            "status": "active" if hub.get("useDefaultRoute", False) else "active",
+                            "mode": mode,
+                        })
+                if not items:
+                    items.append({"networkName": "VPN", "status": mode, "mode": mode})
+                return items
+            elif isinstance(raw_data, list):
+                # Already a list of VPN peer statuses
+                items = []
+                for peer in raw_data:
+                    if isinstance(peer, dict):
+                        items.append({
+                            "networkName": peer.get("networkName") or peer.get("peerName") or peer.get("networkId", "Peer"),
+                            "status": peer.get("reachability") or peer.get("status", "unknown"),
+                            "latencyMs": peer.get("latencyMs") or peer.get("meanLatencyMs"),
+                            "mode": peer.get("vpnMode") or peer.get("mode", ""),
+                        })
+                return items if items else raw_data
+            return raw_data
+
+        # Uplink status → normalize to [{interface, status, ip, publicIp}]
+        if card_type == "meraki_uplink_status":
+            if isinstance(raw_data, list):
+                items = []
+                for item in raw_data:
+                    if isinstance(item, dict):
+                        # Org-level uplink response has nested uplinks array
+                        uplinks = item.get("uplinks", [item])
+                        for uplink in (uplinks if isinstance(uplinks, list) else [uplinks]):
+                            if isinstance(uplink, dict):
+                                items.append({
+                                    "interface": uplink.get("interface") or uplink.get("wan") or uplink.get("connectionType", "unknown"),
+                                    "status": uplink.get("status", "unknown"),
+                                    "ip": uplink.get("ip") or uplink.get("publicIp"),
+                                    "publicIp": uplink.get("publicIp"),
+                                    "latencyMs": uplink.get("latencyMs"),
+                                    "lossPercent": uplink.get("lossPercent"),
+                                })
+                return items if items else raw_data
+            return raw_data
+
+        # Bandwidth/traffic → normalize for area_chart (pass through lists, aggregate app data)
+        if card_type == "meraki_bandwidth_usage":
+            if isinstance(raw_data, list):
+                # Meraki traffic API returns [{application, sent, recv, ...}]
+                # Area chart needs timeseries but app data is aggregated — just pass through
+                # The frontend area_chart component can handle both formats
+                return raw_data
+            return raw_data
+
+        # RF health → multi_gauge format [{label, value, max, unit}]
+        if card_type == "meraki_rf_health":
+            if isinstance(raw_data, list):
+                # Channel utilization data — aggregate into gauges
+                total_util = 0
+                total_wifi = 0
+                total_non_wifi = 0
+                count = 0
+                for entry in raw_data:
+                    if isinstance(entry, dict):
+                        util = entry.get("utilization", entry.get("utilizationTotal"))
+                        wifi = entry.get("wifi", entry.get("utilizationWifi", entry.get("utilization80211")))
+                        non_wifi = entry.get("nonWifi", entry.get("utilizationNon80211"))
+                        if util is not None:
+                            total_util += float(util)
+                            count += 1
+                        if wifi is not None:
+                            total_wifi += float(wifi)
+                        if non_wifi is not None:
+                            total_non_wifi += float(non_wifi)
+                if count > 0:
+                    return [
+                        {"label": "Channel Utilization", "value": round(total_util / count, 1), "max": 100, "unit": "%"},
+                        {"label": "WiFi Utilization", "value": round(total_wifi / count, 1), "max": 100, "unit": "%"},
+                        {"label": "Non-WiFi", "value": round(total_non_wifi / count, 1), "max": 100, "unit": "%"},
+                    ]
+            elif isinstance(raw_data, dict):
+                # Signal quality / single-device stats
+                gauges = []
+                if "signalStrength" in raw_data or "snr" in raw_data:
+                    if "signalStrength" in raw_data:
+                        gauges.append({"label": "Signal Strength", "value": raw_data["signalStrength"], "max": 100, "unit": "dBm"})
+                    if "snr" in raw_data:
+                        gauges.append({"label": "SNR", "value": raw_data["snr"], "max": 50, "unit": "dB"})
+                    if "channelUtilization" in raw_data:
+                        gauges.append({"label": "Ch. Utilization", "value": raw_data["channelUtilization"], "max": 100, "unit": "%"})
+                    return gauges if gauges else raw_data
+            return raw_data
+
+        # Firewall rules → unwrap {rules: [...]} to flat list for table
+        if card_type == "meraki_firewall_rules":
+            if isinstance(raw_data, dict):
+                rules = raw_data.get("rules", raw_data.get("l3FirewallRules", raw_data.get("l7FirewallRules")))
+                if isinstance(rules, list):
+                    return rules
+            elif isinstance(raw_data, list):
+                return raw_data
+            return raw_data
+
+        # ThousandEyes alert summary → badge_list format {critical, major, minor, info}
+        if card_type == "te_alert_summary":
+            if isinstance(raw_data, list):
+                counts = {"critical": 0, "major": 0, "minor": 0, "info": 0, "total": 0}
+                for alert in raw_data:
+                    if isinstance(alert, dict):
+                        severity = str(alert.get("severity", alert.get("type", "info"))).lower()
+                        if severity in counts:
+                            counts[severity] += 1
+                        elif severity in ("high", "error"):
+                            counts["critical"] += 1
+                        elif severity in ("medium", "warning"):
+                            counts["major"] += 1
+                        elif severity in ("low",):
+                            counts["minor"] += 1
+                        else:
+                            counts["info"] += 1
+                counts["total"] = sum(v for k, v in counts.items() if k != "total")
+                return counts
+            return raw_data
+
+        # Catalyst issue summary → badge_list format {p1, p2, p3, p4, total}
+        if card_type == "catalyst_issue_summary":
+            if isinstance(raw_data, list):
+                counts = {"p1": 0, "p2": 0, "p3": 0, "p4": 0, "total": 0}
+                for issue in raw_data:
+                    if isinstance(issue, dict):
+                        priority = str(issue.get("priority", issue.get("severity", ""))).lower()
+                        if priority in ("p1", "1", "critical"):
+                            counts["p1"] += 1
+                        elif priority in ("p2", "2", "high", "major"):
+                            counts["p2"] += 1
+                        elif priority in ("p3", "3", "medium", "warning"):
+                            counts["p3"] += 1
+                        else:
+                            counts["p4"] += 1
+                counts["total"] = counts["p1"] + counts["p2"] + counts["p3"] + counts["p4"]
+                return counts
+            return raw_data
+
+        # Splunk event count → big_number format {value, label}
+        if card_type == "splunk_event_count":
+            if isinstance(raw_data, list):
+                return {"value": len(raw_data), "label": "Events"}
+            elif isinstance(raw_data, dict):
+                count = raw_data.get("count", raw_data.get("total", raw_data.get("eventCount", 0)))
+                return {"value": count, "label": "Events"}
+            elif isinstance(raw_data, (int, float)):
+                return {"value": int(raw_data), "label": "Events"}
+            return raw_data
+
+        # Security events → ensure list format with required fields
+        if card_type == "meraki_security_events":
+            if isinstance(raw_data, list):
+                return raw_data  # Already list of events
+            elif isinstance(raw_data, dict):
+                # Could be a single event or wrapped
+                events = raw_data.get("events", raw_data.get("results", [raw_data]))
+                return events if isinstance(events, list) else [events]
+            return raw_data
+
+        # Default: return raw data unchanged
+        return raw_data
+
+    except Exception as e:
+        logger.warning(f"[CardGen] Data transformation failed for {card_type}: {e}")
+        return raw_data
+
+
+def _generate_card_suggestion(
+    tool_name: str,
+    tool_result: Dict[str, Any],
+    tool_call_id: str,
+    network_id: Optional[str] = None,
+    org_id: Optional[str] = None,
+    network_name: Optional[str] = None,
+    org_name: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Generate a SmartCard suggestion from a tool result.
+
+    This enables automatic card generation when tools return cardable data,
+    following the Static Generative UI pattern where tool results map to
+    predefined card components.
+
+    Args:
+        tool_name: Name of the tool that produced the result
+        tool_result: The tool's result dictionary (should have 'data' key)
+        tool_call_id: Unique ID of the tool call
+        network_id: Optional network ID for scope
+        org_id: Optional organization ID for scope
+        network_name: Optional network name for display
+        org_name: Optional organization name for display
+
+    Returns:
+        Card suggestion dict or None if tool doesn't map to a card type
+    """
+    # Check if this tool maps to a card type
+    card_type = TOOL_CARD_MAPPING.get(tool_name)
+    if not card_type:
+        return None
+
+    # Get the data from the result
+    raw_data = tool_result.get("data")
+    if raw_data is None:
+        return None
+
+    # Transform raw API data to card-compatible format
+    transformed_data = _transform_card_data(card_type, raw_data, tool_name)
+
+    # Generate card title
+    base_title = CARD_TITLE_TEMPLATES.get(card_type, tool_name.replace("_", " ").title())
+
+    # Add network/org context to title if available
+    title = base_title
+    subtitle = None
+    if network_name:
+        subtitle = network_name
+    elif org_name:
+        subtitle = org_name
+
+    # Build scope context
+    scope = {}
+    if org_id:
+        scope["organizationId"] = org_id
+    if org_name:
+        scope["organizationName"] = org_name
+    if network_id:
+        scope["networkId"] = network_id
+    if network_name:
+        scope["networkName"] = network_name
+
+    # Create the card suggestion
+    # NOTE: subtitle must go in metadata (not top-level) for frontend to find it
+    card_suggestion = {
+        "type": card_type,
+        "title": title,
+        "data": transformed_data,
+        "metadata": {
+            "subtitle": subtitle,
+            "toolCallId": tool_call_id,
+            "toolName": tool_name,
+            "scope": scope if scope else None,
+        },
+    }
+
+    logger.info(f"[CardGen] Generated card suggestion: type={card_type}, title={title}")
+    return card_suggestion
+
+
+def _deduplicate_auto_cards(
+    pending_cards: List[Dict[str, Any]],
+    incident_network_id: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """Deduplicate auto-cards, keeping only ONE card per type:network combination.
+
+    When analyzing an incident, strongly prefer cards matching the incident network.
+    This fixes the issue where cards for different networks are incorrectly deduplicated together.
+
+    Args:
+        pending_cards: List of pending card suggestions
+        incident_network_id: If provided, prefer cards matching this network
+
+    Returns:
+        Deduplicated list with only one card per type:network combination
+    """
+    if not pending_cards:
+        return []
+
+    # Group cards by type AND network_id to prevent cross-network deduplication
+    cards_by_key: Dict[str, List[Dict[str, Any]]] = {}
+    for card in pending_cards:
+        card_type = card.get("type", "unknown")
+        # Extract network_id from metadata.scope
+        network_id = None
+        if card.get("metadata", {}).get("scope"):
+            # Check both camelCase and snake_case variants
+            network_id = (
+                card["metadata"]["scope"].get("networkId") or
+                card["metadata"]["scope"].get("network_id")
+            )
+
+        # Create unique key: card_type:network_id
+        key = f"{card_type}:{network_id or 'global'}"
+        if key not in cards_by_key:
+            cards_by_key[key] = []
+        cards_by_key[key].append(card)
+
+    # Now deduplicate by card_type only, but prefer incident network
+    cards_by_type: Dict[str, List[Dict[str, Any]]] = {}
+    for key, cards in cards_by_key.items():
+        card_type = key.split(":")[0]
+        if card_type not in cards_by_type:
+            cards_by_type[card_type] = []
+        cards_by_type[card_type].extend(cards)
+
+    deduped = []
+    for card_type, cards in cards_by_type.items():
+        if len(cards) == 1:
+            deduped.append(cards[0])
+        else:
+            # Multiple cards of same type - prefer incident network if specified
+            if incident_network_id:
+                incident_card = None
+                for card in cards:
+                    scope = card.get("metadata", {}).get("scope", {})
+                    network_id = scope.get("networkId") or scope.get("network_id")
+                    if network_id == incident_network_id:
+                        incident_card = card
+                        break
+                if incident_card:
+                    deduped.append(incident_card)
+                    logger.info(f"[CardGen] Dedup {card_type}: selected incident network card (network_id={incident_network_id}) over {len(cards)-1} others")
+                    continue
+
+            # Fallback: smallest data set (existing behavior)
+            def get_data_size(card: Dict[str, Any]) -> int:
+                data = card.get("data")
+                if isinstance(data, list):
+                    return len(data)
+                elif isinstance(data, dict):
+                    # For dicts, check common array fields
+                    for key in ["items", "devices", "clients", "alerts", "rows"]:
+                        if key in data and isinstance(data[key], list):
+                            return len(data[key])
+                    return 1
+                return 0
+
+            sorted_cards = sorted(cards, key=get_data_size)
+            selected = sorted_cards[0]
+            deduped.append(selected)
+            logger.info(f"[CardGen] Dedup {card_type}: picked smallest ({get_data_size(selected)} items) over {[get_data_size(c) for c in cards]}")
+
+    if len(deduped) < len(pending_cards):
+        logger.info(f"[CardGen] Deduplicated auto-cards: {len(pending_cards)} -> {len(deduped)} (removed duplicates)")
+
+    return deduped
 
 
 def _detect_data_type(tool_name: str) -> str:
@@ -613,8 +1421,8 @@ class UnifiedChatService:
         model: str,
         api_key: str,
         temperature: float = 0.7,
-        max_tokens: int = 4096,
-        enable_extended_thinking: bool = True,
+        max_tokens: int = 16384,
+        enable_extended_thinking: bool = False,
         thinking_budget_tokens: int = 4000,
     ):
         """Initialize the unified chat service.
@@ -623,9 +1431,9 @@ class UnifiedChatService:
             model: Model ID (e.g., "claude-sonnet-4-5-20250929", "gpt-4o")
             api_key: API key for the provider
             temperature: Response temperature (0.0-2.0)
-            max_tokens: Maximum response tokens
+            max_tokens: Maximum response tokens (16384 to accommodate adaptive thinking)
             enable_extended_thinking: Auto-enable extended thinking for complex queries
-            thinking_budget_tokens: Token budget for extended thinking
+            thinking_budget_tokens: Token budget for legacy thinking (fallback only)
         """
         self.model = model
         self.api_key = api_key
@@ -635,86 +1443,112 @@ class UnifiedChatService:
         self.tool_registry = get_tool_registry()
         self.settings = get_settings()
         self.enable_extended_thinking = enable_extended_thinking
-        self.thinking_budget_tokens = thinking_budget_tokens
+        self.thinking_budget_tokens = thinking_budget_tokens  # Legacy fallback only
         self.api_keys = {}  # Initialize API keys dict for provider-specific keys
         self._total_tools_count = len(self.tool_registry.get_all())  # Cache tool count for logging
+
+        # Adaptive thinking: uses type="adaptive" + effort parameter (Feb 2026 Anthropic API)
+        # Enables interleaved thinking — Claude reasons between tool calls automatically.
+        # Set ENABLE_ADAPTIVE_THINKING=false to fall back to legacy type="enabled" + budget_tokens.
+        self.use_adaptive_thinking = os.getenv("ENABLE_ADAPTIVE_THINKING", "true").lower() == "true"
 
         # Initialize provider-specific clients
         self._init_client()
 
         logger.info(
             f"[UnifiedChat] Initialized with model={model}, provider={self.provider}, "
-            f"tools={self._total_tools_count}, extended_thinking={enable_extended_thinking}"
+            f"tools={self._total_tools_count}, extended_thinking={enable_extended_thinking}, "
+            f"adaptive_thinking={self.use_adaptive_thinking}"
         )
 
-    def _should_use_extended_thinking(
-        self,
-        query: str,
-        tool_count: int,
-    ) -> bool:
-        """
-        Detect complex queries that benefit from extended thinking.
+    def _get_thinking_effort(self, query: str, tool_count: int) -> Optional[str]:
+        """Determine adaptive thinking effort level.
 
-        Extended thinking improves accuracy for:
-        - Complex analytical questions
-        - Multi-step troubleshooting
-        - Comparisons and correlations
-        - High tool count scenarios (harder decision-making)
-
-        Per Anthropic research, extended thinking improves:
-        - Multi-step planning
-        - Instruction adherence
-        - Tool use reliability
+        Returns 'high', 'medium', or None (no thinking).
+        With adaptive thinking (type="adaptive"), Claude automatically uses
+        interleaved thinking — reasoning between every tool call.
 
         Args:
             query: The user's query
             tool_count: Number of tools being provided
 
         Returns:
-            True if extended thinking should be enabled
+            'high' for complex investigations, 'medium' for normal tool queries,
+            None for simple queries or non-Anthropic providers.
         """
         if not self.enable_extended_thinking:
-            return False
+            return None
 
         # Skip extended thinking for incident queries (cost optimization)
         if is_incident_query(query):
-            logger.debug("[UnifiedChat] Extended thinking: skipped for incident query")
-            return False
+            logger.debug("[UnifiedChat] Thinking: skipped for incident query")
+            return None
 
         # Only works with Anthropic models
         if self.provider != "anthropic":
-            return False
+            return None
 
         # Only for capable models (opus, sonnet)
         model_lower = self.model.lower()
         if not any(m in model_lower for m in ["opus", "sonnet"]):
-            return False
+            return None
 
         query_lower = query.lower()
 
-        # Check for complex query indicators
+        # High effort: complex investigations, troubleshooting, multi-platform
         for indicator in self.COMPLEX_QUERY_INDICATORS:
             if indicator in query_lower:
-                logger.debug(f"[UnifiedChat] Extended thinking: matched '{indicator}'")
-                return True
-
-        # Many tools = harder decision making = benefit from thinking
+                logger.debug(f"[UnifiedChat] Thinking effort=high: matched '{indicator}'")
+                return "high"
         if tool_count > 20:
-            logger.debug(f"[UnifiedChat] Extended thinking: high tool count ({tool_count})")
-            return True
+            logger.debug(f"[UnifiedChat] Thinking effort=high: high tool count ({tool_count})")
+            return "high"
 
         # Explicit requests for careful analysis
         explicit_requests = ["think carefully", "think through", "step by step", "detailed analysis"]
         if any(req in query_lower for req in explicit_requests):
-            logger.debug("[UnifiedChat] Extended thinking: explicit request")
-            return True
+            logger.debug("[UnifiedChat] Thinking effort=high: explicit request")
+            return "high"
 
-        return False
+        # Medium effort: normal queries with tools
+        if tool_count > 5:
+            logger.debug(f"[UnifiedChat] Thinking effort=medium: moderate tool count ({tool_count})")
+            return "medium"
+
+        return None  # Simple queries: no thinking needed
 
     def _init_client(self):
         """Initialize the appropriate provider client."""
         if self.provider == "anthropic":
-            self.client = anthropic.AsyncAnthropic(api_key=self.api_key)
+            import httpx
+            from src.config.settings import get_settings
+            from src.services.config_service import get_config_or_env
+            settings = get_settings()
+            # Check database first (admin UI saves here), then fall back to settings/env
+            db_verify = get_config_or_env("anthropic_verify_ssl", "ANTHROPIC_VERIFY_SSL")
+            if db_verify is not None:
+                verify_ssl = db_verify.lower() not in ("false", "0", "no", "disabled")
+            else:
+                verify_ssl = settings.anthropic_verify_ssl
+            logger.info(f"[Anthropic] SSL verification: {verify_ssl}")
+            # Use granular timeouts: connect=10s, read=300s (streaming can be slow),
+            # write=30s, pool=10s. This prevents "Connection error." from httpx
+            # when the default timeout is too aggressive for the connect phase.
+            timeout = httpx.Timeout(
+                connect=10.0,
+                read=300.0,
+                write=30.0,
+                pool=10.0,
+            )
+            # Use instrumented transport for network timing capture
+            try:
+                from src.services.instrumented_httpx import InstrumentedAsyncTransport
+                self._http_transport = InstrumentedAsyncTransport(verify=verify_ssl)
+                async_http_client = httpx.AsyncClient(transport=self._http_transport, timeout=timeout)
+            except Exception:
+                self._http_transport = None
+                async_http_client = httpx.AsyncClient(verify=verify_ssl, timeout=timeout)
+            self.client = anthropic.AsyncAnthropic(api_key=self.api_key, http_client=async_http_client)
         elif self.provider == "openai":
             self.client = openai.AsyncOpenAI(api_key=self.api_key)
         elif self.provider == "google":
@@ -843,15 +1677,10 @@ class UnifiedChatService:
             )
 
         # Select relevant tools dynamically (15-25 tools instead of 1000+)
-        org_context = {
-            "org_id": org_id,
-            "org_name": org_name,
-            "edit_mode": edit_mode,
-        }
-
         # Build credentials dict from pool for platform filtering
         # This ensures tool_selector knows which platforms have valid credentials
         tool_credentials = {}
+        available_platforms = []
         if credential_pool:
             available_platforms = credential_pool.get_available_platforms()
             # Map platform availability to credential keys expected by tool_selector
@@ -865,6 +1694,14 @@ class UnifiedChatService:
                 if platform in platform_to_key:
                     tool_credentials[platform_to_key[platform]] = "configured"
             logger.info(f"[UnifiedChat] Platforms with credentials: {available_platforms}")
+
+        org_context = {
+            "org_id": org_id,
+            "org_name": org_name,
+            "edit_mode": edit_mode,
+            "platforms": available_platforms,
+            "has_catalyst": "catalyst" in available_platforms,
+        }
 
         selected_tools = await select_tools_for_query(
             query=message,
@@ -897,19 +1734,27 @@ class UnifiedChatService:
             f"(from {self._total_tools_count} total)"
         )
 
-        # Detect if extended thinking should be used (for accuracy on complex queries)
-        use_extended_thinking = self._should_use_extended_thinking(
+        # Detect thinking effort level (adaptive thinking with interleaved reasoning)
+        thinking_effort = self._get_thinking_effort(
             query=message,
             tool_count=len(tools),
         )
+        use_extended_thinking = thinking_effort is not None
         if use_extended_thinking:
             logger.info(
-                f"[UnifiedChat] Extended thinking enabled for complex query "
-                f"(tools={len(tools)}, budget={self.thinking_budget_tokens})"
+                f"[UnifiedChat] Thinking enabled: effort={thinking_effort}, "
+                f"adaptive={self.use_adaptive_thinking}, tools={len(tools)}"
             )
 
         # Build messages
         messages = self._build_messages(conversation_history, message)
+
+        # Truncate messages to fit within token limit (prevents "prompt is too long" errors)
+        messages = self._truncate_messages_by_tokens(
+            messages,
+            system_prompt,
+            max_tokens=180000  # Leave 20K buffer for response + tools
+        )
 
         # Track metrics
         total_input_tokens = 0
@@ -920,12 +1765,14 @@ class UnifiedChatService:
 
         # Tool execution loop
         for iteration in range(max_tool_iterations):
-            # Call provider (with extended thinking on first iteration only)
+            # Call provider — adaptive thinking persists across all iterations
+            # (interleaved thinking lets Claude reason between tool calls)
             response = await self._call_provider(
                 system_prompt=system_prompt,
                 messages=messages,
                 tools=tools,
-                use_extended_thinking=use_extended_thinking and iteration == 0,
+                use_extended_thinking=use_extended_thinking,
+                thinking_effort=thinking_effort,
             )
 
             # Update token counts
@@ -1049,9 +1896,14 @@ class UnifiedChatService:
 
         # Collect tool data for canvas cards (similar to streaming flow)
         collected_tool_data = []
-        for tc in tool_calls_made:
+        logger.info(f"[Chat][DEBUG] tool_calls_made count: {len(tool_calls_made)}")
+        for i, tc in enumerate(tool_calls_made):
             result = tc.get("result", {})
-            if result.get("success") and result.get("data"):
+            tool_name = tc.get("tool", "unknown")
+            has_success = result.get("success")
+            has_data = result.get("data") is not None
+            logger.info(f"[Chat][DEBUG] tool_calls_made[{i}]: tool={tool_name}, success={has_success}, has_data={has_data}")
+            if has_success and has_data:
                 result_data = result["data"]
                 tool_name = tc.get("tool", "")
                 tool_input = tc.get("input", {})
@@ -1093,6 +1945,10 @@ class UnifiedChatService:
                 collected_tool_data.append(tool_data_item)
                 logger.info(f"[Chat] Collected {tool_name} data for cards (network_id={network_id})")
 
+        logger.info(f"[Chat][DEBUG] Final collected_tool_data count: {len(collected_tool_data)}")
+        if collected_tool_data:
+            logger.info(f"[Chat][DEBUG] collected_tool_data tools: {[td['tool'] for td in collected_tool_data]}")
+
         return ChatResult(
             response=final_response,
             tool_calls=tool_calls_made,
@@ -1118,10 +1974,12 @@ class UnifiedChatService:
         org_id: str = None,
         org_name: str = None,
         network_id: str = None,
+        network_name: str = None,
         edit_mode: bool = False,
         credential_pool: Optional[CredentialPool] = None,
         verbosity: str = "standard",  # "brief", "standard", "detailed"
         card_context: Optional[Dict[str, str]] = None,  # Context from "Ask about this" card feature
+        user_id: Optional[int] = None,  # User ID for trace tracking
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Stream a chat response with tool support.
 
@@ -1138,7 +1996,8 @@ class UnifiedChatService:
             session_id: Session ID
             org_id: Organization ID
             org_name: Organization name
-            network_id: User's currently selected network (for card context)
+            network_id: User's currently selected network ID (for card context)
+            network_name: User's selected network name (for entity resolution)
             edit_mode: Whether write operations allowed
             credential_pool: Dynamic credential pool for multi-platform resolution
             card_context: Context from "Ask about this" card feature (networkId, deviceSerial, orgId)
@@ -1165,6 +2024,30 @@ class UnifiedChatService:
                     logger.info(f"[UnifiedChatService] Bootstrap complete: {list(bootstrap_data.keys())}")
             except Exception as e:
                 logger.warning(f"[UnifiedChatService] Bootstrap failed (continuing): {e}")
+
+        # Set current focus if user has selected a network
+        # This enables enrich_tool_input to auto-fill network_id for tool calls
+        # and adds the network to discovered_entities for name resolution
+        if network_id:
+            await context_store.set_current_focus(
+                session_id=session_id,
+                entity_type=EntityType.NETWORK,
+                entity_id=network_id,
+                display_name=network_name or network_id,  # Use name for entity resolution
+            )
+            logger.info(f"[UnifiedChatService] Set network focus: {network_name or network_id} ({network_id})")
+
+            # Clear cardable cache if network focus changed (prevents cross-incident pollution)
+            # This is important when analyzing different incidents in succession
+            try:
+                session_ctx = await context_store.get_or_create(session_id)
+                last_network = session_ctx._last_incident_network_id
+                if last_network and last_network != network_id:
+                    session_ctx.clear_cardable_cache()
+                    logger.info(f"[StreamChat] Network focus changed from {last_network} to {network_id}, cleared cardable cache")
+                session_ctx._last_incident_network_id = network_id
+            except Exception as cache_err:
+                logger.warning(f"[StreamChat] Could not clear cache on network change: {cache_err}")
 
         # Get context summary (now includes bootstrap data)
         context_summary = await context_store.get_context_for_prompt(session_id)
@@ -1342,18 +2225,48 @@ class UnifiedChatService:
         # See: Issue 6 - Unified Card Suggestion Method
         if self.provider == "anthropic":
             async for event in self._stream_anthropic(
-                system_prompt, messages, tools, credentials, org_id, session_id, credential_pool
+                system_prompt, messages, tools, credentials, org_id, session_id, credential_pool,
+                user_id=user_id, query=message,
             ):
                 yield event
 
         elif self.provider == "openai":
             async for event in self._stream_openai(
-                system_prompt, messages, tools, credentials, org_id, session_id, credential_pool
+                system_prompt, messages, tools, credentials, org_id, session_id, credential_pool,
+                user_id=user_id, query=message,
             ):
                 yield event
 
         else:
             # Non-streaming fallback (Cisco Circuit, Google, etc.)
+            # Start trace for this query
+            trace_id = None
+            root_span_id = None
+            try:
+                from src.services.ai_trace_collector import get_trace_collector, SYSTEM_SESSION_PREFIXES
+                collector = get_trace_collector()
+                trace_session_id = None
+                _is_system_query = isinstance(session_id, str) and session_id.startswith(SYSTEM_SESSION_PREFIXES)
+                try:
+                    trace_session_id = int(session_id) if session_id and session_id != "default" else None
+                except (ValueError, TypeError):
+                    pass
+                trace_id, root_span_id = await collector.start_trace(
+                    session_id=trace_session_id, user_id=user_id, query=message or "",
+                    provider=self.provider, model=self.model,
+                    is_system=_is_system_query,
+                )
+                # Add LLM call span
+                await collector.add_span(
+                    trace_id=trace_id, span_type="llm_call",
+                    parent_span_id=root_span_id, span_name=self.model,
+                    model=self.model, provider=self.provider,
+                )
+            except Exception as trace_err:
+                logger.warning(f"[Trace] Failed to start {self.provider} trace: {trace_err}")
+                trace_id = None
+                root_span_id = None
+
             result = await self.chat(
                 message=message,
                 conversation_history=conversation_history,
@@ -1371,10 +2284,26 @@ class UnifiedChatService:
             tools_used = []
             platforms_used = set()
 
+            # Check if any canvas tools were called - if so, skip auto-card generation
+            canvas_tools_in_response = any(
+                (tc.get("tool") or tc.get("name", "")).startswith("canvas_")
+                for tc in result.tool_calls
+            )
+            if canvas_tools_in_response:
+                logger.info(f"[CardGen] NonStreaming: Canvas tool detected - disabling auto-card generation")
+
             for tool_call in result.tool_calls:
-                tool_name = tool_call.get("name", "unknown")
+                # Note: tool_calls_made uses "tool" key, not "name"
+                tool_name = tool_call.get("tool") or tool_call.get("name", "unknown")
                 tool_id = tool_call.get("id", f"call_{tool_name}")
                 tool_result = tool_call.get("result", {})
+
+                # Debug logging for canvas tool flow (critical for troubleshooting Cisco Circuit)
+                if tool_name.startswith("canvas_"):
+                    result_keys = list(tool_result.keys()) if isinstance(tool_result, dict) else "N/A"
+                    has_card_suggestion = "card_suggestion" in tool_result if isinstance(tool_result, dict) else False
+                    has_card_suggestions = "card_suggestions" in tool_result if isinstance(tool_result, dict) else False
+                    logger.info(f"[Canvas][NonStreaming] Tool: {tool_name}, result_keys: {result_keys}, has_card_suggestion: {has_card_suggestion}, has_card_suggestions: {has_card_suggestions}")
 
                 # Emit tool_use_start event
                 yield {
@@ -1403,6 +2332,41 @@ class UnifiedChatService:
                     "result": tool_result,
                 }
 
+                # Auto-generate card suggestion for non-canvas tools
+                # SKIP if canvas tools are in this response (they handle their own cards)
+                if not tool_name.startswith("canvas_") and not canvas_tools_in_response and isinstance(tool_result, dict):
+                    has_success = tool_result.get("success", True)
+                    has_data = tool_result.get("data") is not None
+                    if has_success and has_data:
+                        # Extract network_id and org_id from tool input or result
+                        tool_input = tool_call.get("input", {})
+                        network_id = tool_input.get("network_id") or tool_input.get("networkId")
+                        org_id_val = tool_input.get("organization_id") or tool_input.get("organizationId")
+                        if not network_id and isinstance(tool_result.get("data"), dict):
+                            potential_id = tool_result["data"].get("networkId") or tool_result["data"].get("id")
+                            if potential_id and isinstance(potential_id, str) and (potential_id.startswith("L_") or potential_id.startswith("N_")):
+                                network_id = potential_id
+                        card_suggestion = _generate_card_suggestion(
+                            tool_name=tool_name,
+                            tool_result=tool_result,
+                            tool_call_id=tool_id,
+                            network_id=network_id,
+                            org_id=org_id_val,
+                        )
+                        if card_suggestion:
+                            logger.info(f"[CardGen] NonStreaming: Emitting auto-generated card: type={card_suggestion.get('type')}")
+                            yield {
+                                "type": "card_suggestion",
+                                "card": card_suggestion,
+                            }
+                # Handle canvas_ tools' card suggestions
+                elif tool_name.startswith("canvas_") and isinstance(tool_result, dict) and tool_result.get("success"):
+                    card_suggestion = tool_result.get("card_suggestion")
+                    if card_suggestion:
+                        yield {"type": "card_suggestion", "card": card_suggestion}
+                    for card in tool_result.get("card_suggestions", []):
+                        yield {"type": "card_suggestion", "card": card}
+
             if tools_used:
                 logger.info(f"[NonStreaming] Emitted events for {len(tools_used)} tools, platforms: {platforms_used}")
 
@@ -1419,7 +2383,22 @@ class UnifiedChatService:
             if result.tool_data:
                 done_event["tool_data"] = result.tool_data
                 logger.info(f"[NonStreaming] Including {len(result.tool_data)} tool_data items in done event")
+            if trace_id:
+                done_event["trace_id"] = str(trace_id)
             yield done_event
+
+            # End trace
+            if trace_id and root_span_id:
+                try:
+                    collector = get_trace_collector()
+                    await collector.end_trace(
+                        trace_id, root_span_id, status="success",
+                        total_input_tokens=result.token_usage.get("input_tokens", 0),
+                        total_output_tokens=result.token_usage.get("output_tokens", 0),
+                        total_cost=result.cost,
+                    )
+                except Exception as trace_err:
+                    logger.warning(f"[Trace] Failed to end {self.provider} trace: {trace_err}")
 
     def _build_system_prompt(
         self,
@@ -1482,6 +2461,14 @@ The user clicked "Ask about this" on a canvas card. Use these identifiers for yo
 
         return f"""You are an expert network operations assistant with access to {self._total_tools_count} tools for managing Cisco network infrastructure.
 
+**CRITICAL - INCIDENT ANALYSIS SCOPE RULE**:
+When the user message contains "incident", "Incident #", or references a specific network problem:
+- ONLY query the network mentioned in the incident - NO OTHER networks
+- Do NOT query "all devices", "all networks", or org-level data
+- If the incident says "GRIEVES network", query ONLY the GRIEVES network
+- IGNORE other networks in the Available Platform Data - they are NOT relevant to this incident
+- This is MANDATORY - querying unrelated networks wastes resources and confuses the user
+
 CURRENT CONTEXT:
 - Organization: {org_name} (ID: {org_id}){network_context}
 - System mode: {mode_text}
@@ -1498,7 +2485,7 @@ AVAILABLE PLATFORMS:
    - DO NOT call `meraki_list_organizations` or `meraki_list_organization_networks` - this data is already provided
    - DO NOT call `catalyst_get_sites` - sites are already listed above
    - Use the IDs from the platform data directly in your tool calls
-2. When the user mentions a network by name (e.g., "Riebel Home"), find it in the AVAILABLE PLATFORM DATA section above
+2. When the user mentions a network by name (e.g., "Demo Home"), find it in the AVAILABLE PLATFORM DATA section above
 3. Only call list/discovery tools if the specific entity isn't in the pre-fetched data
 4. ALWAYS use tools to get data - don't guess or make up information
 5. When the user says "it", "that", "the device", etc. - refer to the SESSION CONTEXT above for entity IDs
@@ -1508,7 +2495,7 @@ AVAILABLE PLATFORMS:
    - Match by model name or device name from the results
    - Then use the serial number for device-specific queries
    - NEVER ask the user for a serial number you can look up yourself
-8. **TOOL SCOPE PREFERENCE**: When user specifies a network name (e.g., "devices on Riebel Home"):
+8. **TOOL SCOPE PREFERENCE**: When user specifies a network name (e.g., "devices on Demo Home"):
    - PREFER network-scoped tools like `meraki_list_network_devices` over org-scoped alternatives
    - Network-scoped tools are more efficient and return exactly what the user asked for
    - Only use org-scoped tools (meraki_organizations_*) when querying across ALL networks or orgs
@@ -1516,9 +2503,10 @@ AVAILABLE PLATFORMS:
    - SUMMARIZE key findings in natural language (counts, highlights, notable issues)
    - DO NOT dump raw JSON, full data arrays, or verbose tool output in your response
    - The raw data is automatically available via "Add to Canvas" buttons - users click these for details
-   - Example GOOD: "Found 13 devices on Riebel Home: 1 MX security appliance, 4 access points, 2 switches, and 6 sensors. Note: MS-220 switch has outdated firmware."
+   - Example GOOD: "Found 13 devices on Demo Home: 1 MX security appliance, 4 access points, 2 switches, and 6 sensors. Note: MS-220 switch has outdated firmware."
    - Example BAD: Pasting full device list with all properties in the response
    - Keep responses concise (2-5 sentences) with actionable insights, not data dumps
+10. **THINK TOOL**: For investigation queries, use `think` between tool calls to analyze results and plan next steps. It is free (no API cost). Use it after receiving data-gathering tool results.
 
 **DATA INTEGRITY** (Critical):
 - NEVER guess network IDs, device serials, or API values - use tool results only
@@ -1587,30 +2575,44 @@ When user asks about logs for a specific device/network by NAME:
 1. First call meraki_devices_list or meraki_networks_list to get serial/networkId
 2. Then use in Splunk: `deviceSerial=<SERIAL>` or `networkId=<NETWORK_ID>`
 
-Example: "Show logs for Garage MX" → Get serial Q2KY-EVGL-CL3C → Run `deviceSerial=Q2KY-EVGL-CL3C | stats count by type`
+Example: "Show logs for Garage MX" → Get serial XXXX-XXXX-XXXX → Run `deviceSerial=XXXX-XXXX-XXXX | stats count by type`
 
-**THOUSANDEYES API GUIDELINES** (CRITICAL - Follow strictly):
-When the user mentions ANY of these, you MUST use ThousandEyes API tools directly:
-- "ThousandEyes", "TE", "synthetic tests", "path visualization", "agents", "probes"
-- Latency, packet loss, network path performance from external monitoring
-- Synthetic monitoring or internet connectivity tests
-- "Check ThousandEyes", "TE alerts", "TE tests"
+<investigation_protocol>
+INVESTIGATION PROTOCOL — For ANY troubleshooting, performance, or connectivity query:
 
-ThousandEyes tools to use:
-- `thousandeyes_list_tests` - List all synthetic tests
-- `thousandeyes_get_test_results` - Get results for a specific test
-- `thousandeyes_list_alerts` - Get active ThousandEyes alerts
-- `thousandeyes_list_agents` - List monitoring agents
-- `thousandeyes_get_path_visualization` - Get network path data
+Phase 1 — THINK: Use the `think` tool to scope the problem, form 2-3 hypotheses, and plan which platforms to query.
 
-**DO NOT** search Splunk for ThousandEyes data unless the user explicitly asks for:
-- "ThousandEyes logs IN Splunk"
-- "ThousandEyes events FROM Splunk"
-- "Splunk for ThousandEyes data"
+Phase 2 — INTERNAL HEALTH: Check Meraki/Catalyst for device status, uplink health, wireless stats, alerts, recent config changes.
 
-If user says "check ThousandEyes for latency" → Use `thousandeyes_list_tests` + `thousandeyes_get_test_results`
-If user says "ThousandEyes alerts" → Use `thousandeyes_list_alerts`
-If user says "latency issues" (general) → Use ThousandEyes tools for synthetic test data
+Phase 3 — EXTERNAL MONITORING: Check ThousandEyes (do NOT skip even if user only mentioned Meraki):
+- `thousandeyes_list_alerts` — Active outages or performance alerts
+- `thousandeyes_list_tests` — Find tests monitoring the affected service/device/path
+- `thousandeyes_get_test_results` — Latency, loss, jitter, HTTP response times
+- `thousandeyes_get_path_visualization` — Trace network path to find where failures occur
+- If no matching test exists, report this as a monitoring gap
+
+Phase 4 — LOG CORRELATION: Check Splunk for related events around the incident timeframe. Correlate timestamps with findings from Phases 2-3.
+
+Phase 5 — THINK: Use `think` to cross-reference timestamps across platforms, evaluate hypotheses against evidence from 2+ sources, and identify root cause.
+
+Phase 6 — VISUALIZE: Add a dashboard using canvas_add_dashboard matching the query type:
+- Connectivity/path questions → scenario='connectivity' (TE path + Meraki uplinks + latency)
+- Device issues → scenario='incident'
+- Performance issues → scenario='performance'
+- If Splunk revealed something significant, add an ai-finding card with the correlation
+
+Phase 7 — RESPOND: Deliver findings citing evidence from multiple platforms, specific metrics/timestamps, and concrete actions.
+</investigation_protocol>
+
+<thoroughness_requirements>
+- Do NOT conclude after querying only one platform. Check at least 2 data sources before stating a root cause.
+- If your first tool call reveals an anomaly, investigate further — do not immediately answer.
+- After each round of tool results, use `think` to evaluate whether you have enough evidence.
+- Report monitoring gaps: if no TE test covers the affected service, say so.
+- Look for temporal correlations: a Meraki device-offline at 14:32 + a TE path alert at 14:31 + a Splunk VPN-down at 14:30 tells a story no single source reveals.
+</thoroughness_requirements>
+
+**DO NOT** search Splunk for ThousandEyes data unless the user explicitly asks for "ThousandEyes logs IN Splunk".
 
 NEVER answer data queries from conversation history alone - ALWAYS call tools.
 
@@ -1633,7 +2635,9 @@ Format by Query Type:
 - CONFIGURATION queries (create VLAN, update firewall): Confirm action, show proposed changes, list prerequisites, note risks
 
 **ANALYSIS RESPONSE FORMAT** (MANDATORY for troubleshooting/investigation queries):
-Keep analysis responses SHORT and ACTIONABLE. Maximum 150 words. Structure:
+Keep analysis responses SHORT and ACTIONABLE. Structure:
+- Single-platform queries: Maximum 150 words
+- Multi-platform investigations (2+ data sources): Maximum 300 words for proper cross-platform correlation
 
 **Summary**: One sentence stating the core issue + key metric.
 
@@ -1657,7 +2661,7 @@ DO NOT:
 - List every query you ran
 - Repeat raw data from tool results
 - Add filler phrases ("Let me check...", "I found that...")
-- Exceed 150 words
+- Exceed the word limit above
 
 Verbosity Level: {verbosity.upper()}
 {self._get_verbosity_instructions(verbosity)}
@@ -1714,30 +2718,53 @@ Avoid:
 - When something doesn't work, quietly try another approach
 - Only show the successful result, not the journey to get there
 
-**CANVAS VISUALIZATION GUIDELINES** (CRITICAL - Follow strictly):
-When to use the `canvas_add_card` tool:
-- User asks for a dashboard, visualization, or monitoring view
-- You have metrics/findings worth visualizing (use ai-metric, ai-stats-grid, ai-gauge, ai-breakdown)
-- Answering knowledge-base questions with source documents (use knowledge-sources)
-- Comparing products or features (use datasheet-comparison)
-- Highlighting issues or recommendations (use ai-finding)
+**CANVAS VISUALIZATION GUIDELINES** (Follow strictly):
 
-Card usage rules:
-1. ONLY ADD ONE CARD per topic - check what's already on the canvas first
-2. Don't suggest the same card type for similar queries - the user already has it
-3. After adding a card, briefly confirm: "I've added a [type] card to your canvas."
-4. For live data monitoring (network-health, device-table, topology), let the card fetch data itself
-5. For AI-generated insights, use card_data to pass the specific values you found
+TOOL SELECTION:
+- `canvas_add_dashboard`: Use for INCIDENT ANALYSIS and MULTI-CARD scenarios (2-4 cards at once)
+- `canvas_add_card`: Use for adding a SINGLE card
 
-Response format when adding cards:
-- DO NOT include internal JSON blocks (```json:comparison or ```json:product)
-- Keep the text response concise - the card provides the detailed visualization
-- Example: "Based on your question, here's what I found: [brief summary]. I've added a Network Health card to your canvas for real-time monitoring."
+WHEN TO ADD CARDS vs TEXT:
+- ADD cards when: user asks to "show/display/monitor" something, incident analysis, or data has tables/lists/metrics worth visualizing
+- TEXT ONLY when: simple factual answers, confirmations, brief status updates, or the answer is a single value
+- NEVER add a card if the same card type is already on the canvas
 
-Canvas awareness:
-- The session context includes what cards are currently on the user's canvas
-- Reference visible cards when relevant: "Looking at your Network Health card..."
-- Don't add cards that duplicate existing ones on the canvas
+DASHBOARD SCENARIOS - Use canvas_add_dashboard based on query type:
+- Device issues (offline/dormant) → scenario='incident'
+- Performance issues (latency/loss) → scenario='performance'
+- Wireless issues (RF/clients) → scenario='wireless'
+- Security events → scenario='security'
+- General/unknown → scenario='overview'
+- CONNECTIVITY QUERIES (branch-to-hub, site-to-site, path analysis) → scenario='connectivity'
+  This adds TE path visualization + TE test results + Meraki uplinks + latency/loss
+
+CROSS-PLATFORM INVESTIGATION (CRITICAL for connectivity/performance queries):
+When user asks about connectivity between sites, branch-to-hub paths, or end-to-end performance:
+1. Use canvas_add_dashboard(scenario='connectivity') to show TE path + Meraki uplinks
+2. Query ThousandEyes for path visualization and test results between the sites
+3. Query Meraki for uplink status and latency/loss at both endpoints
+4. If TE or Meraki reveal issues (high latency, packet loss, alerts), PROACTIVELY check Splunk for correlated log events around that timeframe
+5. Add an ai-finding card summarizing cross-platform correlation if you discover something significant
+
+CRITICAL - Network Focus for Incidents:
+- ONLY query the specific network mentioned in the incident, not the entire org
+- Pass network_id to canvas_add_dashboard so cards are scoped correctly
+
+AUTO-GENERATED CARDS:
+- When you call data-fetching tools (like meraki_list_devices, meraki_get_network_clients), the system automatically generates matching cards from the tool results
+- You do NOT need to manually add cards for data you already fetched with tools
+- Only use canvas_add_card when you want to add a MONITORING card (live data refresh) or an AI contextual card with custom data
+
+Card rules:
+1. Maximum 1 card per follow-up query via canvas_add_card
+2. After adding cards, briefly confirm: "I've added [X] to your canvas"
+3. Always include network_id when available
+4. For live monitoring cards, don't pre-populate data - let the card fetch its own
+
+Response format:
+- Keep text concise when cards provide the detail
+- DO NOT include raw JSON blocks in your text response
+- Example: "Here's a summary of the network health. I've added a monitoring card to your canvas."
 """
 
     def _get_verbosity_instructions(self, verbosity: str) -> str:
@@ -1758,6 +2785,54 @@ Canvas awareness:
 - Suggest related investigations""",
         }
         return instructions.get(verbosity, instructions["standard"])
+
+    def _build_synthesis_instruction(self, tools_executed: list, iteration: int, is_final: bool) -> Optional[str]:
+        """Build a synthesis instruction based on tool execution state.
+
+        Returns a prompt injection to guide the model toward synthesizing
+        cross-platform findings instead of continuing to call tools.
+        """
+        total = len(tools_executed)
+        if total < 3:
+            return None
+
+        # Identify platforms from tool names
+        platforms = set()
+        for name in tools_executed:
+            for prefix, plat in [
+                ("meraki_", "Meraki"),
+                ("catalyst_", "Catalyst"),
+                ("thousandeyes_", "ThousandEyes"),
+                ("splunk_", "Splunk"),
+            ]:
+                if name.startswith(prefix):
+                    platforms.add(plat)
+                    break
+
+        platform_str = ", ".join(sorted(platforms)) if platforms else "multiple sources"
+
+        if is_final:
+            return (
+                f"[SYNTHESIS REQUIRED] You executed {total} tools across {platform_str}. "
+                "Respond NOW with: (1) Summary with key metric, (2) Root cause citing "
+                "cross-platform evidence, (3) 2-3 actions. Do NOT call more tools."
+            )
+
+        if len(platforms) >= 2:
+            return (
+                f"[CROSS-PLATFORM SYNTHESIS] Data gathered from {platform_str} ({total} tools). "
+                "Correlate findings: identify which data corroborates across platforms, "
+                "distinguish root cause from symptoms, note temporal correlations. "
+                "If enough evidence exists, respond with structured analysis."
+            )
+
+        if total >= 5:
+            return (
+                f"[SYNTHESIS GUIDANCE] {total} tools executed. Synthesize into: "
+                "Summary (issue + key metric), Cause (with evidence), Action (1-3 steps)."
+            )
+
+        return None
 
     def _make_json_safe(self, obj: Any) -> Any:
         """Recursively convert non-JSON-serializable objects to strings.
@@ -1814,6 +2889,7 @@ Canvas awareness:
         messages: List[Dict[str, Any]],
         tools: List[Dict[str, Any]],
         use_extended_thinking: bool = False,
+        thinking_effort: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Call the AI provider and return response.
 
@@ -1822,13 +2898,14 @@ Canvas awareness:
             messages: Conversation messages
             tools: Tools in provider-specific format
             use_extended_thinking: Enable extended thinking (Anthropic only)
+            thinking_effort: Effort level for adaptive thinking ('high', 'medium', or None)
 
         Returns:
             Response dict with content, tool_calls, and token usage
         """
         if self.provider == "anthropic":
             return await self._call_anthropic(
-                system_prompt, messages, tools, use_extended_thinking
+                system_prompt, messages, tools, use_extended_thinking, thinking_effort
             )
         elif self.provider == "openai":
             return await self._call_openai(system_prompt, messages, tools)
@@ -1845,18 +2922,21 @@ Canvas awareness:
         messages: List[Dict[str, Any]],
         tools: List[Dict[str, Any]],
         use_extended_thinking: bool = False,
+        thinking_effort: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Call Anthropic Claude API with optional extended thinking.
+        """Call Anthropic Claude API with optional adaptive/extended thinking.
 
-        Extended thinking enables Claude to reason more thoroughly before
-        responding, improving accuracy for complex queries at the cost
-        of ~1-2 seconds additional latency.
+        Supports two thinking modes:
+        - Adaptive (default): type="adaptive" + effort parameter. Enables interleaved
+          thinking — Claude reasons between tool calls automatically.
+        - Legacy (fallback): type="enabled" + budget_tokens. Set ENABLE_ADAPTIVE_THINKING=false.
 
         Args:
             system_prompt: System instructions
             messages: Conversation messages
             tools: Tools in Anthropic format
-            use_extended_thinking: Enable extended thinking mode
+            use_extended_thinking: Enable thinking mode
+            thinking_effort: Effort level for adaptive thinking ('high', 'medium', or None)
 
         Returns:
             Response dict with content, tool_calls, and token usage
@@ -1879,17 +2959,28 @@ Canvas awareness:
                 "tools": tools if tools else None,
             }
 
-            # Extended thinking requires temperature=1 per Anthropic docs
-            # and adds thinking block before response
+            # Thinking configuration: adaptive (interleaved) or legacy (budget-based)
             if use_extended_thinking:
-                params["temperature"] = 1  # Required for extended thinking
-                params["thinking"] = {
-                    "type": "enabled",
-                    "budget_tokens": self.thinking_budget_tokens,
-                }
-                logger.info(
-                    f"[UnifiedChat] Extended thinking enabled with budget={self.thinking_budget_tokens}"
-                )
+                params["temperature"] = 1  # Required for all thinking modes
+                if self.use_adaptive_thinking:
+                    # Adaptive thinking (Feb 2026): automatic interleaved reasoning
+                    # between tool calls. Effort controls depth: high for investigations,
+                    # medium for normal queries.
+                    params["thinking"] = {"type": "adaptive"}
+                    if thinking_effort:
+                        params["output_config"] = {"effort": thinking_effort}
+                    logger.info(
+                        f"[UnifiedChat] Adaptive thinking: effort={thinking_effort}"
+                    )
+                else:
+                    # Legacy fallback (ENABLE_ADAPTIVE_THINKING=false)
+                    params["thinking"] = {
+                        "type": "enabled",
+                        "budget_tokens": self.thinking_budget_tokens,
+                    }
+                    logger.info(
+                        f"[UnifiedChat] Legacy thinking: budget={self.thinking_budget_tokens}"
+                    )
             else:
                 params["temperature"] = self.temperature
 
@@ -2159,17 +3250,65 @@ Action Input: {{"param1": "value1", "param2": "value2"}}
 ```
 
 After I provide the Observation with the tool result, continue reasoning.
-When you have gathered all the information needed, provide your final response:
+
+## Visualization Cards (Auto-Generated)
+
+Visualization cards are AUTOMATICALLY created when tool calls return data. You do NOT need to manually call canvas_add_dashboard or canvas_add_card in most cases — the system handles this for you.
+
+Only use `canvas_add_dashboard` if the user explicitly asks for a dashboard layout, or if you want a specific multi-card arrangement for a cross-platform investigation.
+
+When you have gathered all the information, provide your final response:
 ```
-Thought: I now have all the information needed to answer.
-Final Answer: [Your complete response to the user, formatted nicely with the data]
+Thought: I now have all the information needed.
+Final Answer: [Your detailed analysis response - see format below]
 ```
+
+## Final Answer Format Requirements
+
+Your Final Answer MUST include detailed analysis, NOT just descriptions of what cards were added:
+
+1. **Summary**: Start with a brief summary including key metrics (e.g., "84% connection success rate with 48 failures")
+
+2. **Key Findings**: List specific insights from the data with actual numbers:
+   - Connection/performance statistics
+   - Problem areas or devices identified
+   - Comparison to normal/expected values
+
+3. **Root Cause Analysis**: If there are issues, explain likely causes based on the data patterns
+
+4. **Recommended Actions**: Provide actionable next steps the user can take
+
+5. **Cards Added**: Briefly mention what monitoring cards were added (1-2 sentences max)
+
+**BAD Example (DO NOT DO THIS):**
+"I've added WiFi monitoring cards to your canvas. These provide an overview of wireless performance."
+
+**GOOD Example:**
+"## WiFi Analysis - Network Name
+
+**Summary**: 84% connection success rate (243/291 attempts) with 48 failures in 24 hours.
+
+**Key Findings**:
+- Association failures dominate (96% of failures)
+- Problem client: a4:77:33:7e:b5:ac with 22 failures
+- Most affected AP: Q2KD-J5A6-65XE (38 of 48 failures)
+
+**Root Cause**: RF interference or weak signal on specific AP.
+
+**Recommended Actions**:
+1. Check signal strength on AP Q2KD-J5A6-65XE
+2. Review band steering settings
+
+I've added 3 monitoring cards for real-time visibility."
 
 **RULES:**
 - ALWAYS use tools when asked about networks, devices, clients, status, or any live data
 - NEVER make up data - use tools to fetch real information
 - Output valid JSON for Action Input (use double quotes for strings)
 - Only call ONE tool at a time, wait for the Observation before continuing
+- ALWAYS analyze the data thoroughly in your Final Answer - don't just describe cards
+- The workflow is: 1) Fetch data with tools → 2) Analyze results → 3) Final Answer with analysis
+- Visualization cards are auto-generated from tool results — no need to manually add them
 """
 
             # Create Cisco service instance
@@ -2197,7 +3336,7 @@ Final Answer: [Your complete response to the user, formatted nicely with the dat
                     api_messages.append({"role": role, "content": "".join(text_parts)})
 
             # Call Cisco API (OpenAI-compatible format)
-            async with httpx.AsyncClient(timeout=60.0, verify=False) as client:
+            async with httpx.AsyncClient(timeout=60.0, verify=get_settings().cisco_circuit_verify_ssl) as client:
                 payload = {
                     "messages": api_messages,
                     "user": json.dumps({"appkey": app_key}),  # Required for Cisco Circuit
@@ -2226,6 +3365,17 @@ Final Answer: [Your complete response to the user, formatted nicely with the dat
             content = assistant_content
 
             if react_result.get("has_action") and react_result.get("action"):
+                # Check for parse errors and log them
+                if react_result.get("parse_error"):
+                    logger.warning(f"[Cisco ReAct] JSON parse error for {react_result['action']}: {react_result['parse_error']}")
+                    # If we recovered some parameters via fallback, continue
+                    # Otherwise log what we're working with
+                    action_input = react_result.get("action_input", {})
+                    if not action_input:
+                        logger.warning(f"[Cisco ReAct] No parameters recovered for {react_result['action']} - tool may fail")
+                    else:
+                        logger.info(f"[Cisco ReAct] Recovered parameters via fallback: {list(action_input.keys())}")
+
                 # Model wants to use a tool
                 tool_calls.append({
                     "id": f"react_{react_result['action']}",
@@ -2299,7 +3449,7 @@ Final Answer: [Your complete response to the user, formatted nicely with the dat
                 user_content.append({
                     "type": "tool_result",
                     "tool_use_id": result["id"],
-                    "content": json.dumps(result["result"]),
+                    "content": truncate_tool_result(result["result"]),
                 })
 
             messages.append({
@@ -2330,7 +3480,7 @@ Final Answer: [Your complete response to the user, formatted nicely with the dat
                 messages.append({
                     "role": "tool",
                     "tool_call_id": result["id"],
-                    "content": json.dumps(result["result"]),
+                    "content": truncate_tool_result(result["result"]),
                 })
 
         elif self.provider == "cisco":
@@ -2350,15 +3500,12 @@ Final Answer: [Your complete response to the user, formatted nicely with the dat
             # Add tool results as Observation in user message
             observation_parts = []
             for result in tool_results:
-                result_str = json.dumps(result["result"], indent=2)
-                # Truncate very large results to prevent token overflow
-                if len(result_str) > 8000:
-                    result_str = result_str[:8000] + "\n... [truncated]"
+                result_str = truncate_tool_result(result["result"])
                 observation_parts.append(f"Observation for {result['name']}:\n```json\n{result_str}\n```")
 
             messages.append({
                 "role": "user",
-                "content": "\n\n".join(observation_parts) + "\n\nNow continue with your reasoning. If you have all the information needed, provide your Final Answer.",
+                "content": "\n\n".join(observation_parts) + "\n\nNow continue with your reasoning. If you have all the information needed, provide your Final Answer with DETAILED ANALYSIS of the data - include specific numbers, identify issues/patterns, and give actionable recommendations. Do NOT just describe what cards were added.",
             })
 
         return messages
@@ -2490,16 +3637,19 @@ Final Answer: [Your complete response to the user, formatted nicely with the dat
         org_id: str = None,
         session_id: str = "default",
         credential_pool: Optional[CredentialPool] = None,
+        require_approval: bool = True,
+        user_id: str = "unknown",
     ) -> Dict[str, Any]:
         """Execute a tool and return the result.
 
         This method:
         1. Gets the tool from registry
-        2. Resolves credentials dynamically based on platform and context
-        3. Creates execution context with credentials
-        4. Enriches input with session context
-        5. Executes the tool handler
-        6. Returns the result
+        2. For write operations with require_approval=True, creates a pending action
+        3. Resolves credentials dynamically based on platform and context
+        4. Creates execution context with credentials
+        5. Enriches input with session context
+        6. Executes the tool handler
+        7. Returns the result
 
         Args:
             tool_name: Name of tool to execute
@@ -2508,9 +3658,11 @@ Final Answer: [Your complete response to the user, formatted nicely with the dat
             org_id: Organization ID (for backward compatibility)
             session_id: Session ID for context
             credential_pool: Dynamic credential pool for multi-platform resolution
+            require_approval: If True, write operations create pending actions
+            user_id: User ID for audit tracking
 
         Returns:
-            Tool execution result
+            Tool execution result, or pending action info for write operations
         """
         tool = self.tool_registry.get(tool_name)
         if not tool:
@@ -2518,6 +3670,86 @@ Final Answer: [Your complete response to the user, formatted nicely with the dat
 
         if not tool.handler:
             return {"success": False, "error": f"Tool '{tool_name}' has no handler"}
+
+        # Think tool: zero-cost reasoning checkpoint, no credentials needed
+        if tool_name == "think":
+            return {"success": True, "thought": tool_input.get("thought", "")}
+
+        # For write operations, check if edit mode is enabled
+        if tool.requires_write:
+            try:
+                from src.services.security_service import SecurityConfigService
+                security_service = SecurityConfigService()
+                edit_mode_enabled = await security_service.is_edit_mode_enabled()
+
+                if not edit_mode_enabled:
+                    logger.warning(
+                        f"[Tool] Blocked write operation '{tool_name}' - edit mode is disabled"
+                    )
+                    return {
+                        "success": False,
+                        "blocked": True,
+                        "error": "Edit mode is disabled. The AI is currently in read-only mode and cannot make changes to your network configuration. "
+                                 "Enable edit mode in Settings to allow the AI to make changes (with your approval).",
+                        "tool_name": tool_name,
+                    }
+            except Exception as e:
+                logger.error(f"Failed to check edit mode: {e}")
+                # Default to blocking write operations if we can't check edit mode
+                return {
+                    "success": False,
+                    "blocked": True,
+                    "error": "Unable to verify edit mode status. Write operations are blocked for safety.",
+                    "tool_name": tool_name,
+                }
+
+        # For write operations with edit mode enabled, create a pending action instead of executing directly
+        if tool.requires_write and require_approval:
+            try:
+                from src.api.routes.pending_actions import create_pending_action
+
+                # Generate a description of what this action will do
+                description = self._generate_action_description(tool_name, tool_input)
+
+                # Determine risk level based on tool type
+                risk_level = self._assess_risk_level(tool_name, tool_input)
+
+                # Create pending action
+                action = await create_pending_action(
+                    session_id=session_id,
+                    user_id=user_id,
+                    tool_name=tool_name,
+                    tool_input=tool_input,
+                    description=description,
+                    organization_id=org_id,
+                    network_id=tool_input.get("network_id") or tool_input.get("networkId"),
+                    device_serial=tool_input.get("serial"),
+                    risk_level=risk_level,
+                    impact_summary=f"This action will modify network configuration via {tool_name}",
+                    reversible=True,
+                    expires_in_minutes=30,
+                )
+
+                logger.info(
+                    f"[Tool] Created pending action {action.id} for write tool '{tool_name}' "
+                    f"(session={session_id}, user={user_id})"
+                )
+
+                return {
+                    "success": True,
+                    "pending_approval": True,
+                    "action_id": str(action.id),
+                    "message": f"This action requires your approval before it can be executed. "
+                               f"Please review and approve the '{tool_name}' action in the pending actions panel.",
+                    "description": description,
+                    "risk_level": risk_level,
+                    "tool_name": tool_name,
+                    "tool_input": tool_input,
+                }
+            except Exception as e:
+                logger.error(f"Failed to create pending action: {e}")
+                # Fall through to execute directly if pending action creation fails
+                pass
 
         # Enrich input with context
         context_store = get_session_context_store()
@@ -2569,6 +3801,10 @@ Final Answer: [Your complete response to the user, formatted nicely with the dat
                 logger.debug(
                     f"[Tool] Resolved {tool.platform} credentials from cluster '{platform_cred.cluster_name}'"
                 )
+            elif tool.platform in ("canvas", "knowledge"):
+                # Canvas and knowledge tools don't need external credentials
+                logger.debug(f"[Tool] {tool.platform} tool doesn't require credentials, skipping credential check")
+                pass
             elif not credentials:
                 # No credential pool match and no legacy credentials
                 return {
@@ -2586,7 +3822,7 @@ Final Answer: [Your complete response to the user, formatted nicely with the dat
                     logger.error(f"[Tool] No Meraki API key found in resolved_creds. Keys present: {list(resolved_creds.keys())}")
                     return {"success": False, "error": "No Meraki API key configured for this cluster"}
 
-                logger.debug(f"[Tool] Using Meraki API key: {api_key[:8]}... (length={len(api_key)}) for {tool_name}")
+                logger.debug(f"[Tool] Using Meraki API key: [REDACTED] for {tool_name}")
 
                 from src.services.tools.meraki import MerakiExecutionContext
                 context = MerakiExecutionContext(
@@ -2607,7 +3843,7 @@ Final Answer: [Your complete response to the user, formatted nicely with the dat
                     oauth_token=resolved_creds.get("thousandeyes_token", ""),
                 )
             elif tool.platform == "splunk":
-                from src.services.tools.splunk import SplunkExecutionContext
+                from src.services.tools.splunk import SplunkExecutionContext, SplunkMCPExecutionContext
                 # Splunk credentials: "token" is bearer token for search API,
                 # "splunk_token" is HEC token for event ingestion (different purpose)
                 splunk_token = (
@@ -2620,26 +3856,65 @@ Final Answer: [Your complete response to the user, formatted nicely with the dat
                     resolved_creds.get("base_url")
                 )
                 logger.debug(f"[Tool] Splunk context: base_url={splunk_base_url}, token={'set' if splunk_token else 'MISSING'}")
-                context = SplunkExecutionContext(
+                # Always create direct REST context as fallback
+                rest_context = SplunkExecutionContext(
                     username=resolved_creds.get("splunk_username") or resolved_creds.get("username"),
                     password=resolved_creds.get("splunk_password") or resolved_creds.get("password"),
                     base_url=splunk_base_url,
                     token=splunk_token,
                     verify_ssl=resolved_creds.get("verify_ssl", False),
                 )
+                # Wrap with MCP context if MCP is available
+                try:
+                    from src.services.splunk_mcp_service import get_splunk_mcp_service
+                    mcp_service = get_splunk_mcp_service()
+                    if await mcp_service.is_available():
+                        mcp_creds = await mcp_service.get_mcp_creds()
+                        context = SplunkMCPExecutionContext(
+                            fallback_context=rest_context,
+                            mcp_service=mcp_service,
+                            mcp_creds=mcp_creds,
+                        )
+                        logger.info(f"[Tool] Splunk MCP context created for {tool_name}")
+                    else:
+                        context = rest_context
+                except Exception as e:
+                    logger.debug(f"[Tool] MCP not available, using direct REST: {e}")
+                    context = rest_context
             elif tool.platform == "knowledge":
                 # Knowledge tools don't need external credentials
+                context = None
+            elif tool.platform == "canvas":
+                # Canvas tools are local visualization tools, no external context needed
                 context = None
             else:
                 context = None
 
-            # Execute tool with timeout (30 seconds)
+            # Execute tool with timeout (60s for Splunk MCP, 30s for others)
+            tool_timeout = 60.0 if tool.platform == "splunk" else 30.0
             health_tracker = get_tool_health_tracker()
             try:
                 result = await asyncio.wait_for(
                     tool.handler(tool_input, context),
-                    timeout=30.0
+                    timeout=tool_timeout
                 )
+
+                # Attach network timing from instrumented transport
+                if context and hasattr(context, 'pop_timing') and isinstance(result, dict):
+                    try:
+                        timing = context.pop_timing()
+                        if timing:
+                            result["_network_timing"] = {
+                                "tcp_connect_ms": timing.tcp_connect_ms,
+                                "tls_ms": timing.tls_ms,
+                                "ttfb_ms": timing.ttfb_ms,
+                                "server_ip": timing.server_ip,
+                                "server_port": timing.server_port,
+                                "tls_version": timing.tls_version,
+                                "http_version": timing.http_version,
+                            }
+                    except Exception:
+                        pass
 
                 # Record success/failure for circuit breaker tracking
                 if result.get("success", True):
@@ -2661,7 +3936,7 @@ Final Answer: [Your complete response to the user, formatted nicely with the dat
 
                 return result
             except asyncio.TimeoutError:
-                error_msg = f"Tool '{tool_name}' timed out after 30 seconds"
+                error_msg = f"Tool '{tool_name}' timed out after {tool_timeout:.0f} seconds"
                 logger.error(error_msg)
                 await health_tracker.record_failure(tool_name, error_msg)
                 return {
@@ -2801,10 +4076,38 @@ Final Answer: [Your complete response to the user, formatted nicely with the dat
         org_id: str,
         session_id: str,
         credential_pool: Optional[CredentialPool] = None,
+        user_id: Optional[int] = None,
+        query: Optional[str] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Stream response from Anthropic Claude with multi-turn tool loop."""
+        trace_id = None
+        root_span_id = None
+
         try:
             logger.info(f"[Anthropic] Starting stream with model={self.model}")
+
+            # Start trace for this query
+            try:
+                from src.services.ai_trace_collector import get_trace_collector, SYSTEM_SESSION_PREFIXES
+                collector = get_trace_collector()
+                # Use the direct query parameter (actual user message)
+                trace_query = query or ""
+                # Parse session_id to int if possible
+                trace_session_id = None
+                _is_system_query = isinstance(session_id, str) and session_id.startswith(SYSTEM_SESSION_PREFIXES)
+                try:
+                    trace_session_id = int(session_id) if session_id and session_id != "default" else None
+                except (ValueError, TypeError):
+                    pass
+                trace_id, root_span_id = await collector.start_trace(
+                    session_id=trace_session_id, user_id=user_id, query=trace_query,
+                    provider="anthropic", model=self.model,
+                    is_system=_is_system_query,
+                )
+            except Exception as trace_err:
+                logger.warning(f"[Trace] Failed to start trace: {trace_err}")
+                trace_id = None
+                root_span_id = None
 
             # Truncate messages if needed to avoid token limit errors
             # This prevents "prompt is too long: 214992 tokens > 200000 maximum"
@@ -2816,277 +4119,508 @@ Final Answer: [Your complete response to the user, formatted nicely with the dat
             current_messages = truncated_messages
             total_input_tokens = 0
             total_output_tokens = 0
-            max_iterations = 5  # Reduced from 10 for faster responses
+            max_iterations = 8  # Cross-platform investigations need 6-8 tool rounds
             collected_tool_data = []  # Collect tool results for canvas cards
+            all_tools_executed = []  # Track all tool names for synthesis instruction
+
+            # Track if canvas tools succeeded across ALL iterations (for auto-card suppression)
+            # This MUST be outside the loop so it persists when AI does multi-turn tool calls
+            canvas_tools_succeeded_in_session = False
+            canvas_emitted_card_types: set = set()  # Track card types emitted by canvas tools
+
+            # Determine thinking effort for streaming (adaptive thinking with interleaved reasoning)
+            # We compute this once from the original query (first user message)
+            stream_query = ""
+            for msg in reversed(current_messages):
+                if msg.get("role") == "user":
+                    content = msg.get("content", "")
+                    stream_query = content if isinstance(content, str) else str(content)
+                    break
+            thinking_effort = self._get_thinking_effort(stream_query, len(tools) if tools else 0)
+            use_thinking = thinking_effort is not None
+
+            # Build thinking params for streaming
+            thinking_params = {}
+            if use_thinking:
+                thinking_params["temperature"] = 1
+                if self.use_adaptive_thinking:
+                    thinking_params["thinking"] = {"type": "adaptive"}
+                    if thinking_effort:
+                        thinking_params["output_config"] = {"effort": thinking_effort}
+                    logger.info(f"[Anthropic] Streaming with adaptive thinking: effort={thinking_effort}")
+                else:
+                    thinking_params["thinking"] = {
+                        "type": "enabled",
+                        "budget_tokens": self.thinking_budget_tokens,
+                    }
+                    logger.info(f"[Anthropic] Streaming with legacy thinking: budget={self.thinking_budget_tokens}")
 
             for iteration in range(max_iterations):
                 logger.info(f"[Anthropic] Iteration {iteration + 1}, messages: {len(current_messages)}")
 
-                # Stream the response
-                async with self.client.messages.stream(
-                    model=self.model,
-                    max_tokens=self.max_tokens,
-                    temperature=self.temperature,
-                    system=system_prompt,
-                    messages=current_messages,
-                    tools=tools if tools else None,
-                ) as stream:
-                    # Buffer text for smoother streaming - smaller buffer for more fluid output
+                # Start LLM call span for this iteration
+                llm_span_id = None
+                if trace_id and root_span_id:
+                    try:
+                        collector = get_trace_collector()
+                        llm_span_id = await collector.add_span(
+                            trace_id=trace_id,
+                            span_type="llm_call",
+                            parent_span_id=root_span_id,
+                            span_name=self.model,
+                            iteration=iteration,
+                            model=self.model,
+                            provider="anthropic",
+                        )
+                    except Exception as trace_err:
+                        logger.warning(f"[Trace] Failed to add LLM span: {trace_err}")
+
+                # Stream the response with immediate tool execution
+                # Using raw events allows us to execute tools as soon as they're complete
+                # instead of waiting for the entire response to finish
+                stream_kwargs = {
+                    "model": self.model,
+                    "max_tokens": self.max_tokens,
+                    "temperature": thinking_params.get("temperature", self.temperature),
+                    "system": system_prompt,
+                    "messages": current_messages,
+                    "tools": tools if tools else None,
+                }
+                if "thinking" in thinking_params:
+                    stream_kwargs["thinking"] = thinking_params["thinking"]
+                if "output_config" in thinking_params:
+                    stream_kwargs["output_config"] = thinking_params["output_config"]
+
+                async with self.client.messages.stream(**stream_kwargs) as stream:
+                    # Buffer text for smoother streaming
                     text_buffer = ""
                     last_yield_time = asyncio.get_event_loop().time()
 
-                    async for text in stream.text_stream:
-                        text_buffer += text
-                        current_time = asyncio.get_event_loop().time()
+                    # Track tool_use blocks as they stream
+                    current_tool_blocks: Dict[int, Dict[str, Any]] = {}  # index -> {id, name, input_json}
+                    completed_tools: List[Any] = []  # Store completed tool blocks for conversation history
+                    tool_results = []
+                    assistant_content = []
 
-                        # Yield when buffer has content and either:
-                        # - Has 5+ chars (smooth chunk size)
-                        # - 50ms elapsed (responsive updates)
-                        # - Contains a space or newline (natural break point)
-                        should_yield = (
-                            len(text_buffer) >= 5 or
-                            (current_time - last_yield_time) > 0.05 or
-                            ' ' in text_buffer or
-                            '\n' in text_buffer
-                        )
+                    # Track if any canvas tools are in this response (for auto-card suppression)
+                    canvas_tools_in_response = False
+                    canvas_tool_pending = False  # True when canvas tool started but not completed
+                    pending_auto_cards = []  # Auto-cards to emit if canvas fails
 
-                        if should_yield and text_buffer:
-                            yield {"type": "text_delta", "text": text_buffer}
-                            text_buffer = ""
-                            last_yield_time = current_time
+                    # Process raw events for both text streaming AND tool execution
+                    # Track when thinking block is active to send periodic keepalive
+                    thinking_active = False
+                    last_thinking_keepalive = asyncio.get_event_loop().time()
+
+                    async for event in stream:
+                        # Handle text content
+                        if event.type == "content_block_start":
+                            if hasattr(event.content_block, 'type'):
+                                if event.content_block.type == "thinking":
+                                    # Thinking block started — signal frontend and track
+                                    thinking_active = True
+                                    last_thinking_keepalive = asyncio.get_event_loop().time()
+                                    yield {"type": "thinking"}
+                                elif event.content_block.type == "tool_use":
+                                    # Start tracking a new tool_use block
+                                    current_tool_blocks[event.index] = {
+                                        "id": event.content_block.id,
+                                        "name": event.content_block.name,
+                                        "input_json": "",
+                                    }
+                                    # If canvas tool is starting, defer auto-card generation AND clear any pending
+                                    # This is critical: if data tools ran BEFORE canvas in this iteration,
+                                    # they may have added auto-cards that we now need to discard
+                                    if event.content_block.name.startswith("canvas_"):
+                                        canvas_tool_pending = True
+                                        logger.info(f"[CanvasTool] Canvas tool starting: {event.content_block.name}, {len(pending_auto_cards)} pending auto-cards deferred")
+
+                        elif event.type == "content_block_delta":
+                            if hasattr(event.delta, 'type'):
+                                if event.delta.type == "thinking_delta":
+                                    # Send periodic keepalive during thinking (every 5s)
+                                    # to prevent SSE connection from dropping
+                                    current_time = asyncio.get_event_loop().time()
+                                    if current_time - last_thinking_keepalive > 5.0:
+                                        yield {"type": "thinking"}
+                                        last_thinking_keepalive = current_time
+
+                                elif event.delta.type == "text_delta":
+                                    # Thinking phase is over once text starts
+                                    thinking_active = False
+                                    # Accumulate and stream text
+                                    text_buffer += event.delta.text
+                                    current_time = asyncio.get_event_loop().time()
+
+                                    should_yield = (
+                                        len(text_buffer) >= 1 or
+                                        (current_time - last_yield_time) > 0.03
+                                    )
+
+                                    if should_yield and text_buffer:
+                                        yield {"type": "text_delta", "text": text_buffer}
+                                        text_buffer = ""
+                                        last_yield_time = current_time
+
+                                elif event.delta.type == "input_json_delta":
+                                    # Accumulate tool input JSON
+                                    if event.index in current_tool_blocks:
+                                        current_tool_blocks[event.index]["input_json"] += event.delta.partial_json
+
+                        elif event.type == "content_block_stop":
+                            # Thinking block finished
+                            if thinking_active:
+                                thinking_active = False
+                            # Check if this is a completed tool_use block
+                            if event.index in current_tool_blocks:
+                                tool_info = current_tool_blocks[event.index]
+
+                                # Parse the accumulated JSON input
+                                try:
+                                    tool_input = json.loads(tool_info["input_json"]) if tool_info["input_json"] else {}
+                                except json.JSONDecodeError:
+                                    logger.warning(f"[Anthropic] Failed to parse tool input JSON for {tool_info['name']}")
+                                    tool_input = {}
+
+                                # Create a tool block object for later use
+                                class ToolBlock:
+                                    def __init__(self, id, name, input):
+                                        self.id = id
+                                        self.name = name
+                                        self.input = input
+                                        self.type = "tool_use"
+
+                                block = ToolBlock(tool_info["id"], tool_info["name"], tool_input)
+                                completed_tools.append(block)
+                                all_tools_executed.append(block.name)
+
+                                # Add to assistant content for conversation history
+                                assistant_content.append({
+                                    "type": "tool_use",
+                                    "id": block.id,
+                                    "name": block.name,
+                                    "input": block.input,
+                                })
+
+                                # === IMMEDIATE TOOL EXECUTION ===
+                                # Execute the tool right now instead of waiting for stream to complete
+                                logger.info(f"[Anthropic] Executing tool immediately: {block.name}")
+                                yield {
+                                    "type": "tool_use_start",
+                                    "tool": block.name,
+                                    "id": block.id,
+                                }
+
+                                # Enrich tool input with session context
+                                raw_input = block.input if hasattr(block, 'input') else {}
+                                enriched_input = raw_input.copy()
+                                try:
+                                    context_store = get_session_context_store()
+                                    enriched_input = await context_store.enrich_tool_input(
+                                        session_id, block.name, raw_input
+                                    )
+                                except Exception as enrich_err:
+                                    logger.warning(f"[CardData] Input enrichment failed: {enrich_err}")
+
+                                # Start tool execution span
+                                tool_span_id = None
+                                if trace_id and llm_span_id:
+                                    try:
+                                        collector = get_trace_collector()
+                                        tool_span_id = await collector.add_span(
+                                            trace_id=trace_id,
+                                            span_type="tool_execution",
+                                            parent_span_id=llm_span_id,
+                                            span_name=block.name,
+                                            iteration=iteration,
+                                            tool_name=block.name,
+                                            tool_input=raw_input,
+                                        )
+                                    except Exception as trace_err:
+                                        logger.warning(f"[Trace] Failed to add tool span: {trace_err}")
+
+                                result = await self._execute_tool(
+                                    tool_name=block.name,
+                                    tool_input=raw_input,
+                                    credentials=credentials,
+                                    credential_pool=credential_pool,
+                                    org_id=org_id,
+                                    session_id=session_id,
+                                )
+
+                                # End tool execution span
+                                if tool_span_id:
+                                    try:
+                                        tool_ok = result.get("success", False) if isinstance(result, dict) else True
+                                        tool_err = result.get("error") if isinstance(result, dict) and not tool_ok else None
+                                        net = result.pop("_network_timing", {}) if isinstance(result, dict) else {}
+                                        collector = get_trace_collector()
+                                        await collector.end_span(
+                                            tool_span_id,
+                                            status="success" if tool_ok else "error",
+                                            tool_success=tool_ok,
+                                            tool_output_summary=str(result)[:500] if result else None,
+                                            tool_error=tool_err,
+                                            tcp_connect_ms=net.get("tcp_connect_ms"),
+                                            tls_ms=net.get("tls_ms"),
+                                            ttfb_ms=net.get("ttfb_ms"),
+                                            server_ip=net.get("server_ip"),
+                                            server_port=net.get("server_port"),
+                                            tls_version=net.get("tls_version"),
+                                            http_version=net.get("http_version"),
+                                        )
+                                        # Async TE path correlation (fire-and-forget)
+                                        if net.get("server_ip"):
+                                            try:
+                                                from src.services.te_path_correlator import get_te_path_correlator, PLATFORM_DESTINATIONS
+                                                from src.services.tool_registry import get_tool_registry as _get_registry
+                                                _tool_obj = _get_registry().tools.get(block.name)
+                                                _platform = _tool_obj.platform if _tool_obj else None
+                                                _dest = PLATFORM_DESTINATIONS.get(_platform or "") or net.get("server_ip")
+                                                correlator = get_te_path_correlator()
+                                                path = await correlator.get_path_for_destination(_dest, platform=_platform)
+                                                if path:
+                                                    await collector.update_span_path(tool_span_id, path)
+                                            except Exception:
+                                                pass  # Never block chat
+                                    except Exception as trace_err:
+                                        logger.warning(f"[Trace] Failed to end tool span: {trace_err}")
+
+                                # Make result JSON-safe
+                                safe_result = self._make_json_safe(result)
+
+                                yield {
+                                    "type": "tool_result",
+                                    "tool": block.name,
+                                    "id": block.id,
+                                    "result": safe_result,
+                                }
+
+                                # Handle canvas tool card suggestions IMMEDIATELY
+                                if block.name.startswith("canvas_"):
+                                    canvas_tool_pending = False  # Canvas tool completed
+                                    logger.info(f"[CanvasTool] Canvas tool executed: {block.name}, success={safe_result.get('success')}, error={safe_result.get('error')}")
+                                    if safe_result.get("success"):
+                                        # Canvas succeeded - suppress auto-cards regardless of whether it returned cards
+                                        canvas_tools_in_response = True
+                                        canvas_tools_succeeded_in_session = True  # Persist across iterations
+                                        card_suggestion = safe_result.get("card_suggestion")
+                                        card_suggestions = safe_result.get("card_suggestions", [])
+                                        logger.info(f"[CanvasTool] Canvas result: card_suggestion={card_suggestion is not None}, card_suggestions count={len(card_suggestions)}")
+                                        if card_suggestion:
+                                            logger.info(f"[CanvasTool] Emitting card immediately: type={card_suggestion.get('type')}")
+                                            yield {
+                                                "type": "card_suggestion",
+                                                "card": card_suggestion,
+                                            }
+                                        for card in card_suggestions:
+                                            logger.info(f"[CanvasTool] Emitting card immediately: type={card.get('type')}")
+                                            yield {
+                                                "type": "card_suggestion",
+                                                "card": card,
+                                            }
+                                        # Track which card types canvas emitted (for later auto-card filtering)
+                                        if card_suggestion:
+                                            canvas_emitted_card_types.add(card_suggestion.get("type"))
+                                        for c in card_suggestions:
+                                            canvas_emitted_card_types.add(c.get("type"))
+
+                                        # Canvas succeeded — keep auto-cards whose types weren't covered by canvas
+                                        if pending_auto_cards:
+
+                                            # Emit auto-cards for types not covered by canvas
+                                            remaining = []
+                                            for ac in pending_auto_cards:
+                                                if ac.get("type") not in canvas_emitted_card_types:
+                                                    remaining.append(ac)
+                                                else:
+                                                    logger.debug(f"[CanvasTool] Suppressing auto-card {ac.get('type')} (covered by canvas)")
+                                            if remaining:
+                                                deduped = _deduplicate_auto_cards(remaining, incident_network_id=network_id)
+                                                logger.info(f"[CanvasTool] Canvas succeeded, emitting {len(deduped)} non-overlapping auto-cards")
+                                                for ac in deduped:
+                                                    yield {"type": "card_suggestion", "card": ac}
+                                            pending_auto_cards.clear()
+                                    else:
+                                        # Canvas failed - emit pending auto-cards as fallback
+                                        logger.warning(f"[CanvasTool] Canvas tool FAILED: {safe_result.get('error')}")
+                                        if pending_auto_cards:
+                                            # Deduplicate: keep only ONE card per type (the last/most relevant)
+                                            # Pass incident network_id to prefer cards for the focused network
+                                            deduped_cards = _deduplicate_auto_cards(pending_auto_cards, incident_network_id=network_id)
+                                            logger.info(f"[CanvasTool] Canvas failed, emitting {len(deduped_cards)} auto-cards (was {len(pending_auto_cards)})")
+                                            for pending_card in deduped_cards:
+                                                yield {
+                                                    "type": "card_suggestion",
+                                                    "card": pending_card,
+                                                }
+                                            pending_auto_cards.clear()
+
+                                # Store result for conversation history
+                                tool_results.append({
+                                    "type": "tool_result",
+                                    "tool_use_id": block.id,
+                                    "content": json.dumps(safe_result) if isinstance(safe_result, dict) else str(safe_result),
+                                })
+
+                                # Collect tool data for non-canvas tools (for auto-card generation AND context inference)
+                                if not block.name.startswith("canvas_"):
+                                    if safe_result.get("success") and safe_result.get("data") is not None:
+                                        network_id = enriched_input.get("network_id") or enriched_input.get("networkId")
+                                        org_id_val = enriched_input.get("organization_id") or enriched_input.get("organizationId")
+
+                                        # Cache tool data for context inference (used by canvas_add_dashboard)
+                                        tool_data_item = {
+                                            "tool": block.name,
+                                            "data": safe_result.get("data"),
+                                            "network_id": network_id,
+                                            "org_id": org_id_val,
+                                        }
+                                        collected_tool_data.append(tool_data_item)
+
+                                        # Also cache in session context for future "Add to Canvas" scenarios
+                                        if session_id:
+                                            try:
+                                                ctx_store = get_session_context_store()
+                                                session_ctx = await ctx_store.get_or_create(session_id)
+                                                session_ctx.add_cardable_data(tool_data_item)
+                                                logger.debug(f"[CardData] Cached {block.name} in session context")
+                                            except Exception as cache_err:
+                                                logger.debug(f"[CardData] Could not cache: {cache_err}")
+
+                                        # Generate auto-card - but ALWAYS defer until we know if canvas will succeed
+                                        # This avoids race condition where auto-cards emit before canvas is called
+                                        # Only skip auto-card if canvas already emitted the SAME card type
+                                        card_suggestion = _generate_card_suggestion(
+                                            tool_name=block.name,
+                                            tool_result=safe_result,
+                                            tool_call_id=block.id,
+                                            network_id=network_id,
+                                            org_id=org_id_val,
+                                        )
+                                        if card_suggestion:
+                                            if card_suggestion.get("type") in canvas_emitted_card_types:
+                                                logger.debug(f"[CardGen] Skipping auto-card {card_suggestion.get('type')} - same type already emitted by canvas")
+                                            else:
+                                                logger.info(f"[CardGen] Deferring auto-card: type={card_suggestion.get('type')}")
+                                                pending_auto_cards.append(card_suggestion)
+
+                                del current_tool_blocks[event.index]
+
+                        elif event.type == "message_delta":
+                            if hasattr(event, 'usage') and event.usage:
+                                total_output_tokens += getattr(event.usage, 'output_tokens', 0)
+
+                        elif event.type == "message_start":
+                            if hasattr(event.message, 'usage') and event.message.usage:
+                                total_input_tokens += getattr(event.message.usage, 'input_tokens', 0)
 
                     # Yield any remaining buffered text
                     if text_buffer:
                         yield {"type": "text_delta", "text": text_buffer}
 
-                    # Get final message to check for tool calls
+                    # Get final message for stop_reason
                     final_message = await stream.get_final_message()
-                    total_input_tokens += final_message.usage.input_tokens
-                    total_output_tokens += final_message.usage.output_tokens
 
-                    logger.info(f"[Anthropic] Got {len(final_message.content)} content blocks, stop_reason={final_message.stop_reason}")
+                    logger.info(f"[Anthropic] Stream complete, {len(completed_tools)} tools executed, stop_reason={final_message.stop_reason}")
 
-                # Check if we need to execute tools
-                tool_use_blocks = [b for b in final_message.content if b.type == "tool_use"]
+                    # End LLM call span with token usage + network timing
+                    if llm_span_id:
+                        try:
+                            iter_input = getattr(final_message.usage, 'input_tokens', 0) if hasattr(final_message, 'usage') else 0
+                            iter_output = getattr(final_message.usage, 'output_tokens', 0) if hasattr(final_message, 'usage') else 0
+                            # Calculate cost from tokens
+                            iter_cost = None
+                            try:
+                                from src.config.model_pricing import calculate_cost
+                                iter_cost = float(calculate_cost(self.model, iter_input, iter_output))
+                            except Exception:
+                                pass
+                            # Capture network timing from instrumented transport
+                            net_kwargs = {}
+                            if hasattr(self, '_http_transport') and self._http_transport:
+                                timing = self._http_transport.pop_timing()
+                                if timing:
+                                    net_kwargs = {
+                                        "tcp_connect_ms": timing.tcp_connect_ms,
+                                        "tls_ms": timing.tls_ms,
+                                        "ttfb_ms": timing.ttfb_ms,
+                                        "server_ip": timing.server_ip,
+                                        "server_port": timing.server_port,
+                                        "tls_version": timing.tls_version,
+                                        "http_version": timing.http_version,
+                                    }
+                            collector = get_trace_collector()
+                            await collector.end_span(
+                                llm_span_id,
+                                status="success",
+                                input_tokens=iter_input,
+                                output_tokens=iter_output,
+                                cost_usd=iter_cost,
+                                **net_kwargs,
+                            )
+                            # Async TE path correlation for LLM call
+                            if net_kwargs.get("server_ip"):
+                                try:
+                                    from src.services.te_path_correlator import get_te_path_correlator, PLATFORM_DESTINATIONS
+                                    _provider = self.provider_name or "anthropic"
+                                    _dest = PLATFORM_DESTINATIONS.get(_provider) or net_kwargs["server_ip"]
+                                    correlator = get_te_path_correlator()
+                                    path = await correlator.get_path_for_destination(_dest, platform=_provider)
+                                    if path:
+                                        await collector.update_span_path(llm_span_id, path)
+                                except Exception:
+                                    pass
+                        except Exception as trace_err:
+                            logger.warning(f"[Trace] Failed to end LLM span: {trace_err}")
+
+                    # Emit pending auto-cards — filter out types already covered by canvas
+                    if pending_auto_cards:
+                        # Filter out types already emitted by canvas
+                        remaining = [ac for ac in pending_auto_cards if ac.get("type") not in canvas_emitted_card_types]
+                        if remaining:
+                            deduped_cards = _deduplicate_auto_cards(remaining, incident_network_id=network_id)
+                            logger.info(f"[CardGen] Stream complete, emitting {len(deduped_cards)} deferred auto-cards (was {len(pending_auto_cards)}, canvas_types={canvas_emitted_card_types})")
+                            for pending_card in deduped_cards:
+                                yield {
+                                    "type": "card_suggestion",
+                                    "card": pending_card,
+                                }
+                        elif canvas_emitted_card_types:
+                            logger.info(f"[CardGen] All {len(pending_auto_cards)} auto-cards covered by canvas types: {canvas_emitted_card_types}")
+                        pending_auto_cards.clear()
+
+                # Build tool_use_blocks from completed tools for the loop logic
+                tool_use_blocks = completed_tools
 
                 if not tool_use_blocks:
                     # No tools - we're done
                     logger.info("[Anthropic] No tool calls, conversation complete")
                     break
 
-                # Execute tools and build response
-                tool_names = [b.name for b in tool_use_blocks]
-                logger.info(f"[Anthropic] Executing {len(tool_use_blocks)} tools: {tool_names}")
-
-                # Add assistant message with tool use to conversation
-                assistant_content = []
+                # Add text content to assistant message
                 for block in final_message.content:
                     if block.type == "text":
-                        assistant_content.append({"type": "text", "text": block.text})
-                    elif block.type == "tool_use":
-                        assistant_content.append({
-                            "type": "tool_use",
-                            "id": block.id,
-                            "name": block.name,
-                            "input": block.input,
-                        })
+                        assistant_content.insert(0, {"type": "text", "text": block.text})
 
                 current_messages.append({"role": "assistant", "content": assistant_content})
 
-                # Execute each tool and collect results
-                tool_results = []
-                logger.info(f"[CardData] Starting execution of {len(tool_use_blocks)} tools")
-                for block in tool_use_blocks:
-                    yield {
-                        "type": "tool_use_start",
-                        "tool": block.name,
-                        "id": block.id,
-                    }
+                # Tools already executed during streaming - just need to add results to conversation
+                logger.info(f"[Anthropic] {len(tool_use_blocks)} tools already executed during streaming")
 
-                    # Enrich tool input with session context BEFORE execution
-                    # This gives us resolved network_id, org_id, etc. for CardData collection
-                    raw_input = block.input if hasattr(block, 'input') else {}
-                    enriched_input = raw_input.copy()
-                    try:
-                        context_store = get_session_context_store()
-                        enriched_input = await context_store.enrich_tool_input(
-                            session_id, block.name, raw_input
-                        )
-                        logger.debug(f"[CardData] Enriched input for {block.name}: network_id={enriched_input.get('network_id')}, org_id={enriched_input.get('organization_id')}")
-                    except Exception as enrich_err:
-                        logger.warning(f"[CardData] Input enrichment failed: {enrich_err}")
-
-                    result = await self._execute_tool(
-                        tool_name=block.name,
-                        tool_input=raw_input,  # _execute_tool does its own enrichment
-                        credentials=credentials,
-                        credential_pool=credential_pool,
-                        org_id=org_id,
-                        session_id=session_id,
-                    )
-
-                    # Ensure result is JSON-serializable (convert Response objects to strings)
-                    safe_result = self._make_json_safe(result)
-
-                    yield {
-                        "type": "tool_result",
-                        "tool": block.name,
-                        "id": block.id,
-                        "result": safe_result,
-                    }
-
-                    # Check if this is a canvas tool that wants to add a card
-                    if block.name.startswith("canvas_") and safe_result.get("success"):
-                        # Handle single card suggestion
-                        card_suggestion = safe_result.get("card_suggestion")
-                        if card_suggestion:
-                            logger.info(f"[CanvasTool] Emitting card_suggestion: type={card_suggestion.get('type')}, title={card_suggestion.get('title')}")
-                            yield {
-                                "type": "card_suggestion",
-                                "card": card_suggestion,
-                            }
-                        # Handle multiple card suggestions (dashboard)
-                        card_suggestions = safe_result.get("card_suggestions", [])
-                        for card in card_suggestions:
-                            logger.info(f"[CanvasTool] Emitting card_suggestion: type={card.get('type')}, title={card.get('title')}")
-                            yield {
-                                "type": "card_suggestion",
-                                "card": card,
-                            }
-
-                    # Collect successful tool data for canvas cards (with live topic info)
-                    # Use enriched_input which has resolved network_id, org_id from session context
-                    has_success = safe_result.get("success", True)
-                    has_data = safe_result.get("data") is not None
-                    data_type = _detect_data_type(block.name)
-                    live_topic = _generate_live_topic(block.name, enriched_input)
-                    # Log with correct field names (check both cases)
-                    log_network_id = enriched_input.get("network_id") or enriched_input.get("networkId") or raw_input.get("networkId")
-                    log_org_id = enriched_input.get("organization_id") or enriched_input.get("organizationId") or raw_input.get("organizationId")
-                    logger.info(f"[CardData] Tool {block.name}: success={has_success}, has_data={has_data}, data_type={data_type}, live_topic={live_topic}, network_id={log_network_id}, org_id={log_org_id}")
-                    if has_success and has_data:
-                        result_data = safe_result.get("data")
-
-                        # INTENSIVE LOGGING: Log raw_input and enriched_input
-                        logger.info(f"[CardData][DEBUG] raw_input for {block.name}: {json.dumps(raw_input, default=str)[:500]}")
-                        logger.info(f"[CardData][DEBUG] enriched_input for {block.name}: {json.dumps(enriched_input, default=str)[:500]}")
-
-                        # INTENSIVE LOGGING: Log result_data structure
-                        if isinstance(result_data, dict):
-                            logger.info(f"[CardData][DEBUG] result_data is DICT with keys: {list(result_data.keys())}")
-                            if 'id' in result_data:
-                                logger.info(f"[CardData][DEBUG] result_data.id = {result_data.get('id')}")
-                            if 'networkId' in result_data:
-                                logger.info(f"[CardData][DEBUG] result_data.networkId = {result_data.get('networkId')}")
-                            if 'network' in result_data:
-                                logger.info(f"[CardData][DEBUG] result_data.network = {result_data.get('network')}")
-                        elif isinstance(result_data, list):
-                            logger.info(f"[CardData][DEBUG] result_data is LIST with {len(result_data)} items")
-                            if len(result_data) > 0 and isinstance(result_data[0], dict):
-                                logger.info(f"[CardData][DEBUG] result_data[0] keys: {list(result_data[0].keys())}")
-                                if 'id' in result_data[0]:
-                                    logger.info(f"[CardData][DEBUG] result_data[0].id = {result_data[0].get('id')}")
-                        else:
-                            logger.info(f"[CardData][DEBUG] result_data is {type(result_data).__name__}")
-
-                        # Extract network_id (check input params, then result data)
-                        network_id = (
-                            enriched_input.get("network_id") or
-                            enriched_input.get("networkId") or
-                            raw_input.get("networkId") or
-                            raw_input.get("network_id")
-                        )
-                        # Fallback: extract from result data
-                        if not network_id and isinstance(result_data, dict):
-                            # Check for Meraki-style network ID (L_ or N_ prefix) in 'id' field
-                            potential_id = result_data.get("id")
-                            if potential_id and isinstance(potential_id, str) and (potential_id.startswith("L_") or potential_id.startswith("N_")):
-                                network_id = potential_id
-                            else:
-                                # Fallback to explicit networkId fields
-                                network_id = result_data.get("networkId") or result_data.get("network_id")
-                            # Check nested 'network' object
-                            if not network_id and isinstance(result_data.get("network"), dict):
-                                nested_id = result_data["network"].get("id")
-                                if nested_id and isinstance(nested_id, str) and (nested_id.startswith("L_") or nested_id.startswith("N_")):
-                                    network_id = nested_id
-                        if not network_id and isinstance(result_data, list) and len(result_data) > 0:
-                            # For list responses, check first item for Meraki network ID
-                            first_item = result_data[0]
-                            if isinstance(first_item, dict):
-                                potential_id = first_item.get("id")
-                                if potential_id and isinstance(potential_id, str) and (potential_id.startswith("L_") or potential_id.startswith("N_")):
-                                    network_id = potential_id
-                                else:
-                                    network_id = first_item.get("networkId") or first_item.get("network_id")
-
-                        # Extract org_id (check input params, then result data)
-                        org_id = (
-                            enriched_input.get("organization_id") or
-                            enriched_input.get("organizationId") or
-                            raw_input.get("organizationId") or
-                            raw_input.get("organization_id")
-                        )
-                        # Fallback: extract from result data
-                        if not org_id and isinstance(result_data, dict):
-                            org_id = result_data.get("organizationId") or result_data.get("organization_id")
-                        if not org_id and isinstance(result_data, list) and len(result_data) > 0:
-                            first_item = result_data[0]
-                            if isinstance(first_item, dict):
-                                org_id = first_item.get("organizationId") or first_item.get("organization_id")
-
-                        # Log warning if network_id extraction failed
-                        if not network_id:
-                            result_keys = list(result_data.keys()) if isinstance(result_data, dict) else (
-                                list(result_data[0].keys()) if isinstance(result_data, list) and len(result_data) > 0 and isinstance(result_data[0], dict) else "N/A"
-                            )
-                            logger.warning(f"[CardData] Failed to extract network_id for {block.name}. "
-                                           f"enriched_input keys: {list(enriched_input.keys())}, "
-                                           f"result_data type: {type(result_data).__name__}, "
-                                           f"result_data keys: {result_keys}")
-                        logger.info(f"[CardData] Extracted context: network_id={network_id}, org_id={org_id}")
-
-                        tool_data_item = {
-                            "tool": block.name,
-                            "data": result_data,
-                            "data_type": data_type,
-                            "live_topic": live_topic,
-                            "network_id": network_id,
-                            "org_id": org_id,
-                        }
-                        collected_tool_data.append(tool_data_item)
-                        # INTENSIVE LOGGING: Log the full tool_data_item (without large data)
-                        logger.info(f"[CardData][DEBUG] tool_data_item for frontend: tool={block.name}, network_id={network_id}, org_id={org_id}, data_type={data_type}")
-                        logger.info(f"[CardData] Collected {block.name} data for cards (total: {len(collected_tool_data)}, live: {live_topic is not None})")
-
-                        # Cache in session context for future "Add to Canvas" when AI answers from context
-                        if session_id:
-                            try:
-                                session_store = get_session_context_store()
-                                session_ctx = session_store.get_or_create(session_id)
-                                session_ctx.add_cardable_data(tool_data_item)
-                                logger.debug(f"[CardData] Cached {block.name} in session context")
-                            except Exception as cache_err:
-                                logger.debug(f"[CardData] Could not cache: {cache_err}")
-                    else:
-                        logger.warning(f"[CardData] SKIPPING {block.name} - success={has_success}, has_data={has_data}")
-
-                    # Format result for Claude (use safe_result to avoid serialization errors)
-                    tool_content = json.dumps(safe_result) if isinstance(safe_result, dict) else str(safe_result)
-
-                    # Add formatting hint for large data arrays to encourage summary responses
-                    data_array = safe_result.get("data") if isinstance(safe_result, dict) else None
-                    if isinstance(data_array, list) and len(data_array) > 3:
-                        tool_content += "\n\n[CARD DATA AVAILABLE: This data will be available to the user via 'Add to Canvas' button. Summarize key findings in 2-5 sentences instead of listing all items.]"
-
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": tool_content,
+                # Add tool results as user message with optional synthesis instruction
+                is_approaching_limit = (iteration >= max_iterations - 2)
+                synthesis = self._build_synthesis_instruction(
+                    all_tools_executed, iteration, is_approaching_limit
+                )
+                if synthesis:
+                    logger.info(f"[Synthesis] Injecting instruction after {len(all_tools_executed)} tools, iteration={iteration}")
+                    current_messages.append({
+                        "role": "user",
+                        "content": list(tool_results) + [{"type": "text", "text": synthesis}],
                     })
-
-                # Add tool results as user message
-                current_messages.append({"role": "user", "content": tool_results})
+                else:
+                    current_messages.append({"role": "user", "content": tool_results})
 
             # Done - yield final usage and tool data for canvas cards
             logger.info(f"[CardData] Final collected_tool_data count: {len(collected_tool_data)}, session_id={session_id}")
@@ -3097,7 +4631,7 @@ Final Answer: [Your complete response to the user, formatted nicely with the dat
                 logger.info(f"[CardData] Attempting to retrieve cached data for session: {session_id}")
                 try:
                     session_store = get_session_context_store()
-                    session_ctx = session_store.get_or_create(session_id)
+                    session_ctx = await session_store.get_or_create(session_id)
                     logger.info(f"[CardData] Session cache size: {len(session_ctx.cardable_data_cache)}")
                     cached_data = session_ctx.get_valid_cardable_data()
                     logger.info(f"[CardData] Valid cached items: {len(cached_data) if cached_data else 0}")
@@ -3114,6 +4648,18 @@ Final Answer: [Your complete response to the user, formatted nicely with the dat
             if final_tool_data:
                 logger.info(f"[CardData] Tools with data: {[td['tool'] for td in final_tool_data]}")
 
+            # End trace successfully
+            if trace_id and root_span_id:
+                try:
+                    collector = get_trace_collector()
+                    await collector.end_trace(
+                        trace_id, root_span_id, status="success",
+                        total_input_tokens=total_input_tokens,
+                        total_output_tokens=total_output_tokens,
+                    )
+                except Exception as trace_err:
+                    logger.warning(f"[Trace] Failed to end trace: {trace_err}")
+
             yield {
                 "type": "done",
                 "usage": {
@@ -3121,10 +4667,20 @@ Final Answer: [Your complete response to the user, formatted nicely with the dat
                     "output_tokens": total_output_tokens,
                 },
                 "tool_data": final_tool_data if final_tool_data else None,
+                "trace_id": str(trace_id) if trace_id else None,
             }
 
         except Exception as e:
             logger.error(f"Anthropic streaming error: {e}", exc_info=True)
+            # End trace with error
+            if trace_id and root_span_id:
+                try:
+                    collector = get_trace_collector()
+                    await collector.end_trace(
+                        trace_id, root_span_id, status="error", error_message=str(e)
+                    )
+                except Exception:
+                    pass
             yield {"type": "error", "error": str(e)}
 
     async def _stream_openai(
@@ -3136,9 +4692,42 @@ Final Answer: [Your complete response to the user, formatted nicely with the dat
         org_id: str,
         session_id: str,
         credential_pool: Optional[CredentialPool] = None,
+        user_id: Optional[int] = None,
+        query: Optional[str] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Stream response from OpenAI GPT."""
+        trace_id = None
+        root_span_id = None
+
         try:
+            # Start trace
+            try:
+                from src.services.ai_trace_collector import get_trace_collector, SYSTEM_SESSION_PREFIXES
+                collector = get_trace_collector()
+                # Use the direct query parameter (actual user message)
+                trace_query = query or ""
+                trace_session_id = None
+                _is_system_query = isinstance(session_id, str) and session_id.startswith(SYSTEM_SESSION_PREFIXES)
+                try:
+                    trace_session_id = int(session_id) if session_id and session_id != "default" else None
+                except (ValueError, TypeError):
+                    pass
+                trace_id, root_span_id = await collector.start_trace(
+                    session_id=trace_session_id, user_id=user_id, query=trace_query,
+                    provider="openai", model=self.model,
+                    is_system=_is_system_query,
+                )
+                llm_span_id = await collector.add_span(
+                    trace_id=trace_id, span_type="llm_call",
+                    parent_span_id=root_span_id, span_name=self.model,
+                    model=self.model, provider="openai",
+                )
+            except Exception as trace_err:
+                logger.warning(f"[Trace] Failed to start OpenAI trace: {trace_err}")
+                trace_id = None
+                root_span_id = None
+                llm_span_id = None
+
             full_messages = [{"role": "system", "content": system_prompt}] + messages
 
             stream = await self.client.chat.completions.create(
@@ -3156,6 +4745,7 @@ Final Answer: [Your complete response to the user, formatted nicely with the dat
             total_tokens = 0
             input_tokens = 0
             output_tokens = 0
+            canvas_tools_succeeded = False  # Track if canvas tool added cards
 
             async for chunk in stream:
                 if chunk.choices and chunk.choices[0].delta:
@@ -3184,6 +4774,24 @@ Final Answer: [Your complete response to the user, formatted nicely with the dat
                     input_tokens = getattr(chunk.usage, 'prompt_tokens', 0) or 0
                     output_tokens = getattr(chunk.usage, 'completion_tokens', 0) or 0
 
+            # End LLM span
+            if llm_span_id:
+                try:
+                    iter_cost = None
+                    try:
+                        from src.config.model_pricing import calculate_cost
+                        iter_cost = float(calculate_cost(self.model, input_tokens, output_tokens))
+                    except Exception:
+                        pass
+                    collector = get_trace_collector()
+                    await collector.end_span(
+                        llm_span_id, status="success",
+                        input_tokens=input_tokens, output_tokens=output_tokens,
+                        cost_usd=iter_cost,
+                    )
+                except Exception:
+                    pass
+
             # Execute any pending tool
             if current_tool:
                 try:
@@ -3191,6 +4799,21 @@ Final Answer: [Your complete response to the user, formatted nicely with the dat
                 except (json.JSONDecodeError, ValueError) as e:
                     logger.warning(f"Failed to parse tool input: {e}")
                     tool_input = {}
+
+                # Start tool span
+                tool_span_id = None
+                if trace_id and llm_span_id:
+                    try:
+                        collector = get_trace_collector()
+                        tool_span_id = await collector.add_span(
+                            trace_id=trace_id, span_type="tool_execution",
+                            parent_span_id=llm_span_id,
+                            span_name=current_tool["name"],
+                            tool_name=current_tool["name"],
+                            tool_input=tool_input,
+                        )
+                    except Exception:
+                        pass
 
                 result = await self._execute_tool(
                     tool_name=current_tool["name"],
@@ -3200,6 +4823,21 @@ Final Answer: [Your complete response to the user, formatted nicely with the dat
                     org_id=org_id,
                     session_id=session_id,
                 )
+
+                # End tool span
+                if tool_span_id:
+                    try:
+                        tool_ok = result.get("success", False) if isinstance(result, dict) else True
+                        collector = get_trace_collector()
+                        await collector.end_span(
+                            tool_span_id,
+                            status="success" if tool_ok else "error",
+                            tool_success=tool_ok,
+                            tool_output_summary=str(result)[:500],
+                            tool_error=result.get("error") if isinstance(result, dict) and not tool_ok else None,
+                        )
+                    except Exception:
+                        pass
 
                 # Extract entities asynchronously with error handling
                 if result.get("success"):
@@ -3222,6 +4860,7 @@ Final Answer: [Your complete response to the user, formatted nicely with the dat
 
                 # Check if this is a canvas tool that wants to add a card
                 if current_tool["name"].startswith("canvas_") and isinstance(result, dict) and result.get("success"):
+                    canvas_tools_succeeded = True
                     # Handle single card suggestion
                     card_suggestion = result.get("card_suggestion")
                     if card_suggestion:
@@ -3235,6 +4874,40 @@ Final Answer: [Your complete response to the user, formatted nicely with the dat
                             "type": "card_suggestion",
                             "card": card,
                         }
+                # Auto-generate card for non-canvas tools (suppress if canvas already added cards)
+                elif not canvas_tools_succeeded and isinstance(result, dict) and result.get("success") and result.get("data") is not None:
+                    # Extract network_id and org_id from tool input or result
+                    network_id = tool_input.get("network_id") or tool_input.get("networkId")
+                    org_id_val = tool_input.get("organization_id") or tool_input.get("organizationId")
+                    if not network_id and isinstance(result.get("data"), dict):
+                        network_id = result["data"].get("networkId") or result["data"].get("id")
+                        if network_id and not (network_id.startswith("L_") or network_id.startswith("N_")):
+                            network_id = None  # Only use Meraki-style IDs
+                    card_suggestion = _generate_card_suggestion(
+                        tool_name=current_tool["name"],
+                        tool_result=result,
+                        tool_call_id=current_tool["id"],
+                        network_id=network_id,
+                        org_id=org_id_val,
+                    )
+                    if card_suggestion:
+                        logger.info(f"[CardGen] OpenAI: Emitting auto-generated card: type={card_suggestion.get('type')}")
+                        yield {
+                            "type": "card_suggestion",
+                            "card": card_suggestion,
+                        }
+
+            # End trace successfully
+            if trace_id and root_span_id:
+                try:
+                    collector = get_trace_collector()
+                    await collector.end_trace(
+                        trace_id, root_span_id, status="success",
+                        total_input_tokens=input_tokens,
+                        total_output_tokens=output_tokens,
+                    )
+                except Exception:
+                    pass
 
             yield {
                 "type": "done",
@@ -3243,11 +4916,81 @@ Final Answer: [Your complete response to the user, formatted nicely with the dat
                     "output_tokens": output_tokens,
                     "total_tokens": total_tokens,
                 },
+                "trace_id": str(trace_id) if trace_id else None,
             }
 
         except Exception as e:
             logger.error(f"OpenAI streaming error: {e}")
+            if trace_id and root_span_id:
+                try:
+                    collector = get_trace_collector()
+                    await collector.end_trace(
+                        trace_id, root_span_id, status="error", error_message=str(e)
+                    )
+                except Exception:
+                    pass
             yield {"type": "error", "error": str(e)}
+
+    def _generate_action_description(self, tool_name: str, tool_input: Dict[str, Any]) -> str:
+        """Generate a human-readable description of what an action will do."""
+        descriptions = {
+            # Meraki actions
+            "meraki_reboot_device": lambda i: f"Reboot device {i.get('serial', 'unknown')}",
+            "meraki_update_device": lambda i: f"Update device {i.get('serial', 'unknown')} configuration",
+            "meraki_blink_leds": lambda i: f"Blink LEDs on device {i.get('serial', 'unknown')}",
+            "meraki_disable_switch_port": lambda i: f"Disable switch port {i.get('portId', 'unknown')} on {i.get('serial', 'unknown')}",
+            "meraki_enable_switch_port": lambda i: f"Enable switch port {i.get('portId', 'unknown')} on {i.get('serial', 'unknown')}",
+            "meraki_update_ssid": lambda i: f"Update SSID {i.get('number', 'unknown')} settings in network {i.get('networkId', 'unknown')}",
+            "meraki_update_vlan": lambda i: f"Update VLAN {i.get('vlanId', 'unknown')} in network {i.get('networkId', 'unknown')}",
+            "meraki_update_firewall_rules": lambda i: f"Update firewall rules in network {i.get('networkId', 'unknown')}",
+            "meraki_update_traffic_shaping": lambda i: f"Update traffic shaping rules",
+            "meraki_claim_device": lambda i: f"Claim device {i.get('serial', 'unknown')} to network",
+            "meraki_remove_device": lambda i: f"Remove device {i.get('serial', 'unknown')} from network",
+            # Catalyst actions
+            "catalyst_reboot_device": lambda i: f"Reboot Catalyst device {i.get('deviceId', 'unknown')}",
+            "catalyst_deploy_template": lambda i: f"Deploy template to device",
+            "catalyst_provision_device": lambda i: f"Provision new device",
+        }
+
+        if tool_name in descriptions:
+            try:
+                return descriptions[tool_name](tool_input)
+            except Exception:
+                pass
+
+        # Default description
+        return f"Execute {tool_name.replace('_', ' ')}"
+
+    def _assess_risk_level(self, tool_name: str, tool_input: Dict[str, Any]) -> str:
+        """Assess the risk level of an action based on tool type and parameters."""
+        # High risk actions
+        high_risk = [
+            "meraki_reboot_device", "catalyst_reboot_device",
+            "meraki_update_firewall_rules", "meraki_remove_device",
+            "catalyst_deploy_template", "catalyst_provision_device",
+            "meraki_update_traffic_shaping",
+        ]
+
+        # Medium risk actions
+        medium_risk = [
+            "meraki_update_device", "meraki_update_ssid", "meraki_update_vlan",
+            "meraki_disable_switch_port", "meraki_claim_device",
+        ]
+
+        # Low risk actions
+        low_risk = [
+            "meraki_blink_leds", "meraki_enable_switch_port",
+        ]
+
+        if tool_name in high_risk:
+            return "high"
+        elif tool_name in medium_risk:
+            return "medium"
+        elif tool_name in low_risk:
+            return "low"
+        else:
+            # Default to medium for unknown write operations
+            return "medium"
 
 
 def create_chat_service(

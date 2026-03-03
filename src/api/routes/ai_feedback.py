@@ -5,7 +5,7 @@ Provides endpoints for:
 - Recording detailed feedback with categories
 - Fetching feedback analytics (admin)
 
-Part of Lumen AI Canvas Phase 1 implementation.
+Part of Cisco AIOps Hub Canvas Phase 1 implementation.
 """
 
 import logging

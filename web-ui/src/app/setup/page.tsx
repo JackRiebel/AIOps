@@ -30,7 +30,7 @@ const STEPS: StepConfigExtended[] = [
   {
     id: 'welcome',
     title: 'Welcome',
-    description: 'Set up your Lumen Dashboard',
+    description: 'Set up AI Ops Center',
     icon: 'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5',
   },
   {
@@ -158,6 +158,8 @@ export default function SetupPage() {
   // Network integrations
   const [merakiApiKey, setMerakiApiKey] = useState('');
   const [thousandeyesToken, setThousandeyesToken] = useState('');
+  const [thousandeyesMcpEndpoint, setThousandeyesMcpEndpoint] = useState('');
+  const [thousandeyesMcpToken, setThousandeyesMcpToken] = useState('');
   const [splunkHost, setSplunkHost] = useState('https://localhost:8089');
   const [splunkToken, setSplunkToken] = useState('');
   const [splunkBearerToken, setSplunkBearerToken] = useState('');
@@ -354,6 +356,8 @@ export default function SetupPage() {
       }
       if (hasThousandeyes) {
         integrations.thousandeyes_oauth_token = thousandeyesToken;
+        if (thousandeyesMcpEndpoint) integrations.thousandeyes_mcp_endpoint = thousandeyesMcpEndpoint;
+        if (thousandeyesMcpToken) integrations.thousandeyes_mcp_token = thousandeyesMcpToken;
       }
       if (hasSplunk) {
         // splunkHost is the REST API URL (port 8089), save as splunk_api_url
@@ -471,8 +475,8 @@ export default function SetupPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
           </div>
-          <h1 className="text-3xl font-bold text-white">Lumen</h1>
-          <p className="text-slate-400 mt-2">AI-Powered Network Management</p>
+          <h1 className="text-3xl font-bold text-white">AI Ops Center</h1>
+          <p className="text-slate-400 mt-2">Intelligent Network Operations</p>
         </div>
 
         {/* Progress Steps */}
@@ -531,13 +535,6 @@ export default function SetupPage() {
 
           {/* Step Content */}
           <div className="px-8 py-6">
-            {/* Debug: current step index */}
-            {process.env.NODE_ENV === 'development' && (
-              <div className="mb-2 text-xs text-slate-500">
-                Debug: currentStepIndex={currentStepIndex}, saving={saving.toString()}
-              </div>
-            )}
-
             {error && (
               <div role="alert" className="mb-6 px-4 py-3 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center gap-3">
                 <svg className="w-5 h-5 text-red-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
@@ -551,7 +548,7 @@ export default function SetupPage() {
             {currentStepIndex === 0 && (
               <div className="py-6">
                 <p className="text-slate-300 mb-6 text-center">
-                  Welcome to Lumen! Let&apos;s get you set up with your own instance.
+                  Welcome to AI Ops Center! Let&apos;s get you set up with your own instance.
                 </p>
                 <ul className="text-left text-slate-400 space-y-3 mb-6">
                   <li className="flex items-center gap-3">
@@ -650,8 +647,8 @@ export default function SetupPage() {
                                 <p className="ml-5 text-slate-500">Install from postgresql.org or via package manager</p>
                               </li>
                               <li>
-                                <span className="text-slate-300">A database created for Lumen</span>
-                                <code className="ml-5 block bg-slate-800 px-2 py-1 rounded mt-1 text-cyan-400">createdb lumen</code>
+                                <span className="text-slate-300">A database created for AI Ops Center</span>
+                                <code className="ml-5 block bg-slate-800 px-2 py-1 rounded mt-1 text-cyan-400">createdb aiops_hub</code>
                               </li>
                               <li>
                                 <span className="text-slate-300">A user with full permissions</span>
@@ -1109,6 +1106,27 @@ export default function SetupPage() {
                           placeholder="Your ThousandEyes OAuth token"
                         />
                       </div>
+                      <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">MCP Endpoint (Optional)</label>
+                        <input
+                          type="url"
+                          value={thousandeyesMcpEndpoint}
+                          onChange={(e) => setThousandeyesMcpEndpoint(e.target.value)}
+                          className="w-full px-4 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 text-sm"
+                          placeholder="https://mcp.thousandeyes.com"
+                        />
+                        <p className="text-xs text-slate-500 mt-1">Enables dashboard access and AI-driven queries</p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">MCP Token (Optional)</label>
+                        <input
+                          type="password"
+                          value={thousandeyesMcpToken}
+                          onChange={(e) => setThousandeyesMcpToken(e.target.value)}
+                          className="w-full px-4 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 text-sm"
+                          placeholder="Defaults to OAuth token if not set"
+                        />
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1132,7 +1150,7 @@ export default function SetupPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      {(splunkHost || splunkBearerToken) && <span className="text-xs text-green-400">Configured</span>}
+                      {splunkBearerToken && <span className="text-xs text-green-400">Configured</span>}
                       <svg className={`w-5 h-5 text-slate-400 transition-transform ${expandedIntegration === 'splunk' ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                       </svg>
@@ -1343,7 +1361,7 @@ export default function SetupPage() {
                 </div>
                 <h3 className="text-xl font-semibold text-white mb-2">Setup Complete!</h3>
                 <p className="text-slate-400 mb-6">
-                  Your Lumen is ready to use.
+                  AI Ops Center is ready to use.
                 </p>
                 <div className="bg-slate-900/50 rounded-lg p-4 mb-6 text-left">
                   <h4 className="text-sm font-medium text-slate-300 mb-2">Quick Start:</h4>
@@ -1382,7 +1400,7 @@ export default function SetupPage() {
 
         {/* Footer */}
         <p className="text-center text-slate-500 text-sm mt-6">
-          Lumen MCP Server v1.0.0
+          AI Ops Center v1.0.0
         </p>
       </div>
     </div>

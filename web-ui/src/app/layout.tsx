@@ -5,7 +5,6 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { PermissionProvider } from "@/contexts/PermissionContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { AISessionProvider } from "@/contexts/AISessionContext";
-import { WebSocketProvider } from "@/contexts/WebSocketContext";
 import { DemoModeProvider } from "@/contexts/DemoModeContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { SetupCheck } from "@/components/SetupCheck";
@@ -22,8 +21,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Lumen - Network Intelligence",
-  description: "AI-powered network monitoring and incident correlation platform",
+  title: "AI Ops Center",
+  description: "AI-powered network operations, MCP server monitoring, and intelligent infrastructure management",
 };
 
 export default function RootLayout({
@@ -58,13 +57,11 @@ export default function RootLayout({
               <AuthProvider>
                 <PermissionProvider>
                   <AISessionProvider>
-                    <WebSocketProvider>
-                      <ErrorBoundary name="RootLayout">
-                        <ProtectedRoute>
-                          {children}
-                        </ProtectedRoute>
-                      </ErrorBoundary>
-                    </WebSocketProvider>
+                    <ErrorBoundary name="RootLayout">
+                      <ProtectedRoute>
+                        {children}
+                      </ProtectedRoute>
+                    </ErrorBoundary>
                   </AISessionProvider>
                 </PermissionProvider>
               </AuthProvider>

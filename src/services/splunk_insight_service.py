@@ -481,7 +481,7 @@ Respond in JSON format:
         credentials = f"{self.client_id}:{self.client_secret}"
         basic_auth = base64.b64encode(credentials.encode()).decode()
 
-        async with httpx.AsyncClient(verify=False, timeout=120.0) as client:
+        async with httpx.AsyncClient(verify=get_settings().cisco_circuit_verify_ssl, timeout=120.0) as client:
             # Get access token
             token_response = await client.post(
                 TOKEN_URL,

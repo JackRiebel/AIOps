@@ -273,7 +273,7 @@ class BulkDiscoveryService:
 
     def _generate_job_id(self) -> str:
         """Generate a unique job ID."""
-        return hashlib.md5(f"{time.time()}-{id(self)}".encode()).hexdigest()[:12]
+        return hashlib.sha256(f"{time.time()}-{id(self)}".encode()).hexdigest()[:12]
 
     async def discover_urls(
         self,
@@ -1168,7 +1168,7 @@ class BulkDiscoveryService:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(
                     SITEMAP_LOCATIONS["meraki"],
-                    headers={"User-Agent": "Mozilla/5.0 (compatible; Lumen/1.0)"},
+                    headers={"User-Agent": "Mozilla/5.0 (compatible; CiscoAIOpsHub/1.0)"},
                     follow_redirects=True,
                 )
 
@@ -1309,7 +1309,7 @@ class BulkDiscoveryService:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 response = await client.head(
                     url,
-                    headers={"User-Agent": "Mozilla/5.0 (compatible; Lumen/1.0)"},
+                    headers={"User-Agent": "Mozilla/5.0 (compatible; CiscoAIOpsHub/1.0)"},
                     follow_redirects=True,
                 )
 
@@ -1338,7 +1338,7 @@ class BulkDiscoveryService:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(
                     url,
-                    headers={"User-Agent": "Mozilla/5.0 (compatible; Lumen/1.0)"},
+                    headers={"User-Agent": "Mozilla/5.0 (compatible; CiscoAIOpsHub/1.0)"},
                     follow_redirects=True,
                 )
 

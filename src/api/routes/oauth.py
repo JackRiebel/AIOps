@@ -1,6 +1,7 @@
 """OAuth 2.0 and MFA authentication API routes."""
 
 import logging
+import os
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends, Request, Response, Query
 from fastapi.responses import RedirectResponse, JSONResponse
@@ -100,7 +101,7 @@ async def google_oauth_callback(
     Exchanges code for tokens and creates/updates user.
     """
     settings = get_settings()
-    frontend_url = "https://localhost:3000" if not settings.is_production else ""
+    frontend_url = settings.frontend_url
 
     # Handle OAuth errors (user denied, etc.)
     if error:
@@ -147,10 +148,14 @@ async def google_oauth_callback(
                 status_code=302,
             )
 
+        # Commit user updates (OAuth tokens, profile picture) before proceeding
+        await db.commit()
+
         # Check if MFA is required
         if DuoMFAService.is_enabled() and user.mfa_enabled:
             # Create MFA challenge
-            challenge_id = DuoMFAService.create_challenge(user.id, user.username)
+            challenge_id = await DuoMFAService.create_challenge(db, user.id, user.username)
+            await db.commit()
 
             # Redirect to MFA page with challenge
             return RedirectResponse(
@@ -160,27 +165,30 @@ async def google_oauth_callback(
 
         # Create session
         session = await AuthService.create_session(db, user, request)
+        await db.commit()
 
         # Set session cookie
         response = RedirectResponse(
-            url=f"{frontend_url}{redirect_after}" if not settings.is_production else redirect_after,
+            url=f"{frontend_url}{redirect_after}",
             status_code=302,
         )
+        force_secure = os.environ.get("FORCE_SECURE_COOKIES", "").lower() in ("true", "1", "yes")
+        secure = force_secure or request.url.scheme == "https"
         response.set_cookie(
             key=AuthService.SESSION_COOKIE_NAME,
             value=session.session_token,
             httponly=True,
-            secure=request.url.scheme == "https",
+            secure=secure,
             samesite="lax",
             max_age=AuthService.SESSION_DURATION_HOURS * 3600,
-            path="/",  # Ensure cookie is sent with all requests
+            path="/",
         )
 
         logger.info(f"OAuth login successful for user: {user.username}")
         return response
 
     except Exception as e:
-        logger.error(f"OAuth callback failed: {e}")
+        logger.error(f"OAuth callback failed: {e}", exc_info=True)
         return RedirectResponse(
             url=f"{frontend_url}/login?error=oauth_failed",
             status_code=302,
@@ -264,7 +272,7 @@ async def verify_mfa(
     - passcode: Verify a passcode from Duo app or hardware token
     """
     # Get challenge
-    challenge = DuoMFAService.get_challenge(verify_request.challenge_id)
+    challenge = await DuoMFAService.get_challenge(db, verify_request.challenge_id)
     if not challenge:
         raise HTTPException(status_code=400, detail="Invalid or expired MFA challenge")
 
@@ -288,7 +296,7 @@ async def verify_mfa(
         }
 
     # MFA verified - mark challenge and get user
-    DuoMFAService.mark_challenge_verified(verify_request.challenge_id)
+    await DuoMFAService.mark_challenge_verified(db, verify_request.challenge_id)
 
     from sqlalchemy import select
     result = await db.execute(select(User).where(User.id == user_id))
@@ -299,9 +307,12 @@ async def verify_mfa(
 
     # Create session
     session = await AuthService.create_session(db, user, request)
+    await db.commit()
 
-    # Return session info (frontend will set cookie)
-    return {
+    # Set session cookie on response
+    force_secure = os.environ.get("FORCE_SECURE_COOKIES", "").lower() in ("true", "1", "yes")
+    secure = force_secure or request.url.scheme == "https"
+    json_response = JSONResponse(content={
         "success": True,
         "message": "MFA verification successful",
         "session_token": session.session_token,
@@ -312,7 +323,17 @@ async def verify_mfa(
             "role": user.role,
             "full_name": user.full_name,
         },
-    }
+    })
+    json_response.set_cookie(
+        key=AuthService.SESSION_COOKIE_NAME,
+        value=session.session_token,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        max_age=AuthService.SESSION_DURATION_HOURS * 3600,
+        path="/",
+    )
+    return json_response
 
 
 @router.post("/api/auth/mfa/challenge")
@@ -350,7 +371,7 @@ async def create_mfa_challenge(
         }
 
     # Create challenge
-    challenge_id = DuoMFAService.create_challenge(user_id, username)
+    challenge_id = await DuoMFAService.create_challenge(db, user_id, username)
 
     return {
         "mfa_required": True,

@@ -106,6 +106,67 @@ export interface DeviceHealthData {
 
 export type VisualizationTab = 'organization' | 'topology' | 'performance';
 
+// New 4-tab visualization system
+export type VisualizationTabV2 = 'network-map' | 'performance-v2' | 'health-matrix';
+
+// Cross-platform annotation types for unified visualization
+export interface DeviceAnnotation {
+  deviceId: string;
+  deviceName: string;
+  teAgentIds: number[];
+  teTestCount: number;
+  teAlertCount: number;
+  splunkEventCount: number;
+  matchedIps: string[];
+}
+
+export interface LinkAnnotation {
+  edgeKey: string;
+  teLatency?: number;
+  teLoss?: number;
+  teJitter?: number;
+  teTestId?: number;
+  teTestName?: string;
+  teHealth: 'healthy' | 'degraded' | 'failing' | 'unknown';
+  splunkEvents: number;
+  _nodeIds?: string[]; // topology node IDs this annotation applies to
+}
+
+export interface PerformanceData {
+  timestamp: string;
+  latency?: number;
+  loss?: number;
+  jitter?: number;
+  throughputSent?: number;
+  throughputRecv?: number;
+  availability?: number;
+  source: 'meraki' | 'thousandeyes' | 'combined';
+}
+
+export interface PlatformStatus {
+  platform: 'meraki' | 'catalyst' | 'thousandeyes' | 'splunk';
+  configured: boolean;
+  healthy: boolean;
+  deviceCount: number;
+  onlinePercent: number;
+}
+
+export interface HealthMatrixRow {
+  id: string;
+  name: string;
+  platform: 'meraki' | 'thousandeyes' | 'catalyst';
+  entityType: 'device' | 'test' | 'agent';
+  cells: HealthMatrixCell[];
+  worstHealth: 'healthy' | 'degraded' | 'critical' | 'unknown';
+  alertCount: number;
+}
+
+export interface HealthMatrixCell {
+  timestamp: string;
+  status: 'healthy' | 'degraded' | 'critical' | 'unknown';
+  metrics?: { latency?: number; loss?: number; availability?: number };
+}
+
 export interface VisualizationFilters {
   organization?: string;
   networkId?: string;

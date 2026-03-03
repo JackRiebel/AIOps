@@ -179,6 +179,281 @@ async def list_sessions(
     return {"sessions": sessions, "count": len(sessions)}
 
 
+@router.get("/cost-network-analysis")
+async def get_cost_network_analysis(
+    hours: int = Query(24, ge=1, le=168),
+    provider: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Correlate AI cost data with TE network path metrics.
+
+    Shows the dollar impact of network conditions on AI inference costs.
+    Uses AIQueryTrace (real traced LLM calls with network timing) as the
+    primary data source, falling back to AICostLog if no traces exist.
+    """
+    import logging
+    _logger = logging.getLogger(__name__)
+
+    db = get_db()
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(hours=hours)
+
+    empty_response = {
+        "provider": provider,
+        "period_hours": hours,
+        "total_ai_cost_usd": 0,
+        "total_queries": 0,
+        "avg_api_latency_ms": 0,
+        "avg_network_latency_ms": None,
+        "network_latency_pct": None,
+        "latency_cost_impact": None,
+        "hourly_breakdown": [],
+        "path_summary": None,
+        "token_waste": None,
+        "user_impact": None,
+        "data_notes": "No AI query traces found in the selected period.",
+    }
+
+    async with db.session() as session:
+        # --- 1. Query AIQueryTrace for real traced LLM calls ---
+        # AIQueryTrace stores per-call data with network timing (TCP, TLS, TTFB)
+        from src.models.ai_trace import AIQueryTrace
+
+        trace_stmt = select(AIQueryTrace).where(
+            and_(
+                AIQueryTrace.start_time >= start,
+                AIQueryTrace.span_type == "llm_call",
+            )
+        )
+        if provider:
+            trace_stmt = trace_stmt.where(AIQueryTrace.provider.ilike(f"%{provider}%"))
+
+        result = await session.execute(trace_stmt)
+        traces = result.scalars().all()
+
+        # If no traces, fall back to AICostLog for basic cost data
+        if not traces:
+            from src.models.ai_cost_log import AICostLog
+            cost_stmt = select(AICostLog).where(AICostLog.timestamp >= start)
+            if provider:
+                cost_stmt = cost_stmt.where(AICostLog.model.ilike(f"%{provider}%"))
+            cost_result = await session.execute(cost_stmt)
+            cost_logs = cost_result.scalars().all()
+
+            if not cost_logs:
+                return empty_response
+
+            # Build basic response from cost logs (no latency data available)
+            total_cost = sum(float(c.cost_usd or 0) for c in cost_logs)
+            total_input = sum(c.input_tokens or 0 for c in cost_logs)
+            total_output = sum(c.output_tokens or 0 for c in cost_logs)
+
+            hourly: dict = {}
+            for c in cost_logs:
+                hour_key = c.timestamp.strftime("%Y-%m-%dT%H:00")
+                bucket = hourly.setdefault(hour_key, {"queries": 0, "cost_usd": 0.0})
+                bucket["queries"] += 1
+                bucket["cost_usd"] += float(c.cost_usd or 0)
+
+            hourly_breakdown = [
+                {
+                    "hour": hk,
+                    "queries": b["queries"],
+                    "cost_usd": round(b["cost_usd"], 4),
+                    "avg_api_latency_ms": 0,
+                    "path_health": "healthy",
+                }
+                for hk, b in sorted(hourly.items())
+            ]
+
+            return {
+                "provider": provider,
+                "period_hours": hours,
+                "total_ai_cost_usd": round(total_cost, 4),
+                "total_queries": len(cost_logs),
+                "avg_api_latency_ms": 0,
+                "avg_network_latency_ms": None,
+                "network_latency_pct": None,
+                "latency_cost_impact": None,
+                "hourly_breakdown": hourly_breakdown,
+                "path_summary": None,
+                "token_waste": None,
+                "user_impact": None,
+            }
+
+        # --- 2. Aggregate from real trace data ---
+        total_cost = sum(float(t.cost_usd or 0) for t in traces)
+        durations = [t.duration_ms for t in traces if t.duration_ms]
+        avg_latency = sum(durations) / len(durations) if durations else 0
+
+        # Network latency from real TCP+TLS timing
+        network_latencies = []
+        for t in traces:
+            net = (t.tcp_connect_ms or 0) + (t.tls_ms or 0)
+            if net > 0:
+                network_latencies.append(net)
+        avg_network_latency = (
+            round(sum(network_latencies) / len(network_latencies), 1)
+            if network_latencies else None
+        )
+
+        # --- 3. Hourly breakdown ---
+        hourly: dict = {}
+        for t in traces:
+            hour_key = t.start_time.strftime("%Y-%m-%dT%H:00")
+            bucket = hourly.setdefault(hour_key, {"queries": 0, "cost_usd": 0.0, "latencies": []})
+            bucket["queries"] += 1
+            bucket["cost_usd"] += float(t.cost_usd or 0)
+            if t.duration_ms:
+                bucket["latencies"].append(t.duration_ms)
+
+        # Determine health thresholds based on actual data distribution
+        # LLM API calls normally take 2-15s, so use p75 as "healthy" baseline
+        all_durations_for_threshold = sorted(durations) if durations else []
+        p75_duration = all_durations_for_threshold[int(len(all_durations_for_threshold) * 0.75)] if len(all_durations_for_threshold) > 3 else 15000
+        degraded_threshold = p75_duration * 1.5  # 50% above p75 = degraded
+
+        hourly_breakdown = []
+        for hour_key in sorted(hourly.keys()):
+            b = hourly[hour_key]
+            avg_lat = sum(b["latencies"]) / len(b["latencies"]) if b["latencies"] else 0
+            hourly_breakdown.append({
+                "hour": hour_key,
+                "queries": b["queries"],
+                "cost_usd": round(b["cost_usd"], 4),
+                "avg_api_latency_ms": round(avg_lat, 1),
+                "path_health": "degraded" if avg_lat > degraded_threshold else "healthy",
+            })
+
+        # --- 4. Fetch TE path data (best-effort) ---
+        path_summary = None
+        try:
+            from src.api.routes.ai_endpoint_monitor import (
+                _list_ai_assurance_tests,
+                _group_by_provider,
+            )
+            ai_tests = await _list_ai_assurance_tests()
+            grouped = _group_by_provider(ai_tests)
+            target_provider = provider or "anthropic"
+            provider_tests = grouped.get(target_provider, [])
+
+            net_test = next(
+                (t for t in provider_tests if "Network Path" in t.get("testName", "")),
+                None,
+            )
+            if net_test:
+                test_id = net_test.get("testId") or net_test.get("id")
+                if test_id:
+                    from src.api.routes.thousandeyes import make_api_request
+                    path_data = await make_api_request("GET", f"test-results/{test_id}/path-vis")
+                    if path_data and "error" not in path_data:
+                        path_summary = {"test_id": test_id, "data": path_data}
+        except Exception as exc:
+            _logger.debug(f"TE path data unavailable: {exc}")
+
+        # Fall back to TE path max hop delay if no span-level network timing
+        if avg_network_latency is None and path_summary:
+            try:
+                results = path_summary.get("data", {}).get("results", [])
+                if results:
+                    max_delay = max(
+                        (float(hop.get("delay", 0))
+                         for r in results
+                         for hop in r.get("pathTraces", [{}])[0].get("hops", [])
+                         if hop.get("delay")),
+                        default=0,
+                    )
+                    if max_delay > 0:
+                        avg_network_latency = round(max_delay, 1)
+            except Exception:
+                pass
+
+        # --- 5. Calculate latency & cost analysis ---
+        sorted_durations = sorted(durations) if durations else []
+        # Baseline = p10 (best-case observed latency, excluding outlier fast responses)
+        baseline_ms = sorted_durations[len(sorted_durations) // 10] if len(sorted_durations) > 10 else (sorted_durations[0] if sorted_durations else 0)
+        excess_ms = max(0, avg_latency - baseline_ms)
+
+        # Total user time lost to excess latency (factual: no cost inference)
+        total_excess_wait_s = round(excess_ms * len(traces) / 1000, 1)
+
+        # Suspected slow queries: queries beyond p95 may indicate retries,
+        # API throttling, or transient issues. This is heuristic — we cannot
+        # distinguish true retries from legitimately slow responses.
+        p95_threshold = sorted_durations[int(len(sorted_durations) * 0.95)] if len(sorted_durations) > 20 else (baseline_ms * 3 if baseline_ms > 0 else 30000)
+        suspected_slow = sum(1 for d in durations if d > p95_threshold)
+
+        # Estimated retry cost: IF slow queries were retries, this is what
+        # the duplicate token processing would cost. Actual retries may be
+        # lower — this is an upper-bound estimate.
+        cost_per_query = total_cost / len(traces) if traces else 0
+        estimated_retry_cost = suspected_slow * cost_per_query
+
+        # Token analysis
+        input_tokens_list = [t.input_tokens for t in traces if t.input_tokens]
+        output_tokens_list = [t.output_tokens for t in traces if t.output_tokens]
+        avg_input_tokens = sum(input_tokens_list) / len(input_tokens_list) if input_tokens_list else 0
+        estimated_retry_tokens = int(suspected_slow * avg_input_tokens)
+        total_productive_tokens = sum(input_tokens_list) + sum(output_tokens_list)
+
+        # User impact metrics
+        p95_idx = int(len(sorted_durations) * 0.95)
+        p50_idx = len(sorted_durations) // 2
+        p50_wait = sorted_durations[p50_idx] if sorted_durations else 0
+        p95_wait = sorted_durations[p95_idx] if p95_idx < len(sorted_durations) else p50_wait
+        timeout_threshold = 30000  # 30s — standard API timeout
+        timeout_count = sum(1 for d in durations if d > timeout_threshold)
+        timeout_probability = (timeout_count / len(durations) * 100) if durations else 0
+        degraded_query_count = sum(b["queries"] for b in hourly_breakdown if b["path_health"] == "degraded")
+        degraded_query_pct = (degraded_query_count / len(traces) * 100) if traces else 0
+
+        latency_cost_impact = {
+            "baseline_latency_ms": round(baseline_ms, 1),
+            "actual_avg_latency_ms": round(avg_latency, 1),
+            "excess_latency_ms": round(excess_ms, 1),
+            # Total user time lost above baseline (factual)
+            "total_excess_wait_s": total_excess_wait_s,
+            # Suspected slow queries (heuristic: >p95 duration)
+            "suspected_slow_queries": suspected_slow,
+            # Upper-bound retry cost estimate (if all slow queries were retries)
+            "estimated_retry_cost_usd": round(estimated_retry_cost, 4),
+        }
+
+        network_pct = None
+        if avg_network_latency and avg_latency > 0:
+            network_pct = round(avg_network_latency / avg_latency * 100, 1)
+
+        return {
+            "provider": provider,
+            "period_hours": hours,
+            "total_ai_cost_usd": round(total_cost, 4),
+            "total_queries": len(traces),
+            "avg_api_latency_ms": round(avg_latency, 1),
+            "avg_network_latency_ms": avg_network_latency,
+            "network_latency_pct": network_pct,
+            "latency_cost_impact": latency_cost_impact,
+            "hourly_breakdown": hourly_breakdown,
+            "path_summary": path_summary,
+            "token_waste": {
+                "suspected_slow_queries": suspected_slow,
+                "estimated_retry_tokens": estimated_retry_tokens,
+                "total_productive_tokens": total_productive_tokens,
+                "waste_pct": round(estimated_retry_tokens / max(total_productive_tokens, 1) * 100, 1),
+                "estimated_retry_cost_usd": round(estimated_retry_cost, 4),
+            },
+            "user_impact": {
+                "avg_wait_time_ms": round(avg_latency, 1),
+                "p50_wait_time_ms": round(p50_wait, 1),
+                "p95_wait_time_ms": round(p95_wait, 1),
+                "timeout_probability_pct": round(timeout_probability, 1),
+                "degraded_query_pct": round(degraded_query_pct, 1),
+                "total_excess_wait_s": total_excess_wait_s,
+                "timeout_count": timeout_count,
+                "total_queries": len(traces),
+            },
+        }
+
+
 @router.get("/{session_id}")
 async def get_session(
     session_id: int,

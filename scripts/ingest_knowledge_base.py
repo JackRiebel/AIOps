@@ -964,7 +964,7 @@ async def ingest_documentation(openai_key: str):
                 logger.error(f"  ✗ Failed: {e}")
 
         # Ingest Meraki OpenAPI spec
-        meraki_spec_path = "/Users/jariebel/Desktop/Lumen/openapi_specs/meraki_dashboard.json"
+        meraki_spec_path = "./openapi_specs/meraki_dashboard.json"
         if Path(meraki_spec_path).exists():
             try:
                 logger.info(f"\nIngesting: Meraki Dashboard OpenAPI Spec")

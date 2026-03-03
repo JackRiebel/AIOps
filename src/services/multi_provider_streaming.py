@@ -417,7 +417,7 @@ class CiscoCircuitStreamingProvider(BaseStreamingProvider):
         credentials = f"{self.client_id}:{self.client_secret}"
         basic_auth = base64.b64encode(credentials.encode()).decode()
 
-        async with httpx.AsyncClient(verify=False) as client:
+        async with httpx.AsyncClient(verify=get_settings().cisco_circuit_verify_ssl) as client:
             response = await client.post(
                 "https://id.cisco.com/oauth2/default/v1/token",
                 headers={
@@ -508,7 +508,7 @@ class CiscoCircuitStreamingProvider(BaseStreamingProvider):
             total_input_tokens = 0
             total_output_tokens = 0
 
-            async with httpx.AsyncClient(verify=False) as client:
+            async with httpx.AsyncClient(verify=get_settings().cisco_circuit_verify_ssl) as client:
                 while True:
                     request_body = {
                         "messages": cisco_messages,

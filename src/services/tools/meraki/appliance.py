@@ -23,6 +23,17 @@ from src.services.meraki_api import MerakiAPIClient
 
 logger = logging.getLogger(__name__)
 
+
+def _validate_context(context: Any) -> Dict:
+    """Validate that context has a Meraki client configured."""
+    if not hasattr(context, 'client') or context.client is None:
+        return {
+            "success": False,
+            "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+        }
+    return None
+
+
 # =============================================================================
 # VLAN HANDLERS (7 tools)
 # =============================================================================
@@ -30,6 +41,7 @@ logger = logging.getLogger(__name__)
 async def handle_appliance_list_vlans(params: Dict, context: Any) -> Dict:
     """List VLANs for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -44,6 +56,7 @@ async def handle_appliance_list_vlans(params: Dict, context: Any) -> Dict:
 async def handle_appliance_get_vlan(params: Dict, context: Any) -> Dict:
     """Get a specific VLAN."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         vlan_id = params.get("vlan_id")
         if not network_id or not vlan_id:
@@ -59,6 +72,7 @@ async def handle_appliance_get_vlan(params: Dict, context: Any) -> Dict:
 async def handle_appliance_create_vlan(params: Dict, context: Any) -> Dict:
     """Create a new VLAN."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -74,6 +88,7 @@ async def handle_appliance_create_vlan(params: Dict, context: Any) -> Dict:
 async def handle_appliance_update_vlan(params: Dict, context: Any) -> Dict:
     """Update a VLAN."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         vlan_id = params.get("vlan_id")
         if not network_id or not vlan_id:
@@ -90,6 +105,7 @@ async def handle_appliance_update_vlan(params: Dict, context: Any) -> Dict:
 async def handle_appliance_delete_vlan(params: Dict, context: Any) -> Dict:
     """Delete a VLAN."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         vlan_id = params.get("vlan_id")
         if not network_id or not vlan_id:
@@ -105,6 +121,7 @@ async def handle_appliance_delete_vlan(params: Dict, context: Any) -> Dict:
 async def handle_appliance_get_vlans_settings(params: Dict, context: Any) -> Dict:
     """Get VLAN settings for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -119,6 +136,7 @@ async def handle_appliance_get_vlans_settings(params: Dict, context: Any) -> Dic
 async def handle_appliance_update_vlans_settings(params: Dict, context: Any) -> Dict:
     """Update VLAN settings for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -138,6 +156,7 @@ async def handle_appliance_update_vlans_settings(params: Dict, context: Any) -> 
 async def handle_appliance_get_l3_firewall_rules(params: Dict, context: Any) -> Dict:
     """Get L3 firewall rules for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -152,6 +171,7 @@ async def handle_appliance_get_l3_firewall_rules(params: Dict, context: Any) -> 
 async def handle_appliance_update_l3_firewall_rules(params: Dict, context: Any) -> Dict:
     """Update L3 firewall rules for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -167,6 +187,7 @@ async def handle_appliance_update_l3_firewall_rules(params: Dict, context: Any) 
 async def handle_appliance_get_l7_firewall_rules(params: Dict, context: Any) -> Dict:
     """Get L7 firewall rules for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -181,6 +202,7 @@ async def handle_appliance_get_l7_firewall_rules(params: Dict, context: Any) -> 
 async def handle_appliance_update_l7_firewall_rules(params: Dict, context: Any) -> Dict:
     """Update L7 firewall rules for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -196,6 +218,7 @@ async def handle_appliance_update_l7_firewall_rules(params: Dict, context: Any) 
 async def handle_appliance_get_l7_firewall_categories(params: Dict, context: Any) -> Dict:
     """Get L7 firewall application categories."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -210,6 +233,7 @@ async def handle_appliance_get_l7_firewall_categories(params: Dict, context: Any
 async def handle_appliance_get_inbound_firewall_rules(params: Dict, context: Any) -> Dict:
     """Get inbound firewall rules for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -224,6 +248,7 @@ async def handle_appliance_get_inbound_firewall_rules(params: Dict, context: Any
 async def handle_appliance_update_inbound_firewall_rules(params: Dict, context: Any) -> Dict:
     """Update inbound firewall rules for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -239,6 +264,7 @@ async def handle_appliance_update_inbound_firewall_rules(params: Dict, context: 
 async def handle_appliance_get_cellular_firewall_rules(params: Dict, context: Any) -> Dict:
     """Get cellular firewall rules for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -253,6 +279,7 @@ async def handle_appliance_get_cellular_firewall_rules(params: Dict, context: An
 async def handle_appliance_update_cellular_firewall_rules(params: Dict, context: Any) -> Dict:
     """Update cellular firewall rules for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -272,6 +299,7 @@ async def handle_appliance_update_cellular_firewall_rules(params: Dict, context:
 async def handle_appliance_get_port_forwarding_rules(params: Dict, context: Any) -> Dict:
     """Get port forwarding rules for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -286,6 +314,7 @@ async def handle_appliance_get_port_forwarding_rules(params: Dict, context: Any)
 async def handle_appliance_update_port_forwarding_rules(params: Dict, context: Any) -> Dict:
     """Update port forwarding rules for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -301,6 +330,7 @@ async def handle_appliance_update_port_forwarding_rules(params: Dict, context: A
 async def handle_appliance_get_one_to_one_nat_rules(params: Dict, context: Any) -> Dict:
     """Get 1:1 NAT rules for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -315,6 +345,7 @@ async def handle_appliance_get_one_to_one_nat_rules(params: Dict, context: Any) 
 async def handle_appliance_update_one_to_one_nat_rules(params: Dict, context: Any) -> Dict:
     """Update 1:1 NAT rules for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -330,6 +361,7 @@ async def handle_appliance_update_one_to_one_nat_rules(params: Dict, context: An
 async def handle_appliance_get_one_to_many_nat_rules(params: Dict, context: Any) -> Dict:
     """Get 1:many NAT rules for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -344,6 +376,7 @@ async def handle_appliance_get_one_to_many_nat_rules(params: Dict, context: Any)
 async def handle_appliance_update_one_to_many_nat_rules(params: Dict, context: Any) -> Dict:
     """Update 1:many NAT rules for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -363,6 +396,7 @@ async def handle_appliance_update_one_to_many_nat_rules(params: Dict, context: A
 async def handle_appliance_get_security_intrusion(params: Dict, context: Any) -> Dict:
     """Get intrusion detection settings for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -377,6 +411,7 @@ async def handle_appliance_get_security_intrusion(params: Dict, context: Any) ->
 async def handle_appliance_update_security_intrusion(params: Dict, context: Any) -> Dict:
     """Update intrusion detection settings for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -392,6 +427,7 @@ async def handle_appliance_update_security_intrusion(params: Dict, context: Any)
 async def handle_appliance_get_security_malware(params: Dict, context: Any) -> Dict:
     """Get malware protection settings for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -406,6 +442,7 @@ async def handle_appliance_get_security_malware(params: Dict, context: Any) -> D
 async def handle_appliance_update_security_malware(params: Dict, context: Any) -> Dict:
     """Update malware protection settings for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -421,6 +458,7 @@ async def handle_appliance_update_security_malware(params: Dict, context: Any) -
 async def handle_appliance_get_security_events(params: Dict, context: Any) -> Dict:
     """Get security events for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -463,6 +501,7 @@ async def handle_appliance_get_org_security_events(params: Dict, context: Any) -
 async def handle_appliance_get_content_filtering(params: Dict, context: Any) -> Dict:
     """Get content filtering settings for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -477,6 +516,7 @@ async def handle_appliance_get_content_filtering(params: Dict, context: Any) -> 
 async def handle_appliance_update_content_filtering(params: Dict, context: Any) -> Dict:
     """Update content filtering settings for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -492,6 +532,7 @@ async def handle_appliance_update_content_filtering(params: Dict, context: Any) 
 async def handle_appliance_get_content_filtering_categories(params: Dict, context: Any) -> Dict:
     """Get content filtering categories for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -510,6 +551,7 @@ async def handle_appliance_get_content_filtering_categories(params: Dict, contex
 async def handle_appliance_get_site_to_site_vpn(params: Dict, context: Any) -> Dict:
     """Get site-to-site VPN settings for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -524,6 +566,7 @@ async def handle_appliance_get_site_to_site_vpn(params: Dict, context: Any) -> D
 async def handle_appliance_update_site_to_site_vpn(params: Dict, context: Any) -> Dict:
     """Update site-to-site VPN settings for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -539,6 +582,7 @@ async def handle_appliance_update_site_to_site_vpn(params: Dict, context: Any) -
 async def handle_appliance_get_vpn_bgp(params: Dict, context: Any) -> Dict:
     """Get BGP configuration for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -553,6 +597,7 @@ async def handle_appliance_get_vpn_bgp(params: Dict, context: Any) -> Dict:
 async def handle_appliance_update_vpn_bgp(params: Dict, context: Any) -> Dict:
     """Update BGP configuration for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -639,6 +684,7 @@ async def handle_appliance_get_vpn_stats(params: Dict, context: Any) -> Dict:
 async def handle_appliance_get_traffic_shaping(params: Dict, context: Any) -> Dict:
     """Get traffic shaping settings for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -653,6 +699,7 @@ async def handle_appliance_get_traffic_shaping(params: Dict, context: Any) -> Di
 async def handle_appliance_update_traffic_shaping(params: Dict, context: Any) -> Dict:
     """Update traffic shaping settings for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -668,6 +715,7 @@ async def handle_appliance_update_traffic_shaping(params: Dict, context: Any) ->
 async def handle_appliance_get_traffic_shaping_rules(params: Dict, context: Any) -> Dict:
     """Get traffic shaping rules for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -682,6 +730,7 @@ async def handle_appliance_get_traffic_shaping_rules(params: Dict, context: Any)
 async def handle_appliance_update_traffic_shaping_rules(params: Dict, context: Any) -> Dict:
     """Update traffic shaping rules for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -697,6 +746,7 @@ async def handle_appliance_update_traffic_shaping_rules(params: Dict, context: A
 async def handle_appliance_get_uplink_bandwidth(params: Dict, context: Any) -> Dict:
     """Get uplink bandwidth settings for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -711,6 +761,7 @@ async def handle_appliance_get_uplink_bandwidth(params: Dict, context: Any) -> D
 async def handle_appliance_update_uplink_bandwidth(params: Dict, context: Any) -> Dict:
     """Update uplink bandwidth settings for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -726,6 +777,7 @@ async def handle_appliance_update_uplink_bandwidth(params: Dict, context: Any) -
 async def handle_appliance_get_uplink_selection(params: Dict, context: Any) -> Dict:
     """Get uplink selection settings for a network (SD-WAN)."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -740,6 +792,7 @@ async def handle_appliance_get_uplink_selection(params: Dict, context: Any) -> D
 async def handle_appliance_update_uplink_selection(params: Dict, context: Any) -> Dict:
     """Update uplink selection settings for a network (SD-WAN)."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -759,6 +812,7 @@ async def handle_appliance_update_uplink_selection(params: Dict, context: Any) -
 async def handle_appliance_list_static_routes(params: Dict, context: Any) -> Dict:
     """List static routes for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -773,6 +827,7 @@ async def handle_appliance_list_static_routes(params: Dict, context: Any) -> Dic
 async def handle_appliance_get_static_route(params: Dict, context: Any) -> Dict:
     """Get a specific static route."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         static_route_id = params.get("static_route_id")
         if not network_id or not static_route_id:
@@ -788,6 +843,7 @@ async def handle_appliance_get_static_route(params: Dict, context: Any) -> Dict:
 async def handle_appliance_create_static_route(params: Dict, context: Any) -> Dict:
     """Create a static route."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -803,6 +859,7 @@ async def handle_appliance_create_static_route(params: Dict, context: Any) -> Di
 async def handle_appliance_update_static_route(params: Dict, context: Any) -> Dict:
     """Update a static route."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         static_route_id = params.get("static_route_id")
         if not network_id or not static_route_id:
@@ -819,6 +876,7 @@ async def handle_appliance_update_static_route(params: Dict, context: Any) -> Di
 async def handle_appliance_delete_static_route(params: Dict, context: Any) -> Dict:
     """Delete a static route."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         static_route_id = params.get("static_route_id")
         if not network_id or not static_route_id:
@@ -838,6 +896,7 @@ async def handle_appliance_delete_static_route(params: Dict, context: Any) -> Di
 async def handle_appliance_list_ports(params: Dict, context: Any) -> Dict:
     """List ports for a network appliance."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -852,6 +911,7 @@ async def handle_appliance_list_ports(params: Dict, context: Any) -> Dict:
 async def handle_appliance_get_port(params: Dict, context: Any) -> Dict:
     """Get a specific port on a network appliance."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         port_id = params.get("port_id")
         if not network_id or not port_id:
@@ -867,6 +927,7 @@ async def handle_appliance_get_port(params: Dict, context: Any) -> Dict:
 async def handle_appliance_update_port(params: Dict, context: Any) -> Dict:
     """Update a port on a network appliance."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         port_id = params.get("port_id")
         if not network_id or not port_id:
@@ -887,6 +948,7 @@ async def handle_appliance_update_port(params: Dict, context: Any) -> Dict:
 async def handle_appliance_get_uplinks_settings(params: Dict, context: Any) -> Dict:
     """Get uplink settings for a device."""
     try:
+        if err := _validate_context(context): return err
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -901,6 +963,7 @@ async def handle_appliance_get_uplinks_settings(params: Dict, context: Any) -> D
 async def handle_appliance_update_uplinks_settings(params: Dict, context: Any) -> Dict:
     """Update uplink settings for a device."""
     try:
+        if err := _validate_context(context): return err
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -958,6 +1021,7 @@ async def handle_appliance_get_uplinks_usage(params: Dict, context: Any) -> Dict
 async def handle_appliance_get_single_lan(params: Dict, context: Any) -> Dict:
     """Get single LAN configuration for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -972,6 +1036,7 @@ async def handle_appliance_get_single_lan(params: Dict, context: Any) -> Dict:
 async def handle_appliance_update_single_lan(params: Dict, context: Any) -> Dict:
     """Update single LAN configuration for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -991,6 +1056,7 @@ async def handle_appliance_update_single_lan(params: Dict, context: Any) -> Dict
 async def handle_appliance_get_dhcp_subnets(params: Dict, context: Any) -> Dict:
     """Get DHCP subnets for a device."""
     try:
+        if err := _validate_context(context): return err
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -1009,6 +1075,7 @@ async def handle_appliance_get_dhcp_subnets(params: Dict, context: Any) -> Dict:
 async def handle_appliance_get_performance(params: Dict, context: Any) -> Dict:
     """Get performance metrics for a device."""
     try:
+        if err := _validate_context(context): return err
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -1027,6 +1094,7 @@ async def handle_appliance_get_performance(params: Dict, context: Any) -> Dict:
 async def handle_appliance_get_warm_spare(params: Dict, context: Any) -> Dict:
     """Get warm spare configuration for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -1041,6 +1109,7 @@ async def handle_appliance_get_warm_spare(params: Dict, context: Any) -> Dict:
 async def handle_appliance_update_warm_spare(params: Dict, context: Any) -> Dict:
     """Update warm spare configuration for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -1056,6 +1125,7 @@ async def handle_appliance_update_warm_spare(params: Dict, context: Any) -> Dict
 async def handle_appliance_swap_warm_spare(params: Dict, context: Any) -> Dict:
     """Swap warm spare for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -1074,6 +1144,7 @@ async def handle_appliance_swap_warm_spare(params: Dict, context: Any) -> Dict:
 async def handle_appliance_get_prefixes_delegated_statics(params: Dict, context: Any) -> Dict:
     """Get prefixes delegated statics for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -1088,6 +1159,7 @@ async def handle_appliance_get_prefixes_delegated_statics(params: Dict, context:
 async def handle_appliance_create_prefixes_delegated_static(params: Dict, context: Any) -> Dict:
     """Create a prefixes delegated static for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -1103,6 +1175,7 @@ async def handle_appliance_create_prefixes_delegated_static(params: Dict, contex
 async def handle_appliance_update_prefixes_delegated_static(params: Dict, context: Any) -> Dict:
     """Update a prefixes delegated static for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         static_delegated_prefix_id = params.get("static_delegated_prefix_id")
         if not network_id or not static_delegated_prefix_id:
@@ -1119,6 +1192,7 @@ async def handle_appliance_update_prefixes_delegated_static(params: Dict, contex
 async def handle_appliance_delete_prefixes_delegated_static(params: Dict, context: Any) -> Dict:
     """Delete a prefixes delegated static for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         static_delegated_prefix_id = params.get("static_delegated_prefix_id")
         if not network_id or not static_delegated_prefix_id:
@@ -1138,6 +1212,7 @@ async def handle_appliance_delete_prefixes_delegated_static(params: Dict, contex
 async def handle_appliance_get_sdwan_internet_policies(params: Dict, context: Any) -> Dict:
     """Get SD-WAN internet policies for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -1152,6 +1227,7 @@ async def handle_appliance_get_sdwan_internet_policies(params: Dict, context: An
 async def handle_appliance_update_sdwan_internet_policies(params: Dict, context: Any) -> Dict:
     """Update SD-WAN internet policies for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}

@@ -18,10 +18,11 @@ Tool naming convention: meraki_{action}_{entity}
 """
 
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from src.services.tool_registry import get_tool_registry, Tool, create_tool
 from src.services.meraki_api import MerakiAPIClient
+from src.services.instrumented_httpx import InstrumentedAsyncTransport, RequestTiming
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,25 @@ class MerakiExecutionContext:
         self.org_id = org_id
         self.network_id = network_id
         self.cached_devices = cached_devices or []
+
+        # Instrument the Meraki client's httpx transport for network timing
+        try:
+            import httpx
+            self._transport = InstrumentedAsyncTransport(verify=self.client.verify_ssl)
+            self.client.client = httpx.AsyncClient(
+                transport=self._transport,
+                verify=self.client.verify_ssl,
+                timeout=httpx.Timeout(self.client.settings.api_timeout),
+                follow_redirects=True,
+            )
+        except Exception:
+            self._transport = None
+
+    def pop_timing(self) -> Optional[RequestTiming]:
+        """Pop and return the last captured network timing."""
+        if self._transport:
+            return self._transport.pop_timing()
+        return None
 
 
 # =============================================================================
@@ -514,6 +534,224 @@ async def handle_get_wireless_channel_utilization(params: Dict, context: MerakiE
     return success_result(data=data)
 
 
+async def handle_analyze_network_wireless(params: Dict, context: MerakiExecutionContext) -> Dict:
+    """Comprehensive wireless analysis for a network - resolves network name to ID automatically.
+
+    This composite tool handles:
+    1. Network name resolution (if name provided instead of ID)
+    2. Device enumeration and wireless device detection
+    3. SSID listing
+    4. Channel utilization data
+    5. Wireless health metrics
+
+    Returns a comprehensive wireless analysis summary.
+    """
+    # Get network_id - either directly or by resolving network name
+    network_id = params.get("network_id") or context.network_id
+    network_name = params.get("network_name") or params.get("name")
+    org_id = params.get("organization_id") or context.org_id
+
+    # If we have a network name but no network_id, resolve it
+    if network_name and not network_id:
+        if not org_id:
+            return error_result(
+                "organization_id is required to resolve network name. "
+                "Please provide either network_id directly or organization_id with network_name."
+            )
+
+        try:
+            networks = await api_get(context.client, f"/organizations/{org_id}/networks")
+            name_lower = network_name.lower()
+            matches = [n for n in networks if name_lower in n.get("name", "").lower()]
+
+            if not matches:
+                available = [n.get("name", "Unknown") for n in networks[:10]]
+                return error_result(
+                    f"No network found matching '{network_name}'. "
+                    f"Available networks: {', '.join(available)}"
+                )
+
+            # Use exact match if found, otherwise first partial match
+            target = next(
+                (n for n in matches if n.get("name", "").lower() == name_lower),
+                matches[0]
+            )
+            network_id = target["id"]
+            network_name = target.get("name", network_name)
+            logger.info(f"Resolved network '{network_name}' to ID: {network_id}")
+        except Exception as e:
+            return error_result(f"Failed to resolve network name: {e}")
+
+    if not network_id:
+        return error_result(
+            "Either network_id or network_name is required. "
+            "Example: {'network_name': 'Demo Home'} or {'network_id': 'L_123456789'}"
+        )
+
+    # Initialize result structure
+    analysis = {
+        "network_id": network_id,
+        "network_name": network_name or "Unknown",
+        "wireless_devices": [],
+        "ssids": [],
+        "channel_utilization": None,
+        "summary": "",
+        "recommendations": [],
+    }
+
+    try:
+        # 1. Get network details if we don't have the name
+        if not network_name or network_name == "Unknown":
+            try:
+                net_data = await api_get(context.client, f"/networks/{network_id}")
+                analysis["network_name"] = net_data.get("name", "Unknown")
+            except Exception:
+                pass
+
+        # 2. Get all devices and filter for wireless APs (MR, CW, GR series)
+        try:
+            devices = await api_get(context.client, f"/networks/{network_id}/devices")
+            wireless_devices = [
+                d for d in devices
+                if d.get("model", "").startswith(("MR", "CW", "GR"))
+            ]
+
+            # Get device statuses
+            if wireless_devices and org_id:
+                try:
+                    statuses = await api_get(context.client, f"/organizations/{org_id}/devices/statuses")
+                    status_map = {s.get("serial"): s for s in statuses}
+
+                    for device in wireless_devices:
+                        serial = device.get("serial", "")
+                        status_info = status_map.get(serial, {})
+                        device["status"] = status_info.get("status", "unknown")
+                        device["lanIp"] = status_info.get("lanIp") or device.get("lanIp")
+                        device["publicIp"] = status_info.get("publicIp")
+                except Exception:
+                    pass
+
+            analysis["wireless_devices"] = [
+                {
+                    "name": d.get("name", d.get("serial", "Unknown")),
+                    "serial": d.get("serial"),
+                    "model": d.get("model"),
+                    "status": d.get("status", "unknown"),
+                    "lanIp": d.get("lanIp"),
+                    "mac": d.get("mac"),
+                    "tags": d.get("tags", []),
+                }
+                for d in wireless_devices
+            ]
+
+            # Also count all devices for context
+            analysis["total_devices"] = len(devices)
+            analysis["device_breakdown"] = {
+                "wireless_aps": len(wireless_devices),
+                "switches": len([d for d in devices if d.get("model", "").startswith("MS")]),
+                "appliances": len([d for d in devices if d.get("model", "").startswith(("MX", "Z"))]),
+                "cameras": len([d for d in devices if d.get("model", "").startswith("MV")]),
+                "sensors": len([d for d in devices if d.get("model", "").startswith("MT")]),
+            }
+        except Exception as e:
+            logger.warning(f"Failed to get devices: {e}")
+
+        # 3. Get SSIDs
+        try:
+            ssids = await api_get(context.client, f"/networks/{network_id}/wireless/ssids")
+            # Only include enabled SSIDs
+            enabled_ssids = [s for s in ssids if s.get("enabled")]
+            analysis["ssids"] = [
+                {
+                    "number": s.get("number"),
+                    "name": s.get("name"),
+                    "enabled": s.get("enabled"),
+                    "authMode": s.get("authMode"),
+                    "encryptionMode": s.get("encryptionMode"),
+                    "visible": s.get("visible", True),
+                }
+                for s in enabled_ssids
+            ]
+        except Exception as e:
+            # Network might not have wireless capability
+            logger.debug(f"No SSIDs found: {e}")
+
+        # 4. Get channel utilization (last hour)
+        try:
+            util_data = await api_get(
+                context.client,
+                f"/networks/{network_id}/wireless/channelUtilizationHistory",
+                params={"timespan": 3600}
+            )
+            if util_data:
+                # Summarize channel utilization
+                total_util_24 = []
+                total_util_5 = []
+
+                for item in util_data:
+                    wifi0 = item.get("wifi0", [])
+                    wifi1 = item.get("wifi1", [])
+
+                    if wifi0:
+                        total_util_24.extend([w.get("utilization", 0) for w in wifi0])
+                    if wifi1:
+                        total_util_5.extend([w.get("utilization", 0) for w in wifi1])
+
+                analysis["channel_utilization"] = {
+                    "band_2_4_ghz_avg": round(sum(total_util_24) / len(total_util_24), 1) if total_util_24 else 0,
+                    "band_5_ghz_avg": round(sum(total_util_5) / len(total_util_5), 1) if total_util_5 else 0,
+                    "sample_count": len(util_data),
+                }
+        except Exception as e:
+            logger.debug(f"No channel utilization data: {e}")
+
+        # 5. Build summary and recommendations
+        ap_count = len(analysis["wireless_devices"])
+        ssid_count = len(analysis["ssids"])
+
+        if ap_count == 0:
+            analysis["summary"] = (
+                f"Network '{analysis['network_name']}' has {analysis.get('total_devices', 0)} devices "
+                f"but no wireless access points (MR, CW, or GR models) were found. "
+                f"Device breakdown: {analysis.get('device_breakdown', {})}"
+            )
+            analysis["recommendations"].append(
+                "No wireless APs detected. Add Meraki MR/CW/GR access points to enable wireless analysis."
+            )
+        else:
+            online_aps = len([d for d in analysis["wireless_devices"] if d.get("status") == "online"])
+            offline_aps = ap_count - online_aps
+
+            analysis["summary"] = (
+                f"Network '{analysis['network_name']}' has {ap_count} wireless AP(s) "
+                f"({online_aps} online, {offline_aps} offline) broadcasting {ssid_count} SSID(s)."
+            )
+
+            if offline_aps > 0:
+                analysis["recommendations"].append(
+                    f"{offline_aps} AP(s) are offline - investigate connectivity issues."
+                )
+
+            if analysis["channel_utilization"]:
+                util_24 = analysis["channel_utilization"]["band_2_4_ghz_avg"]
+                util_5 = analysis["channel_utilization"]["band_5_ghz_avg"]
+
+                if util_24 > 70:
+                    analysis["recommendations"].append(
+                        f"High 2.4GHz channel utilization ({util_24}%) - consider enabling band steering."
+                    )
+                if util_5 > 70:
+                    analysis["recommendations"].append(
+                        f"High 5GHz channel utilization ({util_5}%) - review AP placement or add capacity."
+                    )
+
+        return success_result(data=analysis, summary=analysis["summary"])
+
+    except Exception as e:
+        logger.error(f"Wireless analysis failed: {e}")
+        return error_result(f"Wireless analysis failed: {e}")
+
+
 # =============================================================================
 # APPLIANCE TOOLS (MX - VLANs, Firewall, VPN)
 # =============================================================================
@@ -915,7 +1153,7 @@ MERAKI_TOOLS = [
     # Organization Tools - with examples for improved accuracy (per Anthropic research: 72% -> 90%)
     create_tool(
         name="meraki_list_organizations",
-        description="List all organizations accessible to the API key",
+        description="List all Meraki organizations accessible with the current API key. Returns org ID, name, and URL. Use this FIRST to discover available organizations before querying networks or devices. Most queries require an org_id as a starting parameter.",
         platform="meraki",
         category="organizations",
         handler=handle_list_organizations,
@@ -939,7 +1177,7 @@ MERAKI_TOOLS = [
     ),
     create_tool(
         name="meraki_list_organization_networks",
-        description="List all networks in an organization",
+        description="List all networks in a Meraki organization. Returns network ID, name, type, tags, and timezone. Use to find a specific network by name before querying devices, VLANs, or health. Network IDs are required parameters for most device and configuration tools.",
         platform="meraki",
         category="organizations",
         properties={"organization_id": {"type": "string", "description": "Organization ID"}},
@@ -1055,7 +1293,7 @@ MERAKI_TOOLS = [
     ),
     create_tool(
         name="meraki_list_network_devices",
-        description="List all devices in a network",
+        description="List all devices in a specific Meraki network. Returns serial, model, name, MAC, LAN IP, status, and firmware. Use to find devices by name or model (MR46, MX68, MS250) when user references a device without a serial number. The serial from results is needed for device-specific queries.",
         platform="meraki",
         category="devices",  # Changed from "networks" to match device queries
         properties={"network_id": {"type": "string", "description": "Network ID"}},
@@ -1064,6 +1302,8 @@ MERAKI_TOOLS = [
         examples=[
             {"query": "List devices in network L_12345", "params": {"network_id": "L_12345"}},
             {"query": "Show all devices in this network", "params": {}},
+            {"query": "Find the MV21 camera on Demo Home", "params": {"network_id": "N_123456"}},
+            {"query": "What devices are on the warehouse network?", "params": {"network_id": "N_warehouse"}},
         ],
     ),
     create_tool(
@@ -1111,18 +1351,22 @@ MERAKI_TOOLS = [
     ),
     create_tool(
         name="meraki_get_network_alerts_settings",
-        description="Get alert settings for a network",
+        description="Get alert configuration and recent alerts for a Meraki network. Returns alert types, severity thresholds, notification destinations, and recent alert history. Check this early in troubleshooting to find recent events (device offline, config changes, connectivity drops). Correlate alert timestamps with ThousandEyes alerts and Splunk logs for root cause analysis.",
         platform="meraki",
         category="networks",
         properties={"network_id": {"type": "string", "description": "Network ID"}},
         required=["network_id"],
         handler=handle_get_network_alerts_settings,
+        examples=[
+            {"query": "Any alerts on the downtown office?", "params": {"network_id": "N_downtown"}},
+            {"query": "Show recent issues for Demo Home", "params": {"network_id": "N_123456"}},
+        ],
     ),
 
     # Device Tools - with examples for improved accuracy
     create_tool(
         name="meraki_get_device",
-        description="Get device details by serial number or model name (e.g., MX68, MR36)",
+        description="Get detailed info for a specific device by serial number, model, or name. Returns status, uplink info, LAN IP, public IP, firmware, model, name, tags, and location. Use after finding a device serial from list_network_devices. Check status field to determine if device is online/offline.",
         platform="meraki",
         category="devices",
         properties={
@@ -1136,6 +1380,7 @@ MERAKI_TOOLS = [
             {"query": "Get details on the MX68", "params": {"device_model": "MX68"}},
             {"query": "Show device info for serial Q2KY-1234-ABCD", "params": {"serial": "Q2KY-1234-ABCD"}},
             {"query": "What's the status of the Garage router?", "params": {"device_name": "Garage"}},
+            {"query": "Get details for camera Q2EV-XXXX-XXXX", "params": {"serial": "Q2EV-XXXX-XXXX"}},
         ],
     ),
     create_tool(
@@ -1258,7 +1503,7 @@ MERAKI_TOOLS = [
     # Wireless Tools - with examples for improved accuracy
     create_tool(
         name="meraki_list_ssids",
-        description="List all SSIDs (slots 0-14) in a network",
+        description="List all SSIDs configured on a wireless network. Returns SSID name, number, enabled status, auth mode, encryption, VLAN tag, and band selection. Check when investigating WiFi access issues — disabled SSIDs, wrong auth mode, or VLAN mismatches are common causes.",
         platform="meraki",
         category="wireless",
         properties={"network_id": {"type": "string", "description": "Network ID"}},
@@ -1376,7 +1621,7 @@ MERAKI_TOOLS = [
     ),
     create_tool(
         name="meraki_get_wireless_channel_utilization",
-        description="Get wireless channel utilization history",
+        description="Get channel utilization data for wireless APs. Returns per-channel utilization percentages showing WiFi, non-WiFi, and total usage. High utilization (>70%) indicates congestion causing performance degradation. Compare 2.4GHz vs 5GHz — issues on 2.4GHz only suggest interference, not network problems.",
         platform="meraki",
         category="wireless",
         properties={
@@ -1385,20 +1630,45 @@ MERAKI_TOOLS = [
         },
         required=["network_id"],
         handler=handle_get_wireless_channel_utilization,
+        examples=[
+            {"query": "Is there WiFi interference on Demo Home?", "params": {"network_id": "N_123456"}},
+            {"query": "Show channel utilization for the office", "params": {"network_id": "N_office"}},
+        ],
+    ),
+    create_tool(
+        name="meraki_analyze_network_wireless",
+        description="""Comprehensive wireless analysis for a network. Accepts network NAME or ID — automatically resolves names to IDs.
+Returns: wireless AP inventory, SSID list, channel utilization, RF health, and recommendations.
+Use for any WiFi performance investigation. If results show high channel utilization or low connection rates, correlate with ThousandEyes for external path issues vs internal RF problems.""",
+        platform="meraki",
+        category="wireless",
+        tags=["wireless", "analysis", "health", "rf", "ssid", "channel", "ap", "composite"],
+        properties={
+            "network_name": {"type": "string", "description": "Network name (e.g., 'Demo Home', 'Main Office'). Will be resolved to network_id."},
+            "network_id": {"type": "string", "description": "Network ID (e.g., 'L_123456789'). Use this if you already have the ID."},
+            "organization_id": {"type": "string", "description": "Organization ID (required if using network_name)"},
+        },
+        handler=handle_analyze_network_wireless,
+        examples=[
+            {"query": "Analyze wireless for Demo Home", "params": {"network_name": "Demo Home"}},
+            {"query": "WiFi seems slow at the office", "params": {"network_name": "Office"}},
+            {"query": "Show wireless status for network L_12345", "params": {"network_id": "L_12345"}},
+            {"query": "Wireless analysis for the HQ", "params": {"network_name": "HQ"}},
+        ],
     ),
 
     # Appliance Tools (VLANs) - with examples for improved accuracy
     create_tool(
         name="meraki_list_vlans",
-        description="List VLANs in a network",
+        description="List all VLANs configured on an MX network. Returns VLAN ID, name, subnet, appliance IP, DHCP settings, and DNS. Use when investigating connectivity for specific subnets or DHCP issues. VLAN misconfiguration is a common root cause for client connectivity failures.",
         platform="meraki",
         category="appliance",
         properties={"network_id": {"type": "string", "description": "Network ID"}},
         required=["network_id"],
         handler=handle_list_vlans,
         examples=[
-            {"query": "List VLANs in this network", "params": {}},
-            {"query": "Show all VLANs configured on the MX", "params": {}},
+            {"query": "What VLANs are on the main office MX?", "params": {"network_id": "N_main_office"}},
+            {"query": "Show DHCP configuration for Demo Home", "params": {"network_id": "N_123456"}},
             {"query": "Get VLANs for network L_12345", "params": {"network_id": "L_12345"}},
         ],
     ),
@@ -1491,12 +1761,16 @@ MERAKI_TOOLS = [
     # Appliance Tools (VPN)
     create_tool(
         name="meraki_get_appliance_vpn_site_to_site",
-        description="Get site-to-site VPN configuration",
+        description="Get site-to-site VPN configuration for an MX network. Returns VPN mode (hub/spoke/none), hub list, and subnet participation. Check when investigating inter-site connectivity or VPN tunnel failures. Correlate with Splunk VPN events and ThousandEyes path visualization between sites.",
         platform="meraki",
         category="appliance",
         properties={"network_id": {"type": "string", "description": "Network ID"}},
         required=["network_id"],
         handler=handle_get_appliance_vpn_site_to_site,
+        examples=[
+            {"query": "Show VPN config for the branch office", "params": {"network_id": "N_branch"}},
+            {"query": "Is this network a VPN hub or spoke?", "params": {"network_id": "N_123456"}},
+        ],
     ),
     create_tool(
         name="meraki_update_appliance_vpn_site_to_site",
@@ -1524,11 +1798,15 @@ MERAKI_TOOLS = [
     ),
     create_tool(
         name="meraki_get_appliance_uplinks_status",
-        description="Get appliance uplink statuses organization-wide",
+        description="Get real-time uplink status for MX security appliances organization-wide. Returns WAN1/WAN2 status, IP, gateway, DNS, public IP, and signal (for cellular). Critical for connectivity troubleshooting — shows if the internet link is up/down. Compare with ThousandEyes path visualization to distinguish internal vs ISP issues.",
         platform="meraki",
         category="appliance",
         properties={"organization_id": {"type": "string", "description": "Organization ID"}},
         handler=handle_get_appliance_uplinks_status,
+        examples=[
+            {"query": "Is the internet up at the warehouse?", "params": {"organization_id": "org_123"}},
+            {"query": "Check WAN link status across all sites", "params": {}},
+        ],
     ),
     create_tool(
         name="meraki_get_appliance_dhcp_subnets",

@@ -103,7 +103,7 @@ export interface AISessionData {
   resolution_time_minutes?: number;
 }
 
-export type CostsTabType = 'costs' | 'sessions' | 'analytics' | 'rag';
+export type CostsTabType = 'costs' | 'sessions' | 'analytics' | 'rag' | 'network';
 
 // ============================================================================
 // Model Display Configuration

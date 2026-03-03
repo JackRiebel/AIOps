@@ -32,7 +32,7 @@ const DEVICE_HIERARCHY: Record<DeviceType | string, number> = {
   CW: 2,    // Cisco Wireless AP
   MV: 2,    // Camera - connected to switches
   MT: 3,    // IoT Sensor - connected to APs
-  Client: 4, // Client devices - rightmost
+  Client: 5, // Client devices - pushed further right with gap from IoT
   unknown: 2,
 };
 
@@ -75,39 +75,60 @@ function applyHierarchicalLayout(
     const xPos = padding + horizontalGap * levelIndex;
 
     // Calculate vertical positions
-    const availableHeight = height - padding * 2;
     const nodeCount = levelNodes.length;
     const isClientLevel = level === DEVICE_HIERARCHY['Client'];
-    const minGap = isClientLevel ? 25 : 50;
 
-    let verticalGap: number;
-    if (nodeCount === 1) {
-      verticalGap = 0;
+    if (isClientLevel && nodeCount > 1) {
+      // Clients: spread into multiple columns to avoid vertical stacking
+      const clientCols = Math.max(2, Math.ceil(nodeCount / 8));
+      const colWidth = 140;
+      const rowGap = 55;
+
+      levelNodes.forEach((node, nodeIndex) => {
+        const col = nodeIndex % clientCols;
+        const row = Math.floor(nodeIndex / clientCols);
+        const totalColWidth = (clientCols - 1) * colWidth;
+
+        positionedNodes.push({
+          ...node,
+          x: xPos + col * colWidth - totalColWidth / 2,
+          y: padding + row * rowGap + 40,
+        });
+      });
     } else {
-      const calculatedGap = availableHeight / (nodeCount + 1);
-      verticalGap = Math.max(minGap, calculatedGap);
-    }
+      // Non-client levels: standard vertical distribution
+      const availableHeight = height - padding * 2;
+      const minGap = 50;
 
-    // Compress if needed
-    const totalHeight = nodeCount === 1 ? 0 : verticalGap * (nodeCount + 1);
-    if (totalHeight > availableHeight && nodeCount > 1) {
-      verticalGap = availableHeight / (nodeCount + 1);
-    }
-
-    levelNodes.forEach((node, nodeIndex) => {
-      let yPos: number;
+      let verticalGap: number;
       if (nodeCount === 1) {
-        yPos = height / 2;
+        verticalGap = 0;
       } else {
-        yPos = padding + verticalGap * (nodeIndex + 1);
+        const calculatedGap = availableHeight / (nodeCount + 1);
+        verticalGap = Math.max(minGap, calculatedGap);
       }
 
-      positionedNodes.push({
-        ...node,
-        x: xPos,
-        y: yPos,
+      // Compress if needed
+      const totalHeight = nodeCount === 1 ? 0 : verticalGap * (nodeCount + 1);
+      if (totalHeight > availableHeight && nodeCount > 1) {
+        verticalGap = availableHeight / (nodeCount + 1);
+      }
+
+      levelNodes.forEach((node, nodeIndex) => {
+        let yPos: number;
+        if (nodeCount === 1) {
+          yPos = height / 2;
+        } else {
+          yPos = padding + verticalGap * (nodeIndex + 1);
+        }
+
+        positionedNodes.push({
+          ...node,
+          x: xPos,
+          y: yPos,
+        });
       });
-    });
+    }
   });
 
   return positionedNodes;

@@ -39,6 +39,9 @@ const FlowNodeRenderer = memo(({ node }: FlowNodeRendererProps) => {
       return <AIAnalysisFlowNode data={node.data as any} />;
     case 'action':
       return <ActionFlowNode data={node.data as any} />;
+    case 'approval':
+      // Render approval as action with requiresApproval badge
+      return <ActionFlowNode data={{ ...node.data, requiresApproval: true, label: node.data.label || 'Approval Required' } as any} />;
     case 'notify':
       return <NotifyFlowNode data={node.data as any} />;
     default:

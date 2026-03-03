@@ -14,6 +14,17 @@ from src.services.meraki_api import MerakiAPIClient
 
 logger = logging.getLogger(__name__)
 
+
+def _validate_context(context: Any) -> Dict:
+    """Validate that context has a Meraki client configured."""
+    if not hasattr(context, 'client') or context.client is None:
+        return {
+            "success": False,
+            "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+        }
+    return None
+
+
 # =============================================================================
 # HANDLERS
 # =============================================================================
@@ -21,6 +32,7 @@ logger = logging.getLogger(__name__)
 async def handle_insight_list_monitored_media_servers(params: Dict, context: Any) -> Dict:
     """Handler for List Monitored Media Servers."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/insight/list/monitored/media/servers"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -35,6 +47,7 @@ async def handle_insight_list_monitored_media_servers(params: Dict, context: Any
 async def handle_insight_create_monitored_media_server(params: Dict, context: Any) -> Dict:
     """Handler for Create Monitored Media Server."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/insight/create/monitored/media/server"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -49,6 +62,7 @@ async def handle_insight_create_monitored_media_server(params: Dict, context: An
 async def handle_insight_get_monitored_media_server(params: Dict, context: Any) -> Dict:
     """Handler for Get Monitored Media Server."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/insight/get/monitored/media/server"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -63,6 +77,7 @@ async def handle_insight_get_monitored_media_server(params: Dict, context: Any) 
 async def handle_insight_update_monitored_media_server(params: Dict, context: Any) -> Dict:
     """Handler for Update Monitored Media Server."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/insight/update/monitored/media/server"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -77,6 +92,7 @@ async def handle_insight_update_monitored_media_server(params: Dict, context: An
 async def handle_insight_delete_monitored_media_server(params: Dict, context: Any) -> Dict:
     """Handler for Delete Monitored Media Server."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/insight/delete/monitored/media/server"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -91,6 +107,7 @@ async def handle_insight_delete_monitored_media_server(params: Dict, context: An
 async def handle_insight_get_application_health(params: Dict, context: Any) -> Dict:
     """Handler for Get Application Health."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/insight/get/application/health"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -105,6 +122,7 @@ async def handle_insight_get_application_health(params: Dict, context: Any) -> D
 async def handle_insight_get_applications(params: Dict, context: Any) -> Dict:
     """Handler for Get Insight Applications."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/insight/get/applications"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -119,6 +137,7 @@ async def handle_insight_get_applications(params: Dict, context: Any) -> Dict:
 async def handle_insight_get_clients_stats(params: Dict, context: Any) -> Dict:
     """Handler for Get Clients Statistics."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/insight/get/clients/stats"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -133,6 +152,7 @@ async def handle_insight_get_clients_stats(params: Dict, context: Any) -> Dict:
 async def handle_insight_get_speed_test_history(params: Dict, context: Any) -> Dict:
     """Handler for Get Speed Test History."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/insight/get/speed/test/history"
         path = path.replace("{network_id}", params.get("network_id", ""))

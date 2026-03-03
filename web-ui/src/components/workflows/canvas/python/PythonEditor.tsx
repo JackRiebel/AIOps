@@ -2,7 +2,7 @@
  * Python Editor Component
  *
  * Monaco editor configured for Python workflow scripts with:
- * - Lumen SDK autocomplete
+ * - AI Ops Center SDK autocomplete
  * - Real-time validation
  * - Template selection
  */
@@ -337,7 +337,7 @@ export const PythonEditor = memo(function PythonEditor({
         <div className="flex items-center gap-2">
           <span className="text-yellow-400 font-mono text-sm">Python</span>
           <span className="text-gray-500 text-sm">|</span>
-          <span className="text-gray-400 text-xs">Lumen SDK Enabled</span>
+          <span className="text-gray-400 text-xs">AI Ops Center SDK</span>
         </div>
 
         <div className="flex items-center gap-2">

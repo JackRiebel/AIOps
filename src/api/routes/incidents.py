@@ -83,17 +83,46 @@ async def get_incidents(
 
 
 
+import asyncio
+
+# Track background correlation state
+_correlation_state: Dict[str, Any] = {
+    "running": False,
+    "started_at": None,
+    "completed_at": None,
+    "result": None,
+    "error": None,
+}
+
+
+async def _run_correlation_background():
+    """Run correlation in background and store result."""
+    from src.services.background_jobs import get_scheduler
+    try:
+        scheduler = get_scheduler()
+        result = await scheduler.fetch_and_correlate_alerts()
+        _correlation_state["result"] = result
+        _correlation_state["error"] = None
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Background correlation failed: {e}", exc_info=True)
+        _correlation_state["result"] = None
+        _correlation_state["error"] = str(e)
+    finally:
+        _correlation_state["running"] = False
+        _correlation_state["completed_at"] = datetime.utcnow().isoformat() + "Z"
+
+
 @router.post("/api/incidents-refresh")
 async def refresh_incidents(_: None = Depends(require_operator)):
-    """Manually trigger alert fetching and incident correlation.
+    """Trigger alert fetching and incident correlation in the background.
 
-    Returns:
-        Summary of alerts fetched and incidents created
+    Returns immediately with status 'started'. Poll /api/incidents-refresh/status
+    to check progress and get results.
     """
     try:
         from src.services.background_jobs import get_scheduler
 
-        # Get the scheduler and run the fetch/correlation job manually
         scheduler = get_scheduler()
 
         if not scheduler:
@@ -105,14 +134,26 @@ async def refresh_incidents(_: None = Depends(require_operator)):
                 detail="Incident correlation service not configured - ANTHROPIC_API_KEY may be missing"
             )
 
-        # Run the fetch and correlation job
-        await scheduler.fetch_and_correlate_alerts()
+        if _correlation_state["running"]:
+            return {
+                "status": "already_running",
+                "message": "Correlation is already in progress",
+                "started_at": _correlation_state["started_at"],
+            }
 
-        # Return summary of results
+        # Start correlation in background
+        _correlation_state["running"] = True
+        _correlation_state["started_at"] = datetime.utcnow().isoformat() + "Z"
+        _correlation_state["completed_at"] = None
+        _correlation_state["result"] = None
+        _correlation_state["error"] = None
+
+        asyncio.create_task(_run_correlation_background())
+
         return {
-            "status": "success",
-            "message": "Alert fetch and incident correlation completed",
-            "timestamp": datetime.utcnow().isoformat() + "Z"
+            "status": "started",
+            "message": "Correlation started — processing Splunk events",
+            "started_at": _correlation_state["started_at"],
         }
 
     except HTTPException:
@@ -120,8 +161,150 @@ async def refresh_incidents(_: None = Depends(require_operator)):
     except Exception as e:
         import logging
         logging.getLogger(__name__).error(f"Error in refresh_incidents: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to refresh incidents: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to start correlation: {str(e)}")
 
+
+@router.get("/api/incidents-refresh/status")
+async def refresh_status(_: None = Depends(require_viewer)):
+    """Check the status of a background correlation job."""
+    if _correlation_state["running"]:
+        return {
+            "status": "running",
+            "message": "Correlation in progress...",
+            "started_at": _correlation_state["started_at"],
+        }
+
+    if _correlation_state["error"]:
+        return {
+            "status": "error",
+            "message": f"Correlation failed: {_correlation_state['error']}",
+            "started_at": _correlation_state["started_at"],
+            "completed_at": _correlation_state["completed_at"],
+        }
+
+    result = _correlation_state.get("result")
+    if result:
+        incidents_created = result.get("incidents_created", 0)
+        events_found = result.get("events_found", 0)
+        events_filtered = result.get("events_filtered", 0)
+        events_analyzed = events_found - events_filtered
+
+        if incidents_created > 0:
+            message = f"Created {incidents_created} incident{'s' if incidents_created != 1 else ''} from {events_analyzed} event{'s' if events_analyzed != 1 else ''}"
+        elif events_found > 0:
+            message = f"Analyzed {events_analyzed} events — no new incidents to create"
+        else:
+            message = "No Splunk events found in the selected time range"
+
+        return {
+            "status": "completed",
+            "message": message,
+            "events_found": events_found,
+            "events_filtered": events_filtered,
+            "incidents_created": incidents_created,
+            "incident_ids": result.get("incident_ids", []),
+            "started_at": _correlation_state["started_at"],
+            "completed_at": _correlation_state["completed_at"],
+        }
+
+    return {
+        "status": "idle",
+        "message": "No correlation has been run yet",
+    }
+
+
+@router.get("/api/incidents/correlation-settings")
+async def get_correlation_settings(_: None = Depends(require_viewer)):
+    """Get current incident correlation settings.
+
+    Returns:
+        Current interval setting and available options
+    """
+    try:
+        from src.services.background_jobs import get_scheduler, CORRELATION_INTERVALS
+
+        scheduler = get_scheduler()
+        current_interval = await scheduler.get_correlation_interval()
+
+        # Get next run time if scheduled
+        next_run = None
+        try:
+            job = scheduler.scheduler.get_job("fetch_and_correlate_alerts")
+            if job and job.next_run_time:
+                next_run = job.next_run_time.isoformat() + "Z"
+        except Exception:
+            pass
+
+        return {
+            "current_interval": current_interval,
+            "available_intervals": list(CORRELATION_INTERVALS.keys()),
+            "next_run": next_run,
+            "is_enabled": current_interval != "off",
+        }
+
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Error getting correlation settings: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/api/incidents/correlation-settings")
+async def set_correlation_settings(
+    interval: str = Query(..., description="Correlation interval: off, 5min, 30min, 1hr, 2hr, 3hr"),
+    _: None = Depends(require_operator),
+):
+    """Set the incident correlation auto-polling interval.
+
+    Args:
+        interval: One of 'off', '5min', '30min', '1hr', '2hr', '3hr'
+            - 'off': Manual only (use Refresh & Correlate button)
+            - '5min': Every 5 minutes
+            - '30min': Every 30 minutes
+            - '1hr': Every hour
+            - '2hr': Every 2 hours
+            - '3hr': Every 3 hours
+
+    Returns:
+        Updated settings
+    """
+    try:
+        from src.services.background_jobs import get_scheduler, CORRELATION_INTERVALS
+
+        if interval not in CORRELATION_INTERVALS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid interval. Must be one of: {list(CORRELATION_INTERVALS.keys())}"
+            )
+
+        scheduler = get_scheduler()
+        success = await scheduler.set_correlation_interval(interval)
+
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update correlation interval")
+
+        # Get next run time if scheduled
+        next_run = None
+        try:
+            job = scheduler.scheduler.get_job("fetch_and_correlate_alerts")
+            if job and job.next_run_time:
+                next_run = job.next_run_time.isoformat() + "Z"
+        except Exception:
+            pass
+
+        return {
+            "status": "success",
+            "current_interval": interval,
+            "next_run": next_run,
+            "is_enabled": interval != "off",
+            "message": f"Correlation interval set to {interval}"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Error setting correlation settings: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/api/incidents/{incident_id}", response_model=dict)
@@ -563,7 +746,7 @@ Key takeaways and what we learned.
 Specific, actionable steps to prevent recurrence (include owner and due date suggestions).
 
 ---
-*Generated by Lumen AI on {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}*
+*Generated by Cisco AIOps Hub on {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}*
 """
 
             # Use multi-provider AI

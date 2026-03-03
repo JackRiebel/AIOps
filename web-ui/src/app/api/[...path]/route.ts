@@ -144,18 +144,31 @@ async function proxyRequest(
       });
     }
 
-    // Handle redirect responses (e.g., OAuth redirects to Google)
+    // Handle redirect responses (e.g., OAuth redirects to Google, OAuth callback)
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get('Location');
       if (location) {
         console.log(`[API Proxy] Redirect ${response.status} to: ${location}`);
-        // Return a proper redirect response with Location header
-        // Don't use NextResponse.redirect() as it can modify the URL
+        // Build redirect response with proper cookie forwarding
+        const headers = new Headers({ 'Location': location });
+        // Use getSetCookie() for reliable multi-cookie handling (Node 18+)
+        const cookies = (response.headers as any).getSetCookie?.() as string[] | undefined;
+        if (cookies && cookies.length > 0) {
+          console.log(`[API Proxy] Forwarding ${cookies.length} Set-Cookie header(s) on redirect`);
+          for (const cookie of cookies) {
+            headers.append('Set-Cookie', cookie);
+          }
+        } else {
+          // Fallback for older runtimes
+          const setCookieHeader = response.headers.get('Set-Cookie');
+          if (setCookieHeader) {
+            console.log(`[API Proxy] Forwarding Set-Cookie on redirect (fallback)`);
+            headers.set('Set-Cookie', setCookieHeader);
+          }
+        }
         return new NextResponse(null, {
           status: response.status,
-          headers: {
-            'Location': location,
-          },
+          headers,
         });
       }
     }
@@ -164,20 +177,27 @@ async function proxyRequest(
     const data = await response.text();
 
     // Build response headers, including Set-Cookie for session management
-    const responseHeaders: HeadersInit = {
+    const respHeaders = new Headers({
       'Content-Type': contentType || 'application/json',
-    };
+    });
 
-    // Forward Set-Cookie headers from backend
-    const setCookie = response.headers.get('Set-Cookie');
-    if (setCookie) {
-      responseHeaders['Set-Cookie'] = setCookie;
+    // Forward Set-Cookie headers from backend (use getSetCookie for reliability)
+    const respCookies = (response.headers as any).getSetCookie?.() as string[] | undefined;
+    if (respCookies && respCookies.length > 0) {
+      for (const c of respCookies) {
+        respHeaders.append('Set-Cookie', c);
+      }
+    } else {
+      const setCookie = response.headers.get('Set-Cookie');
+      if (setCookie) {
+        respHeaders.set('Set-Cookie', setCookie);
+      }
     }
 
     // Return response with same status code
     return new NextResponse(data, {
       status: response.status,
-      headers: responseHeaders,
+      headers: respHeaders,
     });
   } catch (error: any) {
     console.error('[API Proxy] Error:', error.message);

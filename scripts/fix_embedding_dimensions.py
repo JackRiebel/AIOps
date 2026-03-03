@@ -180,7 +180,7 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_feedback_created_at ON knowledge_feedba
 async def create_knowledge_tables():
     # Connect to the embedded PostgreSQL via Unix socket
     conn = await asyncpg.connect(
-        host='/Users/jariebel/Desktop/Lumen/data/postgres',
+        host='./data/postgres',
         database='lumen',
         user='postgres'
     )

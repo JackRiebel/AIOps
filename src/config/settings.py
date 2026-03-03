@@ -43,6 +43,10 @@ class Settings(BaseSettings):
         default="",
         description="Meraki Dashboard API key"
     )
+    meraki_org_id: str = Field(
+        default="",
+        description="Meraki Organization ID (auto-filled in API calls when set)"
+    )
     meraki_base_url: str = Field(
         default="https://api.meraki.com/api/v1",
         description="Meraki Dashboard API base URL"
@@ -51,9 +55,37 @@ class Settings(BaseSettings):
         default=True,
         description="Verify SSL certificates for Meraki Dashboard connections"
     )
+    catalyst_verify_ssl: bool = Field(
+        default=True,
+        description="Verify SSL certificates for Catalyst Center connections"
+    )
+    thousandeyes_verify_ssl: bool = Field(
+        default=True,
+        description="Verify SSL certificates for ThousandEyes connections"
+    )
+    splunk_verify_ssl: bool = Field(
+        default=False,
+        description="Verify SSL certificates for Splunk connections (often disabled for self-signed certs)"
+    )
+    cisco_circuit_verify_ssl: bool = Field(
+        default=True,
+        description="Verify SSL certificates for Cisco Circuit AI connections"
+    )
+    anthropic_verify_ssl: bool = Field(
+        default=True,
+        description="Verify SSL certificates for Anthropic (Claude) API connections"
+    )
+    openai_verify_ssl: bool = Field(
+        default=True,
+        description="Verify SSL certificates for OpenAI API connections"
+    )
+    google_ai_verify_ssl: bool = Field(
+        default=True,
+        description="Verify SSL certificates for Google AI (Gemini) connections"
+    )
     verify_ssl: bool = Field(
         default=True,
-        description="Verify SSL certificates for all external API connections (set to False for development with SSL inspection)"
+        description="Global default: Verify SSL certificates for all external API connections"
     )
 
     # Security Configuration
@@ -151,8 +183,12 @@ class Settings(BaseSettings):
         description="Google OAuth 2.0 Client Secret"
     )
     oauth_redirect_uri: str = Field(
-        default="https://localhost:8002/api/auth/oauth/google/callback",
-        description="OAuth redirect URI after Google login"
+        default="https://localhost:3000/api/auth/oauth/google/callback",
+        description="OAuth redirect URI after Google login (should go through frontend proxy)"
+    )
+    frontend_url: str = Field(
+        default="https://localhost:3000",
+        description="Frontend URL for OAuth redirects after login"
     )
 
     # Duo MFA Configuration

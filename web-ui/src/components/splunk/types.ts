@@ -14,6 +14,104 @@ export interface SplunkLog {
   [key: string]: any;
 }
 
+// ============================================================================
+// MCP Environment Types
+// ============================================================================
+
+export interface SplunkServerInfo {
+  serverName?: string;
+  version?: string;
+  build?: string;
+  os?: string;
+  cpu_arch?: string;
+  numberOfCores?: number;
+  numberOfVirtualCores?: number;
+  physicalMemoryMB?: number;
+  isFree?: boolean;
+  isTrial?: boolean;
+  licenseState?: string;
+  guid?: string;
+  [key: string]: any;
+}
+
+export interface SplunkUserInfo {
+  name?: string;
+  realname?: string;
+  email?: string;
+  roles?: string[];
+  defaultApp?: string;
+  type?: string;
+  tz?: string;
+  [key: string]: any;
+}
+
+export interface SplunkIndex {
+  name: string;
+  totalEventCount?: string | number;
+  currentDBSizeMB?: string | number;
+  datatype?: string;
+  disabled?: boolean;
+  homePath?: string;
+  [key: string]: any;
+}
+
+export interface SplunkIndexDetail extends SplunkIndex {
+  minTime?: string;
+  maxTime?: string;
+  maxTotalDataSizeMB?: string | number;
+  frozenTimePeriodInSecs?: string | number;
+  maxDataSize?: string;
+  coldPath?: string;
+  thawedPath?: string;
+  [key: string]: any;
+}
+
+export interface SplunkIndexMetadata {
+  hosts?: string[];
+  sources?: string[];
+  sourcetypes?: string[];
+}
+
+export interface SplunkKnowledgeObject {
+  name: string;
+  type?: string;
+  description?: string;
+  search?: string;
+  cron_schedule?: string;
+  disabled?: boolean;
+  is_scheduled?: boolean;
+  next_scheduled_time?: string;
+  actions?: string;
+  [key: string]: any;
+}
+
+export type SplunkDashboardView = 'overview' | 'investigate';
+
+// ============================================================================
+// Cross-Platform Correlation Types
+// ============================================================================
+
+export interface SplunkCorrelatedDevice {
+  ip: string;
+  hostname?: string;
+  merakiDevice?: { serial: string; name: string; model: string; status: string; networkName?: string };
+  catalystDevice?: { serial: string; name: string; model: string; reachabilityStatus?: string };
+  teAgent?: { agentId: number; agentName: string; agentType: string };
+  platforms: string[];
+  logCount?: number;
+  lastSeen?: string;
+}
+
+export interface SplunkCrossPlatformInsight {
+  id: string;
+  title: string;
+  description: string;
+  severity: SeverityLevel;
+  category: 'security' | 'performance' | 'availability' | 'correlation';
+  platforms: string[];
+  relatedDevices: SplunkCorrelatedDevice[];
+}
+
 export interface SplunkInsight {
   id: number;
   organization: string;

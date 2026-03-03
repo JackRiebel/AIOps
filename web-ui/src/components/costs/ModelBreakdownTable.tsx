@@ -2,7 +2,6 @@
 
 import { memo } from 'react';
 import { Cpu, Loader2 } from 'lucide-react';
-import { DashboardCard } from '@/components/dashboard/DashboardCard';
 import { type ModelBreakdown, getModelDisplayName, CHART_COLORS } from './types';
 
 // ============================================================================
@@ -29,53 +28,53 @@ export const ModelBreakdownTable = memo(({
   // Loading state
   if (loading) {
     return (
-      <DashboardCard
-        title="Cost by Model"
-        icon={<Cpu className="w-4 h-4" />}
-        accent="purple"
-        compact
-        className={className}
-      >
+      <div className={`bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 overflow-hidden ${className}`}>
+        <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700/30">
+          <div className="flex items-center gap-2">
+            <Cpu className="w-4 h-4 text-violet-500" />
+            <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Cost by Model</h3>
+          </div>
+        </div>
         <div className="flex flex-col items-center justify-center py-12">
-          <Loader2 className="w-8 h-8 text-purple-500 animate-spin mb-3" />
+          <Loader2 className="w-8 h-8 text-violet-500 animate-spin mb-3" />
           <p className="text-sm text-slate-500 dark:text-slate-400">Loading model data...</p>
         </div>
-      </DashboardCard>
+      </div>
     );
   }
 
   // Empty state
   if (models.length === 0) {
     return (
-      <DashboardCard
-        title="Cost by Model"
-        icon={<Cpu className="w-4 h-4" />}
-        accent="purple"
-        compact
-        className={className}
-      >
+      <div className={`bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 overflow-hidden ${className}`}>
+        <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700/30">
+          <div className="flex items-center gap-2">
+            <Cpu className="w-4 h-4 text-violet-500" />
+            <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Cost by Model</h3>
+          </div>
+        </div>
         <div className="flex flex-col items-center justify-center py-12">
-          <div className="w-12 h-12 mb-3 bg-purple-100 dark:bg-purple-500/10 rounded-full flex items-center justify-center">
-            <Cpu className="w-6 h-6 text-purple-600 dark:text-purple-400" />
+          <div className="w-12 h-12 mb-3 bg-violet-100 dark:bg-violet-500/10 rounded-full flex items-center justify-center">
+            <Cpu className="w-6 h-6 text-violet-600 dark:text-violet-400" />
           </div>
           <p className="text-sm font-medium text-slate-700 dark:text-slate-300">No model data</p>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Model breakdown will appear here</p>
         </div>
-      </DashboardCard>
+      </div>
     );
   }
 
   return (
-    <DashboardCard
-      title="Cost by Model"
-      icon={<Cpu className="w-4 h-4" />}
-      accent="purple"
-      compact
-      className={className}
-    >
-      <div className="overflow-x-auto -mx-4">
+    <div className={`bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 overflow-hidden ${className}`}>
+      <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700/30">
+        <div className="flex items-center gap-2">
+          <Cpu className="w-4 h-4 text-violet-500" />
+          <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Cost by Model</h3>
+        </div>
+      </div>
+      <div className="overflow-x-auto">
         <table className="w-full">
-          <thead>
+          <thead className="sticky top-0 bg-slate-50 dark:bg-slate-800/80 z-10">
             <tr className="border-b border-slate-200 dark:border-slate-700/50">
               <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-slate-500 dark:text-slate-500 uppercase tracking-wider">
                 Model
@@ -102,7 +101,7 @@ export const ModelBreakdownTable = memo(({
               return (
                 <tr
                   key={model.model}
-                  className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition"
+                  className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition"
                 >
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
@@ -143,7 +142,7 @@ export const ModelBreakdownTable = memo(({
           </tbody>
         </table>
       </div>
-    </DashboardCard>
+    </div>
   );
 });
 

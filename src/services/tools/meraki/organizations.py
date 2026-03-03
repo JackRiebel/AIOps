@@ -14,6 +14,17 @@ from src.services.meraki_api import MerakiAPIClient
 
 logger = logging.getLogger(__name__)
 
+
+def _validate_context(context: Any) -> Dict:
+    """Validate that context has a Meraki client configured."""
+    if not hasattr(context, 'client') or context.client is None:
+        return {
+            "success": False,
+            "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+        }
+    return None
+
+
 # =============================================================================
 # HANDLERS
 # =============================================================================
@@ -21,9 +32,15 @@ logger = logging.getLogger(__name__)
 async def handle_organizations_list(params: Dict, context: Any) -> Dict:
     """Handler for List Organizations."""
     try:
+        # Validate execution context has a Meraki client
+        if not hasattr(context, 'client') or context.client is None:
+            return {
+                "success": False,
+                "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+            }
+
         # Build API path
         path = "/organizations"
-        pass
 
         # Make API request
         result = await context.client.request("GET", path, params=params)
@@ -35,9 +52,26 @@ async def handle_organizations_list(params: Dict, context: Any) -> Dict:
 async def handle_organizations_get(params: Dict, context: Any) -> Dict:
     """Handler for Get Organization."""
     try:
+        # Validate execution context has a Meraki client
+        if not hasattr(context, 'client') or context.client is None:
+            return {
+                "success": False,
+                "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+            }
+
+        # Get organization_id from params or context
+        org_id = params.get("organization_id") or params.get("organizationId")
+        if not org_id and hasattr(context, 'org_id'):
+            org_id = context.org_id
+
+        if not org_id:
+            return {
+                "success": False,
+                "error": "Missing required parameter: organization_id. Please specify a Meraki organization ID."
+            }
+
         # Build API path
-        path = "/organizations/{organization_id}"
-        path = path.replace("{organization_id}", params.get("organization_id", ""))
+        path = f"/organizations/{org_id}"
 
         # Make API request
         result = await context.client.request("GET", path, params=params)
@@ -49,9 +83,15 @@ async def handle_organizations_get(params: Dict, context: Any) -> Dict:
 async def handle_organizations_create(params: Dict, context: Any) -> Dict:
     """Handler for Create Organization."""
     try:
+        # Validate execution context has a Meraki client
+        if not hasattr(context, 'client') or context.client is None:
+            return {
+                "success": False,
+                "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+            }
+
         # Build API path
-        path = "/organizations/{organization_id}/create"
-        pass
+        path = "/organizations"
 
         # Make API request
         result = await context.client.request("POST", path, json_data=params)
@@ -63,9 +103,26 @@ async def handle_organizations_create(params: Dict, context: Any) -> Dict:
 async def handle_organizations_update(params: Dict, context: Any) -> Dict:
     """Handler for Update Organization."""
     try:
+        # Validate execution context has a Meraki client
+        if not hasattr(context, 'client') or context.client is None:
+            return {
+                "success": False,
+                "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+            }
+
+        # Get organization_id from params or context
+        org_id = params.get("organization_id") or params.get("organizationId")
+        if not org_id and hasattr(context, 'org_id'):
+            org_id = context.org_id
+
+        if not org_id:
+            return {
+                "success": False,
+                "error": "Missing required parameter: organization_id. Please specify a Meraki organization ID."
+            }
+
         # Build API path
-        path = "/organizations/{organization_id}/update"
-        path = path.replace("{organization_id}", params.get("organization_id", ""))
+        path = f"/organizations/{org_id}"
 
         # Make API request
         result = await context.client.request("PUT", path, json_data=params)
@@ -77,9 +134,26 @@ async def handle_organizations_update(params: Dict, context: Any) -> Dict:
 async def handle_organizations_delete(params: Dict, context: Any) -> Dict:
     """Handler for Delete Organization."""
     try:
+        # Validate execution context has a Meraki client
+        if not hasattr(context, 'client') or context.client is None:
+            return {
+                "success": False,
+                "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+            }
+
+        # Get organization_id from params or context
+        org_id = params.get("organization_id") or params.get("organizationId")
+        if not org_id and hasattr(context, 'org_id'):
+            org_id = context.org_id
+
+        if not org_id:
+            return {
+                "success": False,
+                "error": "Missing required parameter: organization_id. Please specify a Meraki organization ID."
+            }
+
         # Build API path
-        path = "/organizations/{organization_id}/delete"
-        path = path.replace("{organization_id}", params.get("organization_id", ""))
+        path = f"/organizations/{org_id}"
 
         # Make API request
         result = await context.client.request("DELETE", path, json_data=params)
@@ -91,9 +165,26 @@ async def handle_organizations_delete(params: Dict, context: Any) -> Dict:
 async def handle_organizations_clone(params: Dict, context: Any) -> Dict:
     """Handler for Clone Organization."""
     try:
+        # Validate execution context has a Meraki client
+        if not hasattr(context, 'client') or context.client is None:
+            return {
+                "success": False,
+                "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+            }
+
+        # Get organization_id from params or context
+        org_id = params.get("organization_id") or params.get("organizationId")
+        if not org_id and hasattr(context, 'org_id'):
+            org_id = context.org_id
+
+        if not org_id:
+            return {
+                "success": False,
+                "error": "Missing required parameter: organization_id. Please specify a Meraki organization ID."
+            }
+
         # Build API path
-        path = "/organizations/{organization_id}/clone"
-        path = path.replace("{organization_id}", params.get("organization_id", ""))
+        path = f"/organizations/{org_id}/clone"
 
         # Make API request
         result = await context.client.request("POST", path, json_data=params)
@@ -105,6 +196,7 @@ async def handle_organizations_clone(params: Dict, context: Any) -> Dict:
 async def handle_organizations_list_admins(params: Dict, context: Any) -> Dict:
     """Handler for List Organization Admins."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/organizations"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -119,6 +211,7 @@ async def handle_organizations_list_admins(params: Dict, context: Any) -> Dict:
 async def handle_organizations_create_admin(params: Dict, context: Any) -> Dict:
     """Handler for Create Organization Admin."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/organizations/{organization_id}/create"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -133,6 +226,7 @@ async def handle_organizations_create_admin(params: Dict, context: Any) -> Dict:
 async def handle_organizations_update_admin(params: Dict, context: Any) -> Dict:
     """Handler for Update Organization Admin."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/organizations/{organization_id}/update"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -147,6 +241,7 @@ async def handle_organizations_update_admin(params: Dict, context: Any) -> Dict:
 async def handle_organizations_delete_admin(params: Dict, context: Any) -> Dict:
     """Handler for Delete Organization Admin."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/organizations/{organization_id}/delete"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -161,6 +256,7 @@ async def handle_organizations_delete_admin(params: Dict, context: Any) -> Dict:
 async def handle_organizations_list_devices(params: Dict, context: Any) -> Dict:
     """Handler for List Organization Devices."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/organizations"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -174,9 +270,26 @@ async def handle_organizations_list_devices(params: Dict, context: Any) -> Dict:
 
 
 async def handle_organizations_get_devices_statuses(params: Dict, context: Any) -> Dict:
-    """Handler for Get Device Statuses."""
+    """Handler for Get Device Statuses - returns status of all devices in an organization."""
     try:
-        org_id = params.get("organization_id", "")
+        # Validate execution context has a Meraki client
+        if not hasattr(context, 'client') or context.client is None:
+            return {
+                "success": False,
+                "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+            }
+
+        # Get organization_id from params or context
+        org_id = params.get("organization_id") or params.get("organizationId")
+        if not org_id and hasattr(context, 'org_id'):
+            org_id = context.org_id
+
+        if not org_id:
+            return {
+                "success": False,
+                "error": "Missing required parameter: organization_id. Please specify a Meraki organization ID."
+            }
+
         path = f"/organizations/{org_id}/devices/statuses"
 
         # Filter to valid query params only (exclude path params like organization_id)
@@ -193,6 +306,7 @@ async def handle_organizations_get_devices_statuses(params: Dict, context: Any) 
 async def handle_organizations_get_devices_availabilities(params: Dict, context: Any) -> Dict:
     """Handler for Get Device Availabilities."""
     try:
+        if err := _validate_context(context): return err
         org_id = params.get("organization_id", "")
         path = f"/organizations/{org_id}/devices/availabilities"
 
@@ -210,6 +324,7 @@ async def handle_organizations_get_devices_availabilities(params: Dict, context:
 async def handle_organizations_get_devices_uplinks_addresses(params: Dict, context: Any) -> Dict:
     """Handler for Get Device Uplink Addresses."""
     try:
+        if err := _validate_context(context): return err
         org_id = params.get("organization_id", "")
         path = f"/organizations/{org_id}/devices/uplinks/addresses/byDevice"
 
@@ -226,6 +341,7 @@ async def handle_organizations_get_devices_uplinks_addresses(params: Dict, conte
 async def handle_organizations_get_devices_power_modules_statuses(params: Dict, context: Any) -> Dict:
     """Handler for Get Power Module Statuses."""
     try:
+        if err := _validate_context(context): return err
         org_id = params.get("organization_id", "")
         path = f"/organizations/{org_id}/devices/powerModules/statuses/byDevice"
 
@@ -242,6 +358,7 @@ async def handle_organizations_get_devices_power_modules_statuses(params: Dict, 
 async def handle_organizations_get_devices_provisioning_statuses(params: Dict, context: Any) -> Dict:
     """Handler for Get Provisioning Statuses."""
     try:
+        if err := _validate_context(context): return err
         org_id = params.get("organization_id", "")
         path = f"/organizations/{org_id}/devices/provisioning/statuses"
 
@@ -259,6 +376,7 @@ async def handle_organizations_get_devices_provisioning_statuses(params: Dict, c
 async def handle_organizations_list_alerts_profiles(params: Dict, context: Any) -> Dict:
     """Handler for List Alert Profiles."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/organizations"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -273,6 +391,7 @@ async def handle_organizations_list_alerts_profiles(params: Dict, context: Any) 
 async def handle_organizations_create_alerts_profile(params: Dict, context: Any) -> Dict:
     """Handler for Create Alert Profile."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/organizations/{organization_id}/create"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -287,6 +406,7 @@ async def handle_organizations_create_alerts_profile(params: Dict, context: Any)
 async def handle_organizations_update_alerts_profile(params: Dict, context: Any) -> Dict:
     """Handler for Update Alert Profile."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/organizations/{organization_id}/update"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -301,6 +421,7 @@ async def handle_organizations_update_alerts_profile(params: Dict, context: Any)
 async def handle_organizations_delete_alerts_profile(params: Dict, context: Any) -> Dict:
     """Handler for Delete Alert Profile."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/organizations/{organization_id}/delete"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -313,14 +434,34 @@ async def handle_organizations_delete_alerts_profile(params: Dict, context: Any)
 
 
 async def handle_organizations_get_assurance_alerts(params: Dict, context: Any) -> Dict:
-    """Handler for Get Assurance Alerts."""
+    """Handler for Get Assurance Alerts - organization-wide health alerts."""
     try:
-        # Build API path
-        path = "/organizations/{organization_id}/get"
-        path = path.replace("{organization_id}", params.get("organization_id", ""))
+        # Validate execution context has a Meraki client
+        if not hasattr(context, 'client') or context.client is None:
+            return {
+                "success": False,
+                "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+            }
+
+        # Get organization_id from params or context
+        org_id = params.get("organization_id") or params.get("organizationId")
+        if not org_id and hasattr(context, 'org_id'):
+            org_id = context.org_id
+
+        if not org_id:
+            return {
+                "success": False,
+                "error": "Missing required parameter: organization_id. Please specify an organization ID."
+            }
+
+        # Build API path - Meraki API: GET /organizations/{organizationId}/assurance/alerts
+        path = f"/organizations/{org_id}/assurance/alerts"
+
+        # Filter out org_id params, pass rest as query params
+        query_params = {k: v for k, v in params.items() if k not in ('organization_id', 'organizationId')}
 
         # Make API request
-        result = await context.client.request("GET", path, params=params)
+        result = await context.client.request("GET", path, params=query_params)
         return {"success": True, "data": result}
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -329,6 +470,7 @@ async def handle_organizations_get_assurance_alerts(params: Dict, context: Any) 
 async def handle_organizations_dismiss_assurance_alerts(params: Dict, context: Any) -> Dict:
     """Handler for Dismiss Assurance Alerts."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/organizations/{organization_id}/dismiss"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -343,6 +485,7 @@ async def handle_organizations_dismiss_assurance_alerts(params: Dict, context: A
 async def handle_organizations_list_config_templates(params: Dict, context: Any) -> Dict:
     """Handler for List Config Templates."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/organizations"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -357,6 +500,7 @@ async def handle_organizations_list_config_templates(params: Dict, context: Any)
 async def handle_organizations_create_config_template(params: Dict, context: Any) -> Dict:
     """Handler for Create Config Template."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/organizations/{organization_id}/create"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -371,6 +515,7 @@ async def handle_organizations_create_config_template(params: Dict, context: Any
 async def handle_organizations_get_config_template(params: Dict, context: Any) -> Dict:
     """Handler for Get Config Template."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/organizations/{organization_id}/get"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -385,6 +530,7 @@ async def handle_organizations_get_config_template(params: Dict, context: Any) -
 async def handle_organizations_update_config_template(params: Dict, context: Any) -> Dict:
     """Handler for Update Config Template."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/organizations/{organization_id}/update"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -399,6 +545,7 @@ async def handle_organizations_update_config_template(params: Dict, context: Any
 async def handle_organizations_delete_config_template(params: Dict, context: Any) -> Dict:
     """Handler for Delete Config Template."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/organizations/{organization_id}/delete"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -413,6 +560,7 @@ async def handle_organizations_delete_config_template(params: Dict, context: Any
 async def handle_organizations_get_inventory_devices(params: Dict, context: Any) -> Dict:
     """Handler for Get Inventory Devices."""
     try:
+        if err := _validate_context(context): return err
         org_id = params.get("organization_id", "")
         path = f"/organizations/{org_id}/inventory/devices"
 
@@ -430,6 +578,7 @@ async def handle_organizations_get_inventory_devices(params: Dict, context: Any)
 async def handle_organizations_claim_devices(params: Dict, context: Any) -> Dict:
     """Handler for Claim Devices."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/organizations/{organization_id}/claim"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -444,6 +593,7 @@ async def handle_organizations_claim_devices(params: Dict, context: Any) -> Dict
 async def handle_organizations_release_devices(params: Dict, context: Any) -> Dict:
     """Handler for Release Devices."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/organizations/{organization_id}/release"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -458,6 +608,7 @@ async def handle_organizations_release_devices(params: Dict, context: Any) -> Di
 async def handle_organizations_get_inventory_onboarding_cloud_status(params: Dict, context: Any) -> Dict:
     """Handler for Get Cloud Onboarding Status."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/organizations/{organization_id}/get"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -472,6 +623,7 @@ async def handle_organizations_get_inventory_onboarding_cloud_status(params: Dic
 async def handle_organizations_list_action_batches(params: Dict, context: Any) -> Dict:
     """Handler for List Action Batches."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/organizations"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -486,6 +638,7 @@ async def handle_organizations_list_action_batches(params: Dict, context: Any) -
 async def handle_organizations_create_action_batch(params: Dict, context: Any) -> Dict:
     """Handler for Create Action Batch."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/organizations/{organization_id}/create"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -500,6 +653,7 @@ async def handle_organizations_create_action_batch(params: Dict, context: Any) -
 async def handle_organizations_get_action_batch(params: Dict, context: Any) -> Dict:
     """Handler for Get Action Batch."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/organizations/{organization_id}/get"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -514,6 +668,7 @@ async def handle_organizations_get_action_batch(params: Dict, context: Any) -> D
 async def handle_organizations_delete_action_batch(params: Dict, context: Any) -> Dict:
     """Handler for Delete Action Batch."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/organizations/{organization_id}/delete"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -528,6 +683,7 @@ async def handle_organizations_delete_action_batch(params: Dict, context: Any) -
 async def handle_organizations_update_action_batch(params: Dict, context: Any) -> Dict:
     """Handler for Update Action Batch."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/organizations/{organization_id}/update"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -542,6 +698,7 @@ async def handle_organizations_update_action_batch(params: Dict, context: Any) -
 async def handle_organizations_get_api_requests(params: Dict, context: Any) -> Dict:
     """Handler for Get API Requests."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/organizations/{organization_id}/get"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -556,6 +713,7 @@ async def handle_organizations_get_api_requests(params: Dict, context: Any) -> D
 async def handle_organizations_get_api_requests_overview(params: Dict, context: Any) -> Dict:
     """Handler for Get API Requests Overview."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/organizations/{organization_id}/get"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -570,6 +728,7 @@ async def handle_organizations_get_api_requests_overview(params: Dict, context: 
 async def handle_organizations_get_api_requests_overview_response_codes(params: Dict, context: Any) -> Dict:
     """Handler for Get API Response Codes Overview."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/organizations/{organization_id}/get"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -584,6 +743,7 @@ async def handle_organizations_get_api_requests_overview_response_codes(params: 
 async def handle_organizations_search_clients(params: Dict, context: Any) -> Dict:
     """Handler for Search Clients."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/organizations/{organization_id}/search"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -598,6 +758,7 @@ async def handle_organizations_search_clients(params: Dict, context: Any) -> Dic
 async def handle_organizations_get_clients_bandwidth_usage(params: Dict, context: Any) -> Dict:
     """Handler for Get Clients Bandwidth Usage."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/organizations/{organization_id}/get"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -612,6 +773,7 @@ async def handle_organizations_get_clients_bandwidth_usage(params: Dict, context
 async def handle_organizations_get_clients_overview(params: Dict, context: Any) -> Dict:
     """Handler for Get Clients Overview."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/organizations/{organization_id}/get"
         path = path.replace("{organization_id}", params.get("organization_id", ""))

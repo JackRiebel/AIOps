@@ -129,3 +129,9 @@ export type { StatusLevel } from './widgets/StatusIndicator';
 // Composite Card for grouping related cards
 export { CompositeCard, CompositeFromTemplate } from './CompositeCard';
 export type { CompositeCardProps, CompositeFromTemplateProps } from './CompositeCard';
+
+// Base card components for Canvas and general use
+export { StatCard, type StatCardProps } from './StatCard';
+export { DeviceCard, type DeviceCardProps, type Device } from './DeviceCard';
+export { StatusCard, type StatusCardProps } from './StatusCard';
+export { DataTableCard, type DataTableCardProps, type Column } from './DataTableCard';

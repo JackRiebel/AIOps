@@ -131,13 +131,15 @@ def parse_react_response(text: str) -> Dict[str, Any]:
             action: str | None - Tool name to call
             action_input: dict | None - Tool parameters
             final_answer: str | None - Final response (if complete)
+            parse_error: str | None - If JSON parsing failed, describes the error
     """
     result = {
         "has_action": False,
         "thought": None,
         "action": None,
         "action_input": None,
-        "final_answer": None
+        "final_answer": None,
+        "parse_error": None,
     }
 
     # Check for Final Answer first (indicates completion)
@@ -173,13 +175,16 @@ def parse_react_response(text: str) -> Dict[str, Any]:
                 try:
                     result["action_input"] = json.loads(json_str)
                 except json.JSONDecodeError:
-                    # Try to fix common JSON issues (single quotes, unquoted keys)
-                    fixed_json = re.sub(r"'", '"', json_str)  # Replace single quotes
+                    # Try to fix common JSON issues
+                    fixed_json = _fix_json_string(json_str)
                     try:
                         result["action_input"] = json.loads(fixed_json)
-                    except json.JSONDecodeError:
-                        logger.warning(f"[ReAct] Failed to parse Action Input: {json_str[:200]}")
-                        result["action_input"] = {}
+                    except json.JSONDecodeError as e:
+                        error_msg = f"JSON parse error: {e}. Raw input: {json_str[:200]}"
+                        logger.warning(f"[ReAct] {error_msg}")
+                        result["parse_error"] = error_msg
+                        # Try to extract key-value pairs manually as fallback
+                        result["action_input"] = _extract_key_values_fallback(json_str)
             else:
                 # Fallback to simple regex for flat JSON
                 input_match = re.search(r'\{[^}]+\}', remaining_text)
@@ -187,15 +192,96 @@ def parse_react_response(text: str) -> Dict[str, Any]:
                     try:
                         result["action_input"] = json.loads(input_match.group(0))
                     except json.JSONDecodeError:
-                        logger.warning(f"[ReAct] Failed to parse fallback Action Input")
-                        result["action_input"] = {}
+                        # Try to fix the JSON
+                        fixed_json = _fix_json_string(input_match.group(0))
+                        try:
+                            result["action_input"] = json.loads(fixed_json)
+                        except json.JSONDecodeError as e:
+                            error_msg = f"Fallback JSON parse error: {e}"
+                            logger.warning(f"[ReAct] {error_msg}")
+                            result["parse_error"] = error_msg
+                            result["action_input"] = _extract_key_values_fallback(remaining_text)
                 else:
-                    result["action_input"] = {}
+                    result["parse_error"] = "No JSON object found after Action Input"
+                    result["action_input"] = _extract_key_values_fallback(remaining_text)
         else:
-            result["action_input"] = {}
+            # No JSON object found - try to extract any key-value patterns
+            result["parse_error"] = "No JSON object starting with '{' found"
+            result["action_input"] = _extract_key_values_fallback(remaining_text)
     elif result["has_action"]:
         # Action without input - use empty dict
         result["action_input"] = {}
+
+    return result
+
+
+def _fix_json_string(json_str: str) -> str:
+    """Attempt to fix common JSON issues from LLM output.
+
+    Handles:
+    - Single quotes instead of double quotes
+    - Unquoted keys
+    - Trailing commas
+    - Python-style True/False/None
+    """
+    # Replace single quotes with double quotes (but not inside strings)
+    # Simple approach: replace all single quotes
+    fixed = re.sub(r"'", '"', json_str)
+
+    # Fix Python-style booleans and None
+    fixed = re.sub(r'\bTrue\b', 'true', fixed)
+    fixed = re.sub(r'\bFalse\b', 'false', fixed)
+    fixed = re.sub(r'\bNone\b', 'null', fixed)
+
+    # Remove trailing commas before } or ]
+    fixed = re.sub(r',(\s*[}\]])', r'\1', fixed)
+
+    # Try to quote unquoted keys (e.g., {network_id: "value"} -> {"network_id": "value"})
+    fixed = re.sub(r'{\s*(\w+)\s*:', r'{"\1":', fixed)
+    fixed = re.sub(r',\s*(\w+)\s*:', r', "\1":', fixed)
+
+    return fixed
+
+
+def _extract_key_values_fallback(text: str) -> Dict[str, Any]:
+    """Extract key-value pairs from malformed JSON using pattern matching.
+
+    This is a fallback when JSON parsing fails. It looks for common patterns like:
+    - "key": "value"
+    - key: "value"
+    - network_id=L_123456
+
+    Returns a dict with any extracted values, or empty dict if none found.
+    """
+    result = {}
+
+    # Pattern for "key": "value" or key: "value"
+    kv_pattern = r'["\']?(\w+)["\']?\s*[:=]\s*["\']([^"\']+)["\']'
+    for match in re.finditer(kv_pattern, text):
+        key = match.group(1)
+        value = match.group(2)
+        result[key] = value
+
+    # Pattern for network_id specifically (common required param)
+    network_pattern = r'network_id["\']?\s*[:=]\s*["\']?([LN]_\d+)["\']?'
+    network_match = re.search(network_pattern, text, re.IGNORECASE)
+    if network_match:
+        result["network_id"] = network_match.group(1)
+
+    # Pattern for organization_id
+    org_pattern = r'organization_id["\']?\s*[:=]\s*["\']?(\d+)["\']?'
+    org_match = re.search(org_pattern, text, re.IGNORECASE)
+    if org_match:
+        result["organization_id"] = org_match.group(1)
+
+    # Pattern for serial numbers
+    serial_pattern = r'serial["\']?\s*[:=]\s*["\']?([A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4})["\']?'
+    serial_match = re.search(serial_pattern, text, re.IGNORECASE)
+    if serial_match:
+        result["serial"] = serial_match.group(1)
+
+    if result:
+        logger.info(f"[ReAct] Fallback extraction recovered params: {list(result.keys())}")
 
     return result
 
@@ -355,7 +441,7 @@ class CiscoCircuitAIService(BaseNetworkAssistant):
         credentials = f"{self.client_id}:{self.client_secret}"
         basic_auth = base64.b64encode(credentials.encode()).decode()
 
-        async with httpx.AsyncClient(verify=False) as client:
+        async with httpx.AsyncClient(verify=get_settings().cisco_circuit_verify_ssl) as client:
             response = await client.post(
                 self.TOKEN_URL,
                 headers={
@@ -378,22 +464,16 @@ class CiscoCircuitAIService(BaseNetworkAssistant):
             logger.info("Successfully obtained Cisco Circuit access token")
             return self._access_token
 
-    def generate_simple_response(self, prompt: str, max_tokens: int = 2000) -> str:
-        """Generate a simple response without tools (sync version for reports, summaries, etc.).
-
-        Note: This is a sync wrapper for compatibility with the base class.
-        """
-        import asyncio
-        return asyncio.get_event_loop().run_until_complete(
-            self._async_simple_response(prompt, max_tokens)
-        )
+    async def generate_simple_response(self, prompt: str, max_tokens: int = 2000) -> str:
+        """Generate a simple response without tools."""
+        return await self._async_simple_response(prompt, max_tokens)
 
     async def _async_simple_response(self, prompt: str, max_tokens: int = 2000) -> str:
         """Async implementation of simple response."""
         access_token = await self._get_access_token()
         chat_url = self._get_chat_url()
 
-        async with httpx.AsyncClient(verify=False) as client:
+        async with httpx.AsyncClient(verify=get_settings().cisco_circuit_verify_ssl) as client:
             response = await client.post(
                 chat_url,
                 headers={
@@ -524,7 +604,7 @@ class CiscoCircuitAIService(BaseNetworkAssistant):
             total_input_tokens = 0
             total_output_tokens = 0
 
-            async with httpx.AsyncClient(verify=False) as client:
+            async with httpx.AsyncClient(verify=get_settings().cisco_circuit_verify_ssl) as client:
                 # Initial response
                 response = await client.post(
                     chat_url,
@@ -628,6 +708,14 @@ class CiscoCircuitAIService(BaseNetworkAssistant):
                             tool_name = parsed["action"]
                             tool_input = parsed["action_input"] or {}
 
+                            # Log parse errors but continue with recovered parameters
+                            if parsed.get("parse_error"):
+                                logger.warning(f"[Cisco Circuit ReAct] JSON parse error for {tool_name}: {parsed['parse_error']}")
+                                if tool_input:
+                                    logger.info(f"[Cisco Circuit ReAct] Recovered parameters via fallback: {list(tool_input.keys())}")
+                                else:
+                                    logger.warning(f"[Cisco Circuit ReAct] No parameters recovered - tool may fail")
+
                             logger.info(f"[Cisco Circuit ReAct] Executing tool: {tool_name} with input: {tool_input}")
                             tools_used.append(tool_name)
 
@@ -647,7 +735,19 @@ class CiscoCircuitAIService(BaseNetworkAssistant):
 
                             # Add assistant message and observation
                             messages.append({"role": "assistant", "content": text_content})
-                            observation = f"Observation: {json.dumps(result, indent=2)}"
+
+                            # If tool failed due to missing required params and we had a parse error,
+                            # provide more helpful feedback to the AI
+                            observation_text = json.dumps(result, indent=2)
+                            if not result.get("success") and parsed.get("parse_error") and "required" in str(result.get("error", "")):
+                                observation_text = (
+                                    f"Tool Error: {result.get('error')}\n\n"
+                                    f"Note: There was a JSON parsing error with your Action Input. "
+                                    f"Please ensure you output valid JSON with double-quoted strings. "
+                                    f"For example: {{\"network_id\": \"L_123456789012345678\"}}"
+                                )
+
+                            observation = f"Observation: {observation_text}"
                             messages.append({"role": "user", "content": observation})
                             logger.info(f"[Cisco Circuit ReAct] Added observation, continuing loop")
                         else:
@@ -842,7 +942,7 @@ RESPONSE STYLE - BE CONCISE:
             total_input_tokens = 0
             total_output_tokens = 0
 
-            async with httpx.AsyncClient(verify=False) as client:
+            async with httpx.AsyncClient(verify=get_settings().cisco_circuit_verify_ssl) as client:
                 response = await client.post(
                     chat_url,
                     headers={

@@ -250,36 +250,33 @@ LAST 7 DAYS:
 
 Keep the response brief and actionable. Use markdown formatting."""
 
-    # Get AI assistant
-    from src.services.ai_service import get_ai_assistant
-    assistant = get_ai_assistant()
-    if not assistant:
-        raise HTTPException(status_code=503, detail="AI service not configured")
+    # Use multi-provider AI (async, works with database config)
+    from src.services.multi_provider_ai import generate_text
+    from src.services.config_service import get_configured_ai_provider
 
     try:
-        # Generate analysis using simple response (no tools needed)
-        analysis = assistant.generate_simple_response(prompt, max_tokens=800)
+        # Check if AI is configured
+        ai_config = await get_configured_ai_provider()
+        if not ai_config:
+            raise HTTPException(status_code=503, detail="AI service not configured. Please configure an AI provider in Admin > System Config.")
 
-        # Log cost asynchronously (don't block response)
-        try:
-            from src.services.cost_logger import get_cost_logger
-            cost_logger = get_cost_logger()
-            await cost_logger.log_ai_operation(
-                operation_type="cost_analysis",
-                model=assistant.model,
-                input_tokens=600,  # Estimated
-                output_tokens=300,  # Estimated
-                user_id="cost-analyze",
-            )
-        except Exception as log_err:
-            logger.warning(f"Failed to log cost analysis cost: {log_err}")
+        # Generate analysis
+        result = await generate_text(prompt, max_tokens=800)
+
+        if not result:
+            raise HTTPException(status_code=503, detail="AI provider returned no response")
+
+        analysis_text = result.get("text", "")
+        model_used = result.get("model", ai_config.get("model", "unknown"))
 
         return {
             "success": True,
-            "analysis": analysis,
-            "model": assistant.model
+            "analysis": analysis_text,
+            "model": model_used
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Cost analysis error: {e}")
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")

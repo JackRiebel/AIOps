@@ -47,6 +47,8 @@ import { PythonEditor, PythonReference, FULL_PYTHON_TEMPLATE, type PythonValidat
 import { useCanvasHistory } from './hooks/useCanvasHistory';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useWorkflowMode } from './contexts/WorkflowModeContext';
+import { useAISession } from '@/contexts/AISessionContext';
+import AISessionToggle from '@/components/AISessionToggle';
 import { type WorkflowTemplate } from './templates/cardTemplates';
 import type {
   CanvasNodeType,
@@ -387,6 +389,9 @@ const EnterpriseCanvasInner = memo(({
   // Mode context
   const { mode, setMode, setCli, setPython, pendingModeSwitch, cancelPendingSwitch } = useWorkflowMode();
 
+  // AI Session tracking for workflow actions
+  const { isActive: isSessionActive, logEditAction } = useAISession();
+
   // State
   const [name, setName] = useState(initialName || '');
   const [description, setDescription] = useState('');
@@ -532,7 +537,24 @@ end
     };
     setEdges(eds => [...eds, newEdge]);
     takeSnapshot('Connect nodes');
-  }, [setEdges, takeSnapshot]);
+
+    // Track connection for AI session
+    if (isSessionActive) {
+      const sourceNode = nodes.find(n => n.id === connection.source);
+      const targetNode = nodes.find(n => n.id === connection.target);
+      const sourceLabel = (sourceNode?.data as BaseNodeData)?.label || sourceNode?.type || 'node';
+      const targetLabel = (targetNode?.data as BaseNodeData)?.label || targetNode?.type || 'node';
+      const handleInfo = connection.sourceHandle === 'true' ? ' (Yes path)' : connection.sourceHandle === 'false' ? ' (No path)' : '';
+      logEditAction(`Connected workflow nodes: "${sourceLabel}" → "${targetLabel}"${handleInfo}`, {
+        action: 'connect_nodes',
+        sourceType: sourceNode?.type,
+        targetType: targetNode?.type,
+        sourceLabel,
+        targetLabel,
+        conditionPath: connection.sourceHandle,
+      });
+    }
+  }, [setEdges, takeSnapshot, isSessionActive, logEditAction, nodes]);
 
   const addNode = useCallback((type: CanvasNodeType, data?: Record<string, unknown>) => {
     const id = `${type}-${Date.now()}`;
@@ -560,7 +582,28 @@ end
     setNodes(nds => [...nds, newNode]);
     setSelectedNodeId(id);
     takeSnapshot(`Add ${type} node`);
-  }, [setNodes, reactFlowInstance, takeSnapshot, workflowId]);
+
+    // Track node addition for AI session (skip action type, tracked separately with more detail)
+    if (isSessionActive && type !== 'action') {
+      const nodeTypeLabels: Record<string, string> = {
+        trigger: 'Trigger',
+        condition: 'Condition (If/Then)',
+        ai: 'AI Decision',
+        notify: 'Notification',
+        approval: 'Approval Gate',
+        delay: 'Delay',
+        loop: 'Loop',
+        subworkflow: 'Sub-workflow',
+        comment: 'Comment',
+      };
+      const label = nodeTypeLabels[type] || type;
+      logEditAction(`Added ${label} node to workflow`, {
+        action: 'add_node',
+        nodeType: type,
+        nodeLabel: nodeData.label,
+      });
+    }
+  }, [setNodes, reactFlowInstance, takeSnapshot, workflowId, isSessionActive, logEditAction]);
 
   const addAction = useCallback((action: ActionDefinition) => {
     addNode('action', {
@@ -570,20 +613,78 @@ end
       riskLevel: action.riskLevel,
       requiresApproval: action.riskLevel === 'high',
     });
-  }, [addNode]);
+
+    // Track action addition with detailed info for AI session
+    if (isSessionActive) {
+      const riskLabel = action.riskLevel === 'high' ? ' (requires approval)' : action.riskLevel === 'medium' ? ' (medium risk)' : '';
+      logEditAction(`Added action: ${action.name}${riskLabel}`, {
+        action: 'add_action',
+        actionId: action.id,
+        actionName: action.name,
+        platform: action.platform,
+        riskLevel: action.riskLevel,
+        requiresApproval: action.riskLevel === 'high',
+      });
+    }
+  }, [addNode, isSessionActive, logEditAction]);
 
   const updateNode = useCallback((nodeId: string, data: Record<string, unknown>) => {
+    const node = nodes.find(n => n.id === nodeId);
     setNodes(nds =>
       nds.map(n => (n.id === nodeId ? { ...n, data } : n))
     );
-  }, [setNodes]);
+
+    // Track significant configuration changes for AI session
+    if (isSessionActive && node) {
+      const nodeType = node.type || 'unknown';
+      const label = (data.label as string) || (node.data as BaseNodeData)?.label || nodeType;
+
+      // Build description based on node type and configuration
+      let configDescription = `Configured ${nodeType} node: "${label}"`;
+
+      if (nodeType === 'trigger' && data.triggerType) {
+        configDescription = `Configured trigger: ${data.triggerType}${data.schedule ? ` (${data.schedule})` : ''}`;
+      } else if (nodeType === 'condition' && data.expression) {
+        configDescription = `Set condition: ${data.expression}`;
+      } else if (nodeType === 'ai' && data.prompt) {
+        const promptPreview = (data.prompt as string).slice(0, 50);
+        configDescription = `Configured AI analysis: "${promptPreview}..."`;
+        if (data.confidenceThreshold) {
+          configDescription += ` (threshold: ${data.confidenceThreshold}%)`;
+        }
+      } else if (nodeType === 'action' && data.actionId) {
+        configDescription = `Configured action: ${data.actionName || data.actionId}`;
+      } else if (nodeType === 'notify' && data.channel) {
+        configDescription = `Set notification to ${data.channel}`;
+      }
+
+      logEditAction(configDescription, {
+        action: 'configure_node',
+        nodeId,
+        nodeType,
+        label,
+        configuredFields: Object.keys(data),
+      });
+    }
+  }, [setNodes, nodes, isSessionActive, logEditAction]);
 
   const deleteNode = useCallback((nodeId: string) => {
+    const node = nodes.find(n => n.id === nodeId);
     setNodes(nds => nds.filter(n => n.id !== nodeId));
     setEdges(eds => eds.filter(e => e.source !== nodeId && e.target !== nodeId));
     if (selectedNodeId === nodeId) setSelectedNodeId(null);
     takeSnapshot('Delete node');
-  }, [setNodes, setEdges, selectedNodeId, takeSnapshot]);
+
+    // Track deletion for AI session
+    if (isSessionActive && node) {
+      const label = (node.data as BaseNodeData)?.label || node.type || 'node';
+      logEditAction(`Deleted node: "${label}"`, {
+        action: 'delete_node',
+        nodeType: node.type,
+        nodeLabel: label,
+      });
+    }
+  }, [setNodes, setEdges, selectedNodeId, takeSnapshot, nodes, isSessionActive, logEditAction]);
 
   const duplicateNode = useCallback((nodeId: string) => {
     const node = nodes.find(n => n.id === nodeId);
@@ -664,7 +765,18 @@ end
       setMode('python');
       takeSnapshot(`Load Python template: ${template.name}`);
     }
-  }, [setNodes, setEdges, takeSnapshot, reactFlowInstance, setMode, setCli, setPython]);
+
+    // Track template loading for AI session
+    if (isSessionActive) {
+      logEditAction(`Loaded workflow template: "${template.name}" (${template.mode} mode)`, {
+        action: 'load_template',
+        templateName: template.name,
+        templateMode: template.mode,
+        templateCategory: template.category,
+        templateDescription: template.description,
+      });
+    }
+  }, [setNodes, setEdges, takeSnapshot, reactFlowInstance, setMode, setCli, setPython, isSessionActive, logEditAction]);
 
   // Insert workflow pattern at current position
   const insertPattern = useCallback((pattern: WorkflowPattern) => {
@@ -927,6 +1039,79 @@ end
       }
 
       const workflow = await response.json();
+
+      // Track workflow save with comprehensive summary for AI session
+      if (isSessionActive) {
+        // Build a human-readable workflow summary
+        const triggerNode = nodes.find(n => n.type === 'trigger');
+        const triggerData = triggerNode?.data as BaseNodeData | undefined;
+        const triggerType = (triggerData?.triggerType as string) || 'manual';
+
+        const aiNodes = nodes.filter(n => n.type === 'ai');
+        const conditionNodes = nodes.filter(n => n.type === 'condition');
+        const notifyNodes = nodes.filter(n => n.type === 'notify');
+
+        // Describe the workflow logic
+        const parts: string[] = [];
+
+        // Trigger description
+        if (triggerType === 'schedule') {
+          parts.push(`runs on schedule (${triggerData?.cron || 'cron'})`);
+        } else if (triggerType === 'splunk_query') {
+          parts.push('triggers on Splunk alerts');
+        } else {
+          parts.push('runs manually');
+        }
+
+        // AI analysis description
+        if (aiNodes.length > 0) {
+          const aiNode = aiNodes[0];
+          const aiData = aiNode.data as BaseNodeData;
+          const threshold = aiData.confidenceThreshold;
+          if (threshold) {
+            parts.push(`uses AI analysis with ${threshold}% confidence threshold`);
+          } else {
+            parts.push('includes AI-powered decision making');
+          }
+        }
+
+        // Condition descriptions
+        if (conditionNodes.length > 0) {
+          const conditions = conditionNodes.map(n => {
+            const data = n.data as BaseNodeData;
+            return data.expression || data.label || 'condition';
+          });
+          parts.push(`has ${conditionNodes.length} conditional branch${conditionNodes.length > 1 ? 'es' : ''}`);
+        }
+
+        // Action descriptions
+        const actionDescriptions = actionNodes.map(n => {
+          const data = n.data as BaseNodeData;
+          return data.actionName || data.label || 'action';
+        });
+        parts.push(`executes: ${actionDescriptions.join(', ')}`);
+
+        // Notification descriptions
+        if (notifyNodes.length > 0) {
+          const channels = notifyNodes.map(n => (n.data as BaseNodeData).channel || 'notification');
+          parts.push(`notifies via ${channels.join(', ')}`);
+        }
+
+        const workflowSummary = `Saved workflow "${name}" that ${parts.join('; ')}`;
+
+        logEditAction(workflowSummary, {
+          action: 'save_workflow',
+          workflowId: workflow.id,
+          workflowName: name,
+          triggerType,
+          nodeCount: nodes.length,
+          actionCount: actionNodes.length,
+          hasAI: aiNodes.length > 0,
+          hasConditions: conditionNodes.length > 0,
+          isNew: !workflowId,
+        });
+      }
+
       onSave(workflow);
       onClose();
     } catch (err) {
@@ -934,7 +1119,7 @@ end
     } finally {
       setIsSaving(false);
     }
-  }, [name, description, nodes, edges, workflowId, onSave, onClose]);
+  }, [name, description, nodes, edges, workflowId, onSave, onClose, isSessionActive, logEditAction]);
 
   // Test Run
   const handleRun = useCallback(async () => {
@@ -1010,6 +1195,11 @@ end
             className="bg-transparent text-sm text-slate-400 placeholder-slate-600
                      border-none outline-none focus:ring-0 w-full max-w-md mt-0.5"
           />
+        </div>
+
+        {/* AI Session Toggle - matches TopBar positioning */}
+        <div className="flex items-center gap-3">
+          <AISessionToggle />
         </div>
       </div>
 

@@ -3,7 +3,10 @@
 import asyncio
 import logging
 import os
+from typing import Any, Dict, Optional
+from datetime import datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from src.config.database import get_async_session
@@ -15,6 +18,16 @@ from src.tasks.meraki_tasks import ingest_meraki_traffic
 from src.services.network_service import sync_all_organizations
 
 logger = logging.getLogger(__name__)
+
+# Valid correlation interval values (in minutes, 0 = disabled)
+CORRELATION_INTERVALS = {
+    "off": 0,
+    "5min": 5,
+    "30min": 30,
+    "1hr": 60,
+    "2hr": 120,
+    "3hr": 180,
+}
 
 
 class BackgroundJobScheduler:
@@ -29,27 +42,125 @@ class BackgroundJobScheduler:
         self.splunk_correlator = SplunkDrivenCorrelationService()
         self.incident_correlator = IncidentCorrelationService()
 
-    async def fetch_and_correlate_alerts(self):
-        """Fetch alerts from Splunk and enrich with Meraki/ThousandEyes context."""
+        # Track current correlation interval setting
+        self._correlation_interval: str = "off"
+
+    async def get_correlation_interval(self) -> str:
+        """Get the current correlation interval setting from database."""
+        try:
+            from src.services.config_service import ConfigService
+            config = ConfigService()
+            interval = await config.get_config("incident_correlation_interval")
+            if interval and interval in CORRELATION_INTERVALS:
+                return interval
+            return "off"  # Default to disabled
+        except Exception as e:
+            logger.warning(f"Failed to get correlation interval: {e}")
+            return "off"
+
+    async def set_correlation_interval(self, interval: str) -> bool:
+        """Set the correlation interval and update the scheduled job.
+
+        Args:
+            interval: One of 'off', '5min', '30min', '1hr', '2hr', '3hr'
+
+        Returns:
+            True if successful
+        """
+        if interval not in CORRELATION_INTERVALS:
+            logger.error(f"Invalid correlation interval: {interval}")
+            return False
+
+        try:
+            # Save to database
+            from src.services.config_service import ConfigService
+            config = ConfigService()
+            await config.set_config("incident_correlation_interval", interval)
+
+            # Update the scheduled job
+            self._correlation_interval = interval
+            self._update_correlation_job()
+
+            logger.info(f"Correlation interval set to: {interval}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to set correlation interval: {e}")
+            return False
+
+    def _update_correlation_job(self):
+        """Update or remove the correlation job based on current interval."""
+        job_id = "fetch_and_correlate_alerts"
+
+        # Remove existing job if present
+        try:
+            existing_job = self.scheduler.get_job(job_id)
+            if existing_job:
+                self.scheduler.remove_job(job_id)
+                logger.info(f"Removed existing correlation job")
+        except Exception:
+            pass
+
+        # Add new job if interval is not "off"
+        minutes = CORRELATION_INTERVALS.get(self._correlation_interval, 0)
+        if minutes > 0:
+            self.scheduler.add_job(
+                self.fetch_and_correlate_alerts,
+                trigger=IntervalTrigger(minutes=minutes),
+                id=job_id,
+                name=f"Fetch and correlate alerts (every {self._correlation_interval})",
+                replace_existing=True,
+            )
+            logger.info(f"Scheduled correlation job to run every {minutes} minutes")
+        else:
+            logger.info("Correlation auto-polling disabled (manual only)")
+
+    async def fetch_and_correlate_alerts(self) -> Dict[str, Any]:
+        """Fetch alerts from Splunk and enrich with Meraki/ThousandEyes context.
+
+        Returns:
+            Dict with events_found, events_filtered, incidents_created, incident_ids
+        """
+        result = {
+            "events_found": 0,
+            "events_filtered": 0,
+            "incidents_created": 0,
+            "incident_ids": [],
+        }
         try:
             logger.info("=" * 60)
             logger.info("STARTING SPLUNK-DRIVEN INCIDENT ANALYSIS")
             logger.info("=" * 60)
 
             # Use the new Splunk-driven correlation workflow
-            incident_ids = await self.splunk_correlator.analyze_and_create_incidents(hours=24)
+            correlation_result = await self.splunk_correlator.analyze_and_create_incidents(hours=24)
+
+            # analyze_and_create_incidents returns List[int] of incident IDs
+            incident_ids = correlation_result if isinstance(correlation_result, list) else []
+
             if incident_ids:
                 logger.info(f"✓ Created {len(incident_ids)} enriched incidents")
                 logger.info(f"  Incident IDs: {incident_ids}")
             else:
                 logger.info("✓ No new incidents to create")
 
+            result["incidents_created"] = len(incident_ids)
+            result["incident_ids"] = incident_ids
+
+            # Pull counts from the correlator's last run stats if available
+            if hasattr(self.splunk_correlator, '_last_run_stats'):
+                stats = self.splunk_correlator._last_run_stats
+                result["events_found"] = stats.get("events_found", 0)
+                result["events_filtered"] = stats.get("events_filtered", 0)
+
             logger.info("=" * 60)
             logger.info("SPLUNK-DRIVEN INCIDENT ANALYSIS COMPLETE")
             logger.info("=" * 60)
 
+            return result
+
         except Exception as e:
             logger.error(f"❌ Error in fetch_and_correlate_alerts job: {e}", exc_info=True)
+            raise
 
     async def run_scheduled_kb_hygiene(self):
         """Run scheduled knowledge base hygiene maintenance.
@@ -98,6 +209,26 @@ class BackgroundJobScheduler:
         except Exception as e:
             logger.error(f"Error in Meraki traffic ingestion: {e}", exc_info=True)
 
+    async def run_te_metrics_collection(self):
+        """Collect latest ThousandEyes test metrics."""
+        try:
+            from src.services.te_metrics_service import get_te_metrics_service
+            svc = get_te_metrics_service()
+            stats = await svc.collect_all_tests()
+            logger.info(f"TE metrics collection: {stats['inserted']} new rows, {stats['tests_processed']} tests processed")
+        except Exception as e:
+            logger.error(f"Error in TE metrics collection: {e}", exc_info=True)
+
+    async def run_te_metrics_cleanup(self):
+        """Remove ThousandEyes metrics older than 7 days."""
+        try:
+            from src.services.te_metrics_service import get_te_metrics_service
+            svc = get_te_metrics_service()
+            deleted = await svc.cleanup_old_metrics(days=7)
+            logger.info(f"TE metrics cleanup: {deleted} old rows removed")
+        except Exception as e:
+            logger.error(f"Error in TE metrics cleanup: {e}", exc_info=True)
+
     async def run_network_cache_sync(self):
         """Sync network and device data from all configured integrations."""
         try:
@@ -126,21 +257,9 @@ class BackgroundJobScheduler:
 
     def start(self):
         """Start the background job scheduler."""
-        # Run fetch_and_correlate_alerts every 3 hours
-        self.scheduler.add_job(
-            self.fetch_and_correlate_alerts,
-            trigger=IntervalTrigger(hours=3),
-            id="fetch_and_correlate_alerts",
-            name="Fetch and correlate alerts",
-            replace_existing=True,
-        )
-
-        # Also run immediately on startup
-        self.scheduler.add_job(
-            self.fetch_and_correlate_alerts,
-            id="fetch_and_correlate_alerts_startup",
-            name="Fetch and correlate alerts (startup)",
-        )
+        # Note: Correlation job is configured separately via start_async()
+        # which reads the interval setting from database.
+        # Default is "off" (manual only) to save AI costs.
 
         # Run KB hygiene every 6 hours
         self.scheduler.add_job(
@@ -158,15 +277,34 @@ class BackgroundJobScheduler:
             id="meraki_traffic_ingestion",
             name="Meraki traffic data ingestion",
             replace_existing=True,
+            max_instances=1,
         )
 
-        # Also run Meraki ingestion on startup (after 30 seconds to allow app initialization)
+        # Also run Meraki ingestion once on startup (after 30 seconds)
         self.scheduler.add_job(
             self.run_meraki_traffic_ingestion,
-            trigger=IntervalTrigger(seconds=30),
+            trigger=DateTrigger(run_date=datetime.now() + timedelta(seconds=30)),
             id="meraki_traffic_ingestion_startup",
             name="Meraki traffic data ingestion (startup)",
+        )
+
+        # Run ThousandEyes metrics collection every 5 minutes
+        self.scheduler.add_job(
+            self.run_te_metrics_collection,
+            trigger=IntervalTrigger(minutes=5),
+            id="te_metrics_collection",
+            name="ThousandEyes test metrics collection",
+            replace_existing=True,
             max_instances=1,
+        )
+
+        # Run ThousandEyes metrics cleanup every 6 hours (7-day retention)
+        self.scheduler.add_job(
+            self.run_te_metrics_cleanup,
+            trigger=IntervalTrigger(hours=6),
+            id="te_metrics_cleanup",
+            name="ThousandEyes metrics cleanup (7-day retention)",
+            replace_existing=True,
         )
 
         # Run network cache sync every 15 minutes
@@ -176,19 +314,33 @@ class BackgroundJobScheduler:
             id="network_cache_sync",
             name="Network cache sync",
             replace_existing=True,
-        )
-
-        # Also run network sync on startup (after 10 seconds to allow app initialization)
-        self.scheduler.add_job(
-            self.run_network_cache_sync,
-            trigger=IntervalTrigger(seconds=10),
-            id="network_cache_sync_startup",
-            name="Network cache sync (startup)",
             max_instances=1,
         )
 
+        # Also run network sync once on startup (after 10 seconds)
+        self.scheduler.add_job(
+            self.run_network_cache_sync,
+            trigger=DateTrigger(run_date=datetime.now() + timedelta(seconds=10)),
+            id="network_cache_sync_startup",
+            name="Network cache sync (startup)",
+        )
+
         self.scheduler.start()
-        logger.info("Background job scheduler started - network sync every 15 min, alert correlation every 3 hours, KB hygiene every 6 hours, Meraki traffic every 5 minutes")
+        logger.info("Background job scheduler started - network sync every 15 min, KB hygiene every 6 hours, Meraki traffic every 5 min, TE metrics every 5 min")
+
+    async def start_async(self):
+        """Async initialization that loads settings from database.
+
+        Call this after start() to configure jobs that depend on database settings.
+        """
+        # Load and apply correlation interval setting from database
+        self._correlation_interval = await self.get_correlation_interval()
+        self._update_correlation_job()
+
+        if self._correlation_interval == "off":
+            logger.info("Incident correlation: manual only (use 'Refresh & Correlate' button)")
+        else:
+            logger.info(f"Incident correlation: auto-polling every {self._correlation_interval}")
 
     def shutdown(self):
         """Shutdown the scheduler."""

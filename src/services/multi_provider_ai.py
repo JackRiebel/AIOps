@@ -23,6 +23,7 @@ from typing import Optional, Dict, Any, Tuple
 
 import httpx
 
+from src.config.settings import get_settings
 from src.services.config_service import get_configured_ai_provider
 from src.services.ai_service import get_model_costs
 
@@ -225,7 +226,7 @@ class CiscoCircuitClient(BaseAIClient):
         credentials = f"{self.client_id}:{self.client_secret}"
         basic_auth = base64.b64encode(credentials.encode()).decode()
 
-        async with httpx.AsyncClient(verify=False, timeout=120.0) as client:
+        async with httpx.AsyncClient(verify=get_settings().cisco_circuit_verify_ssl, timeout=120.0) as client:
             # Get access token
             token_response = await client.post(
                 self.TOKEN_URL,

@@ -6,12 +6,16 @@ import hmac
 import hashlib
 import base64
 import secrets
+from datetime import datetime, timedelta
 from typing import Optional, Tuple
 from urllib.parse import urlencode
 
 import httpx
+from sqlalchemy import select, delete
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.settings import get_settings
+from src.models.mfa_challenge import MfaChallenge, MFA_CHALLENGE_TTL_SECONDS
 from src.services.config_service import get_config_or_env
 
 logger = logging.getLogger(__name__)
@@ -43,9 +47,6 @@ def _get_duo_credentials() -> Tuple[Optional[str], Optional[str], Optional[str]]
 
 class DuoMFAService:
     """Service for handling Duo Security MFA authentication."""
-
-    # Store pending MFA challenges (in production, use Redis)
-    _pending_challenges: dict[str, dict] = {}
 
     @staticmethod
     def is_configured() -> bool:
@@ -138,10 +139,11 @@ class DuoMFAService:
             return result.get("response", {"result": "allow"})
 
     @staticmethod
-    def create_challenge(user_id: int, username: str) -> str:
-        """Create an MFA challenge for a user.
+    async def create_challenge(db: AsyncSession, user_id: int, username: str) -> str:
+        """Create an MFA challenge for a user (persisted in DB).
 
         Args:
+            db: Async database session
             user_id: User's database ID
             username: Username
 
@@ -149,48 +151,59 @@ class DuoMFAService:
             Challenge ID
         """
         challenge_id = secrets.token_urlsafe(32)
-        DuoMFAService._pending_challenges[challenge_id] = {
-            "user_id": user_id,
-            "username": username,
-            "created_at": time.time(),
-            "verified": False,
-        }
+        row = MfaChallenge(
+            challenge_id=challenge_id,
+            user_id=user_id,
+            username=username,
+        )
+        db.add(row)
+        await db.commit()
         return challenge_id
 
     @staticmethod
-    def get_challenge(challenge_id: str) -> Optional[dict]:
-        """Get a pending MFA challenge.
+    async def get_challenge(db: AsyncSession, challenge_id: str) -> Optional[dict]:
+        """Get a pending MFA challenge from the database.
 
         Args:
+            db: Async database session
             challenge_id: Challenge ID
 
         Returns:
-            Challenge data or None
+            Challenge data dict or None
         """
-        challenge = DuoMFAService._pending_challenges.get(challenge_id)
-        if not challenge:
+        result = await db.execute(
+            select(MfaChallenge).where(
+                MfaChallenge.challenge_id == challenge_id,
+                MfaChallenge.expires_at > datetime.utcnow(),
+            )
+        )
+        row = result.scalar_one_or_none()
+        if not row:
             return None
-
-        # Check if expired (5 minutes)
-        if time.time() - challenge["created_at"] > 300:
-            del DuoMFAService._pending_challenges[challenge_id]
-            return None
-
-        return challenge
+        return {
+            "user_id": row.user_id,
+            "username": row.username,
+            "verified": row.verified,
+            "created_at": row.created_at,
+        }
 
     @staticmethod
-    def consume_challenge(challenge_id: str) -> Optional[dict]:
+    async def consume_challenge(db: AsyncSession, challenge_id: str) -> Optional[dict]:
         """Consume (verify and remove) an MFA challenge.
 
         Args:
+            db: Async database session
             challenge_id: Challenge ID
 
         Returns:
             Challenge data or None
         """
-        challenge = DuoMFAService.get_challenge(challenge_id)
+        challenge = await DuoMFAService.get_challenge(db, challenge_id)
         if challenge and challenge.get("verified"):
-            del DuoMFAService._pending_challenges[challenge_id]
+            await db.execute(
+                delete(MfaChallenge).where(MfaChallenge.challenge_id == challenge_id)
+            )
+            await db.commit()
             return challenge
         return None
 
@@ -303,17 +316,38 @@ class DuoMFAService:
         }
 
     @staticmethod
-    def mark_challenge_verified(challenge_id: str) -> bool:
+    async def mark_challenge_verified(db: AsyncSession, challenge_id: str) -> bool:
         """Mark an MFA challenge as verified.
 
         Args:
+            db: Async database session
             challenge_id: Challenge ID
 
         Returns:
             True if challenge was found and marked
         """
-        challenge = DuoMFAService._pending_challenges.get(challenge_id)
-        if challenge:
-            challenge["verified"] = True
+        result = await db.execute(
+            select(MfaChallenge).where(
+                MfaChallenge.challenge_id == challenge_id,
+                MfaChallenge.expires_at > datetime.utcnow(),
+            )
+        )
+        row = result.scalar_one_or_none()
+        if row:
+            row.verified = True
+            await db.commit()
             return True
         return False
+
+    @staticmethod
+    async def cleanup_expired(db: AsyncSession) -> int:
+        """Delete expired MFA challenges.
+
+        Returns:
+            Number of rows deleted
+        """
+        result = await db.execute(
+            delete(MfaChallenge).where(MfaChallenge.expires_at <= datetime.utcnow())
+        )
+        await db.commit()
+        return result.rowcount

@@ -165,7 +165,7 @@ export function RAGMetricsDashboard() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-gradient-to-br from-purple-500 to-cyan-500">
+          <div className="p-2 rounded-xl bg-gradient-to-br from-purple-500 to-cyan-500">
             <Sparkles className="w-5 h-5 text-white" />
           </div>
           <div>
@@ -181,7 +181,7 @@ export function RAGMetricsDashboard() {
           <select
             value={periodHours}
             onChange={(e) => setPeriodHours(Number(e.target.value))}
-            className="text-sm px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+            className="text-sm px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700/50 bg-white dark:bg-slate-800/60 text-slate-700 dark:text-slate-300"
           >
             <option value={1}>Last hour</option>
             <option value={24}>Last 24 hours</option>
@@ -190,7 +190,7 @@ export function RAGMetricsDashboard() {
           <button
             onClick={handleRefresh}
             disabled={refreshing}
-            className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+            className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors"
           >
             <RefreshCw className={`w-4 h-4 text-slate-500 ${refreshing ? 'animate-spin' : ''}`} />
           </button>
@@ -230,7 +230,7 @@ export function RAGMetricsDashboard() {
 
       {/* Summary Stats Grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 p-4">
+        <div className="bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 border-l-4 border-l-cyan-500 p-4">
           <div className="flex items-center gap-2 mb-2">
             <Activity className="w-4 h-4 text-cyan-500" />
             <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
@@ -242,7 +242,7 @@ export function RAGMetricsDashboard() {
           </p>
         </div>
 
-        <div className="bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 p-4">
+        <div className="bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 border-l-4 border-l-purple-500 p-4">
           <div className="flex items-center gap-2 mb-2">
             <Clock className="w-4 h-4 text-purple-500" />
             <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
@@ -256,7 +256,7 @@ export function RAGMetricsDashboard() {
           <p className="text-xs text-slate-500 mt-1">P95: {summary.p95_latency_ms.toFixed(0)}ms</p>
         </div>
 
-        <div className="bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 p-4">
+        <div className="bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 border-l-4 border-l-emerald-500 p-4">
           <div className="flex items-center gap-2 mb-2">
             <FileText className="w-4 h-4 text-green-500" />
             <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
@@ -268,7 +268,7 @@ export function RAGMetricsDashboard() {
           </p>
         </div>
 
-        <div className="bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 p-4">
+        <div className="bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 border-l-4 border-l-amber-500 p-4">
           <div className="flex items-center gap-2 mb-2">
             <TrendingUp className="w-4 h-4 text-amber-500" />
             <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
@@ -286,7 +286,7 @@ export function RAGMetricsDashboard() {
 
       {/* Agent Performance */}
       <div className="bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 p-5">
-        <h3 className="text-sm font-semibold text-slate-900 dark:text-white mb-4">
+        <h3 className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-4">
           Agent Performance
         </h3>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -324,7 +324,7 @@ export function RAGMetricsDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Strategy Distribution */}
         <div className="bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 p-5">
-          <h3 className="text-sm font-semibold text-slate-900 dark:text-white mb-4">
+          <h3 className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-4">
             Retrieval Strategy Distribution
           </h3>
           <div className="space-y-3">
@@ -342,9 +342,9 @@ export function RAGMetricsDashboard() {
                       {count} ({percentage.toFixed(0)}%)
                     </span>
                   </div>
-                  <div className="h-2 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                  <div className="h-2 bg-slate-100 dark:bg-slate-700/50 rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-gradient-to-r from-purple-500 to-cyan-500 rounded-full"
+                      className="h-full bg-cyan-500 dark:bg-cyan-400 rounded-full"
                       style={{ width: `${percentage}%` }}
                     />
                   </div>
@@ -361,15 +361,15 @@ export function RAGMetricsDashboard() {
 
         {/* Slow Queries */}
         <div className="bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 p-5">
-          <h3 className="text-sm font-semibold text-slate-900 dark:text-white mb-4">
+          <h3 className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-4">
             Slow Queries ({'>'}10s)
           </h3>
           {slowQueries.length > 0 ? (
-            <div className="space-y-3">
+            <div className="divide-y divide-slate-100 dark:divide-slate-700/30">
               {slowQueries.map((query) => (
                 <div
                   key={query.id}
-                  className="p-3 rounded-lg bg-slate-50 dark:bg-slate-800/30 border border-slate-200 dark:border-slate-700/30"
+                  className="px-3 py-3"
                 >
                   <p className="text-sm text-slate-700 dark:text-slate-300 line-clamp-1">
                     {query.query}
@@ -394,25 +394,25 @@ export function RAGMetricsDashboard() {
 
       {/* Additional Metrics */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 p-4 text-center">
+        <div className="bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 border-l-4 border-l-blue-500 p-4 text-center">
           <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Avg Iterations</p>
           <p className="text-xl font-bold text-slate-900 dark:text-white">
             {summary.avg_iterations.toFixed(1)}
           </p>
         </div>
-        <div className="bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 p-4 text-center">
+        <div className="bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 border-l-4 border-l-purple-500 p-4 text-center">
           <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Web Search Rate</p>
           <p className="text-xl font-bold text-slate-900 dark:text-white">
             {(summary.web_search_rate * 100).toFixed(1)}%
           </p>
         </div>
-        <div className="bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 p-4 text-center">
+        <div className="bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 border-l-4 border-l-emerald-500 p-4 text-center">
           <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Quality: Good</p>
           <p className="text-xl font-bold text-green-500">
             {summary.quality_distribution.GOOD || 0}
           </p>
         </div>
-        <div className="bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 p-4 text-center">
+        <div className="bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 border-l-4 border-l-cyan-500 p-4 text-center">
           <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Quality: Excellent</p>
           <p className="text-xl font-bold text-emerald-500">
             {summary.quality_distribution.EXCELLENT || 0}

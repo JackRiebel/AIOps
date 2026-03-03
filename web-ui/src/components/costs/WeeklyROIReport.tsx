@@ -126,13 +126,13 @@ export function WeeklyROIReport({
   }, [data.weekOverWeekChange]);
 
   return (
-    <div className={`bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 overflow-hidden ${className}`}>
+    <div className={`bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 border-l-4 border-l-blue-500 overflow-hidden ${className}`}>
       {/* Header */}
       <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700/50">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-gradient-to-br from-cyan-500/20 to-blue-500/20">
-              <FileText className="w-5 h-5 text-cyan-500" />
+            <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-500/10">
+              <FileText className="w-5 h-5 text-blue-600 dark:text-blue-400" />
             </div>
             <div>
               <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
@@ -180,11 +180,11 @@ export function WeeklyROIReport({
         <>
           {/* Summary Section */}
           <div className="p-5 border-b border-slate-200 dark:border-slate-700/50">
-            <h4 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-4">
+            <h4 className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-4">
               Summary
             </h4>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-800/30">
+              <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-800/30 border-l-2 border-l-blue-500">
                 <div className="flex items-center gap-2 mb-1">
                   <Zap className="w-4 h-4 text-blue-500" />
                   <span className="text-xs text-slate-500 dark:text-slate-400">Sessions</span>
@@ -199,7 +199,7 @@ export function WeeklyROIReport({
                 )}
               </div>
 
-              <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-800/30">
+              <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-800/30 border-l-2 border-l-emerald-500">
                 <div className="flex items-center gap-2 mb-1">
                   <Clock className="w-4 h-4 text-emerald-500" />
                   <span className="text-xs text-slate-500 dark:text-slate-400">Time Saved</span>
@@ -212,7 +212,7 @@ export function WeeklyROIReport({
                 </p>
               </div>
 
-              <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-800/30">
+              <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-800/30 border-l-2 border-l-cyan-500">
                 <div className="flex items-center gap-2 mb-1">
                   <DollarSign className="w-4 h-4 text-cyan-500" />
                   <span className="text-xs text-slate-500 dark:text-slate-400">AI Cost</span>
@@ -227,7 +227,7 @@ export function WeeklyROIReport({
                 )}
               </div>
 
-              <div className="p-3 rounded-lg bg-gradient-to-br from-cyan-50 to-emerald-50 dark:from-cyan-500/5 dark:to-emerald-500/5">
+              <div className="p-3 rounded-lg bg-gradient-to-br from-cyan-50 to-emerald-50 dark:from-cyan-500/5 dark:to-emerald-500/5 border-l-2 border-l-violet-500">
                 <div className="flex items-center gap-2 mb-1">
                   <TrendingUp className="w-4 h-4 text-cyan-500" />
                   <span className="text-xs text-slate-500 dark:text-slate-400">Net ROI</span>
@@ -245,14 +245,14 @@ export function WeeklyROIReport({
           {/* Top Wins */}
           {data.topWins.length > 0 && (
             <div className="p-5 border-b border-slate-200 dark:border-slate-700/50">
-              <h4 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3">
+              <h4 className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3">
                 Top Wins
               </h4>
               <div className="space-y-2">
                 {data.topWins.map((win, index) => (
                   <div
                     key={win.sessionId}
-                    className="flex items-start gap-3 p-3 rounded-lg bg-emerald-50 dark:bg-emerald-500/5 border border-emerald-100 dark:border-emerald-500/10"
+                    className="flex items-start gap-3 p-3 rounded-lg bg-slate-50 dark:bg-slate-800/30 border-l-2 border-l-emerald-500"
                   >
                     <div className="flex-shrink-0 w-6 h-6 rounded-full bg-emerald-500 flex items-center justify-center">
                       <span className="text-xs font-bold text-white">{index + 1}</span>
@@ -284,7 +284,7 @@ export function WeeklyROIReport({
           {/* Optimization Opportunities */}
           {data.optimizations.length > 0 && (
             <div className="p-5">
-              <h4 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3">
+              <h4 className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3">
                 Optimization Opportunities
               </h4>
               <div className="space-y-2">

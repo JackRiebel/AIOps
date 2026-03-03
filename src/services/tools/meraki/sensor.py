@@ -14,6 +14,17 @@ from src.services.meraki_api import MerakiAPIClient
 
 logger = logging.getLogger(__name__)
 
+
+def _validate_context(context: Any) -> Dict:
+    """Validate that context has a Meraki client configured."""
+    if not hasattr(context, 'client') or context.client is None:
+        return {
+            "success": False,
+            "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+        }
+    return None
+
+
 # =============================================================================
 # HANDLERS
 # =============================================================================
@@ -21,6 +32,7 @@ logger = logging.getLogger(__name__)
 async def handle_sensor_list_alerts_profiles(params: Dict, context: Any) -> Dict:
     """Handler for List Sensor Alert Profiles."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sensor/list/alerts/profiles"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -35,6 +47,7 @@ async def handle_sensor_list_alerts_profiles(params: Dict, context: Any) -> Dict
 async def handle_sensor_create_alerts_profile(params: Dict, context: Any) -> Dict:
     """Handler for Create Sensor Alert Profile."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sensor/create/alerts/profile"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -49,6 +62,7 @@ async def handle_sensor_create_alerts_profile(params: Dict, context: Any) -> Dic
 async def handle_sensor_get_alerts_profile(params: Dict, context: Any) -> Dict:
     """Handler for Get Sensor Alert Profile."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sensor/get/alerts/profile"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -63,6 +77,7 @@ async def handle_sensor_get_alerts_profile(params: Dict, context: Any) -> Dict:
 async def handle_sensor_update_alerts_profile(params: Dict, context: Any) -> Dict:
     """Handler for Update Sensor Alert Profile."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sensor/update/alerts/profile"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -77,6 +92,7 @@ async def handle_sensor_update_alerts_profile(params: Dict, context: Any) -> Dic
 async def handle_sensor_delete_alerts_profile(params: Dict, context: Any) -> Dict:
     """Handler for Delete Sensor Alert Profile."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sensor/delete/alerts/profile"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -91,6 +107,7 @@ async def handle_sensor_delete_alerts_profile(params: Dict, context: Any) -> Dic
 async def handle_sensor_get_alerts_current(params: Dict, context: Any) -> Dict:
     """Handler for Get Current Sensor Alerts."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sensor/get/alerts/current"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -105,6 +122,7 @@ async def handle_sensor_get_alerts_current(params: Dict, context: Any) -> Dict:
 async def handle_sensor_get_alerts_history(params: Dict, context: Any) -> Dict:
     """Handler for Get Sensor Alerts History."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sensor/get/alerts/history"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -119,6 +137,7 @@ async def handle_sensor_get_alerts_history(params: Dict, context: Any) -> Dict:
 async def handle_sensor_get_readings_history(params: Dict, context: Any) -> Dict:
     """Handler for Get Sensor Readings History."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sensor/get/readings/history"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -133,6 +152,7 @@ async def handle_sensor_get_readings_history(params: Dict, context: Any) -> Dict
 async def handle_sensor_get_readings_latest(params: Dict, context: Any) -> Dict:
     """Handler for Get Sensor Readings Latest."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sensor/get/readings/latest"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -147,6 +167,7 @@ async def handle_sensor_get_readings_latest(params: Dict, context: Any) -> Dict:
 async def handle_sensor_list_relationships(params: Dict, context: Any) -> Dict:
     """Handler for List Sensor Relationships."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sensor/list/relationships"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -161,6 +182,7 @@ async def handle_sensor_list_relationships(params: Dict, context: Any) -> Dict:
 async def handle_sensor_get_device_relationships(params: Dict, context: Any) -> Dict:
     """Handler for Get Device Sensor Relationships."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sensor/get/device/relationships"
         path = path.replace("{serial}", params.get("serial", ""))
@@ -175,6 +197,7 @@ async def handle_sensor_get_device_relationships(params: Dict, context: Any) -> 
 async def handle_sensor_update_device_relationships(params: Dict, context: Any) -> Dict:
     """Handler for Update Device Sensor Relationships."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sensor/update/device/relationships"
         path = path.replace("{serial}", params.get("serial", ""))
@@ -189,6 +212,7 @@ async def handle_sensor_update_device_relationships(params: Dict, context: Any) 
 async def handle_sensor_create_command(params: Dict, context: Any) -> Dict:
     """Handler for Create Sensor Command."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sensor/create/command"
         path = path.replace("{serial}", params.get("serial", ""))
@@ -203,6 +227,7 @@ async def handle_sensor_create_command(params: Dict, context: Any) -> Dict:
 async def handle_sensor_get_command(params: Dict, context: Any) -> Dict:
     """Handler for Get Sensor Command."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sensor/get/command"
         path = path.replace("{serial}", params.get("serial", ""))

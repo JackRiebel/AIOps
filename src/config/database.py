@@ -15,6 +15,12 @@ from .settings import get_settings
 Base = declarative_base()
 
 
+def _mask_url(url: str) -> str:
+    """Mask password in a database connection URL for safe logging."""
+    import re
+    return re.sub(r'://([^:]+):([^@]+)@', r'://\1:****@', url)
+
+
 def _import_all_models():
     """Import all models to register them with Base.metadata."""
     # This must be called before create_tables() for all tables to be created
@@ -45,14 +51,16 @@ class Database:
         async_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1) if database_url else ""
 
         # Async engine with connection pooling
+        # Embedded PostgreSQL has max_connections=100 (6 reserved for system)
+        # Auth middleware now releases sessions early, so pool pressure is lower.
         self.async_engine = create_async_engine(
             async_url,
             echo=False,
             pool_pre_ping=True,
-            pool_size=20,
-            max_overflow=40,
+            pool_size=15,
+            max_overflow=30,
             pool_recycle=300,  # Recycle connections after 5 minutes
-            pool_timeout=60,  # Wait up to 60s for a connection
+            pool_timeout=30,  # Wait up to 30s for a connection
         ) if async_url else None
 
         self.async_session_factory = async_sessionmaker(
@@ -79,7 +87,7 @@ class Database:
         import logging
         logger = logging.getLogger(__name__)
         logger.info(f"Creating tables for {len(Base.metadata.tables)} models...")
-        logger.info(f"Database URL: {self.database_url}")
+        logger.info(f"Database URL: {_mask_url(self.database_url)}")
         try:
             # Use sync engine for table creation
             Base.metadata.create_all(bind=self.sync_engine)
@@ -163,7 +171,7 @@ def _ensure_embedded_postgres() -> str:
 
     # Update settings with the connection string
     settings.database_url = connection_string
-    logger.info(f"Embedded PostgreSQL started: {connection_string}")
+    logger.info(f"Embedded PostgreSQL started: {_mask_url(connection_string)}")
 
     return connection_string
 
@@ -203,6 +211,7 @@ def get_async_session():
 # This is safe — no circular imports, no path issues
 # ————————————————————————————————————————————————
 import importlib
+import logging
 
 sql_alchemy_models = [
     "src.models.user",
@@ -226,13 +235,18 @@ sql_alchemy_models = [
     "src.models.workflow",
     "src.models.splunk_insight",
     "src.models.system_config",
+    "src.models.canvas",
+    "src.models.pending_action",
+    "src.models.mfa_challenge",
+    "src.models.network_change",
+    "src.models.te_test_metric",
 ]
 
 for module_name in sql_alchemy_models:
     try:
         importlib.import_module(module_name)
     except Exception as e:
-        print(f"[DB] Warning: Could not load model {module_name}: {e}")
+        logging.getLogger(__name__).warning(f"Could not load model {module_name}: {e}")
 
 # Optional: nice exports
 __all__ = ["Base", "Database", "get_db", "init_db", "get_async_session"]

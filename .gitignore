@@ -29,6 +29,10 @@ ENV/
 .env.local
 .env.*.local
 
+# Meraki Magic MCP cache
+.meraki_cache/
+meraki-magic-mcp/
+
 # IDE
 .vscode/
 .idea/
@@ -41,6 +45,22 @@ ENV/
 *.db
 *.sqlite3
 postgres_data/
+data/
+
+# Certificates
+certs/
+certificates/
+web-ui/certificates/
+*.pem
+*.key
+*.crt
+
+# Virtual Environment
+.venv/
+venv/
+
+# Claude Code
+.claude/
 
 # Docker
 *.log

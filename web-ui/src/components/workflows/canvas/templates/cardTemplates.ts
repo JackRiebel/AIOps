@@ -50,12 +50,12 @@ const genId = (prefix: string) => `${prefix}-${++idCounter}`;
 export const networkHealthMonitorTemplate: WorkflowTemplate = {
   id: 'network-health-monitor',
   name: 'Network Health Monitor',
-  description: 'Continuously monitor network health and alert when thresholds are exceeded',
+  description: 'Monitor network health across all networks, automatically create incidents when issues are detected',
   category: 'monitoring',
   icon: '💓',
   difficulty: 'beginner',
   estimatedTime: '5 min',
-  tags: ['meraki', 'health', 'monitoring', 'alerts'],
+  tags: ['meraki', 'health', 'monitoring', 'alerts', 'incident'],
   nodes: [
     {
       id: 'trigger-1',
@@ -73,39 +73,31 @@ export const networkHealthMonitorTemplate: WorkflowTemplate = {
       type: 'action',
       position: { x: 350, y: 200 },
       data: {
-        label: 'Get Network Health',
-        actionId: 'meraki.get_network_health',
-        actionName: 'Get Network Health',
-        parameters: {},
-      },
-    },
-    {
-      id: 'condition-1',
-      type: 'condition',
-      position: { x: 600, y: 200 },
-      data: {
-        label: 'Health Check',
-        conditionType: 'expression',
-        expression: 'health_score < 80',
-        description: 'Check if health score is below threshold',
+        label: 'Monitor Health & Create Incident',
+        actionId: 'monitor_network_health',
+        actionName: 'Monitor Network Health',
+        parameters: {
+          organization_id: '', // Set your Meraki org ID for all networks
+          create_incident: true, // Auto-create incident if alerts found
+          min_severity: 'warning', // warning or critical
+        },
       },
     },
     {
       id: 'notify-1',
       type: 'notify',
-      position: { x: 850, y: 150 },
+      position: { x: 600, y: 200 },
       data: {
         label: 'Send Alert',
         notifyType: 'slack',
         channel: '#network-alerts',
-        message: 'Network health degraded: {{health_score}}%',
+        message: 'Network health issues detected: {{alerts_found}} alert(s). Incident #{{incident_id}} created.',
       },
     },
   ],
   edges: [
     { id: 'e1', source: 'trigger-1', target: 'action-1' },
-    { id: 'e2', source: 'action-1', target: 'condition-1' },
-    { id: 'e3', source: 'condition-1', target: 'notify-1', sourceHandle: 'true' },
+    { id: 'e2', source: 'action-1', target: 'notify-1' },
   ],
 };
 
@@ -163,7 +155,11 @@ export const securityAlertResponseTemplate: WorkflowTemplate = {
         label: 'Isolate Device',
         actionId: 'meraki.quarantine_device',
         actionName: 'Quarantine Device',
-        parameters: {},
+        parameters: {
+          network_id: '', // Required: Set your Meraki network ID
+          client_mac: '{{trigger.client_mac}}', // From trigger data
+          policy: 'blocked',
+        },
       },
     },
     {
@@ -220,7 +216,9 @@ export const scheduledBackupTemplate: WorkflowTemplate = {
         label: 'List Devices',
         actionId: 'meraki.list_devices',
         actionName: 'List Network Devices',
-        parameters: {},
+        parameters: {
+          network_id: '', // Required: Set your Meraki network ID
+        },
       },
     },
     {
@@ -300,7 +298,9 @@ export const bandwidthAlertTemplate: WorkflowTemplate = {
         label: 'Get Bandwidth Stats',
         actionId: 'meraki.get_bandwidth_usage',
         actionName: 'Get Bandwidth Usage',
-        parameters: {},
+        parameters: {
+          network_id: '', // Required: Set your Meraki network ID
+        },
       },
     },
     {
@@ -1002,7 +1002,9 @@ export const thousandEyesPerformanceTemplate: WorkflowTemplate = {
         label: 'Run Diagnostics',
         actionId: 'meraki.get_network_health',
         actionName: 'Network Diagnostics',
-        parameters: {},
+        parameters: {
+          network_id: '', // Required: Set your Meraki network ID
+        },
       },
     },
     {
@@ -1073,7 +1075,9 @@ export const incidentCorrelationTemplate: WorkflowTemplate = {
         label: 'Check Meraki',
         actionId: 'meraki.get_network_events',
         actionName: 'Get Network Events',
-        parameters: {},
+        parameters: {
+          network_id: '', // Required: Set your Meraki network ID
+        },
       },
     },
     {
@@ -1084,7 +1088,7 @@ export const incidentCorrelationTemplate: WorkflowTemplate = {
         label: 'Check ThousandEyes',
         actionId: 'thousandeyes.get_alerts',
         actionName: 'Get Active Alerts',
-        parameters: {},
+        parameters: {}, // No required parameters for ThousandEyes alerts
       },
     },
     {
@@ -1199,7 +1203,10 @@ export const changeManagementTemplate: WorkflowTemplate = {
         label: 'Apply Change',
         actionId: 'meraki.update_network',
         actionName: 'Apply Network Change',
-        parameters: {},
+        parameters: {
+          network_id: '', // Required: Set your Meraki network ID
+          // Add network update fields based on your change requirements
+        },
       },
     },
     {
@@ -1231,7 +1238,9 @@ export const changeManagementTemplate: WorkflowTemplate = {
         label: 'Verify Change',
         actionId: 'meraki.get_network_health',
         actionName: 'Check Network Health',
-        parameters: {},
+        parameters: {
+          network_id: '', // Required: Set your Meraki network ID
+        },
       },
     },
     {
@@ -1290,7 +1299,9 @@ export const complianceCheckTemplate: WorkflowTemplate = {
         label: 'Get Firewall Rules',
         actionId: 'meraki.get_firewall_rules',
         actionName: 'List Firewall Rules',
-        parameters: {},
+        parameters: {
+          network_id: '', // Required: Set your Meraki network ID
+        },
       },
     },
     {
@@ -1301,7 +1312,9 @@ export const complianceCheckTemplate: WorkflowTemplate = {
         label: 'Get SSID Config',
         actionId: 'meraki.get_ssids',
         actionName: 'List SSIDs',
-        parameters: {},
+        parameters: {
+          network_id: '', // Required: Set your Meraki network ID
+        },
       },
     },
     {
@@ -1619,7 +1632,9 @@ export const capacityPlanningTemplate: WorkflowTemplate = {
         label: 'Get Device Inventory',
         actionId: 'meraki.list_devices',
         actionName: 'List All Devices',
-        parameters: {},
+        parameters: {
+          network_id: '', // Required: Set your Meraki network ID
+        },
       },
     },
     {

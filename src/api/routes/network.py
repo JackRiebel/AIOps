@@ -10,6 +10,7 @@ from sqlalchemy import insert
 from typing import Dict, Any, AsyncGenerator
 
 from src.config.database import get_db
+from src.config.settings import get_settings
 from src.services.claude_service import get_claude_assistant
 from src.services.ai_service import get_ai_assistant, get_provider_from_model
 from src.services.meraki_api import MerakiAPIClient
@@ -243,7 +244,7 @@ async def get_rf_analysis(
 
             # Get wireless devices (APs)
             devices = await meraki_client.request("GET", f"/networks/{network_id}/devices")
-            wireless_devices = [d for d in devices if d.get("model", "").startswith(("MR", "CW"))]
+            wireless_devices = [d for d in devices if d.get("model", "").startswith(("MR", "CW", "GR"))]
 
             if not wireless_devices:
                 await meraki_client.client.aclose()
@@ -1072,34 +1073,33 @@ NETWORK STATISTICS:
 
 Keep the response brief and actionable. Use markdown formatting."""
 
-    # Get AI assistant
-    from src.services.ai_service import get_ai_assistant
-    assistant = get_ai_assistant()
-    if not assistant:
-        raise HTTPException(status_code=503, detail="AI service not configured")
+    # Use multi-provider AI (async, works with database config)
+    from src.services.multi_provider_ai import generate_text
+    from src.services.config_service import get_configured_ai_provider
 
     try:
-        # Generate analysis using simple response (no tools needed)
-        analysis = assistant.generate_simple_response(prompt, max_tokens=800)
+        # Check if AI is configured
+        ai_config = await get_configured_ai_provider()
+        if not ai_config:
+            raise HTTPException(status_code=503, detail="AI service not configured. Please configure an AI provider in Admin > System Config.")
 
-        # Log cost
-        cost_entry = {
-            "conversation_id": None,
-            "user_id": "network-analyze",
-            "input_tokens": 500,  # Estimated
-            "output_tokens": 300,  # Estimated
-            "total_tokens": 800,
-            "cost_usd": 0.0008,  # Estimated for Haiku
-            "model": assistant.model,
-        }
-        await session.execute(insert(AICostLog).values(**cost_entry))
+        # Generate analysis
+        result = await generate_text(prompt, max_tokens=800)
+
+        if not result:
+            raise HTTPException(status_code=503, detail="AI provider returned no response")
+
+        analysis_text = result.get("text", "")
+        model_used = result.get("model", ai_config.get("model", "unknown"))
 
         return {
             "success": True,
-            "analysis": analysis,
-            "model": assistant.model
+            "analysis": analysis_text,
+            "model": model_used
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Network analysis error: {e}")
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
@@ -1453,7 +1453,7 @@ async def cisco_agent_chat(
         access_token = await assistant._get_access_token()
         chat_url = assistant._get_chat_url()
 
-        async with httpx.AsyncClient(verify=False) as client:
+        async with httpx.AsyncClient(verify=get_settings().cisco_circuit_verify_ssl) as client:
             response = await client.post(
                 chat_url,
                 headers={
@@ -1702,7 +1702,7 @@ async def network_chat_stream(
                 "properties": {
                     "organization": {
                         "type": "string",
-                        "description": "The Splunk organization name (e.g., 'Riebel Splunk')."
+                        "description": "The Splunk organization name (e.g., 'Demo Splunk')."
                     },
                     "search_query": {
                         "type": "string",
@@ -1986,7 +1986,7 @@ async def network_chat_stream(
                 # Add time range to query
                 full_query = f"{search_query} earliest={time_range}"
 
-                async with httpx.AsyncClient(verify=False, timeout=60.0) as client:
+                async with httpx.AsyncClient(verify=get_settings().cisco_circuit_verify_ssl, timeout=60.0) as client:
                     # Create search job
                     search_response = await client.post(
                         f"{splunk_url}/services/search/jobs",
@@ -2059,7 +2059,7 @@ async def network_chat_stream(
             access_token = await assistant._get_access_token()
             chat_url = assistant._get_chat_url()
 
-            async with httpx.AsyncClient(verify=False) as http_client:
+            async with httpx.AsyncClient(verify=get_settings().cisco_circuit_verify_ssl) as http_client:
                 response = await http_client.post(
                     chat_url,
                     headers={

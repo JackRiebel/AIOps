@@ -91,12 +91,14 @@ export function MTTRDashboard({ data, className = '' }: MTTRDashboardProps) {
   }
 
   return (
-    <div className={`bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 overflow-hidden ${className}`}>
+    <div className={`bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 border-l-4 border-l-emerald-500 overflow-hidden ${className}`}>
       {/* Header */}
       <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700/50">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Clock className="w-5 h-5 text-cyan-500" />
+            <div className="p-1.5 rounded-lg bg-emerald-100 dark:bg-emerald-500/10">
+              <Clock className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+            </div>
             <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-900 dark:text-white">
               Mean Time to Resolution (MTTR)
               <HelpTooltip content="MTTR measures the average time from when an incident is detected to when it's fully resolved. Lower is better." />
@@ -159,7 +161,7 @@ export function MTTRDashboard({ data, className = '' }: MTTRDashboardProps) {
 
         {/* Stats Row */}
         <div className="grid grid-cols-3 gap-4 p-4 bg-slate-50 dark:bg-slate-800/30 rounded-lg mb-6">
-          <div className="text-center">
+          <div className="text-center border-l-2 border-l-blue-500 pl-3">
             <p className="text-2xl font-bold text-slate-900 dark:text-white">
               {data.incidentsResolved}
             </p>
@@ -168,7 +170,7 @@ export function MTTRDashboard({ data, className = '' }: MTTRDashboardProps) {
               <HelpTooltip content="Number of incidents where AI assistance was used to help diagnose and resolve the issue." />
             </p>
           </div>
-          <div className="text-center">
+          <div className="text-center border-l-2 border-l-emerald-500 pl-3">
             <p className={`text-2xl font-bold ${improvementColors.text}`}>
               {data.improvementPercentage.toFixed(0)}%
             </p>
@@ -177,7 +179,7 @@ export function MTTRDashboard({ data, className = '' }: MTTRDashboardProps) {
               <HelpTooltip content="Percentage reduction in resolution time compared to the baseline (manual resolution without AI)." />
             </p>
           </div>
-          <div className="text-center">
+          <div className="text-center border-l-2 border-l-cyan-500 pl-3">
             <p className="text-2xl font-bold text-emerald-500">
               {formatTime(data.avgTimeSavedPerIncident)}
             </p>
@@ -191,10 +193,10 @@ export function MTTRDashboard({ data, className = '' }: MTTRDashboardProps) {
         {/* Recent Incidents */}
         {data.recentIncidents.length > 0 && (
           <div>
-            <h4 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3">
+            <h4 className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3">
               Recent Incidents Resolved
             </h4>
-            <div className="space-y-2">
+            <div className="divide-y divide-slate-100 dark:divide-slate-700/30">
               {data.recentIncidents.slice(0, 5).map((incident) => {
                 const savedPct = incident.baselineMinutes > 0
                   ? ((incident.baselineMinutes - incident.resolutionTimeMinutes) / incident.baselineMinutes) * 100
@@ -204,7 +206,7 @@ export function MTTRDashboard({ data, className = '' }: MTTRDashboardProps) {
                 return (
                   <div
                     key={incident.id}
-                    className="flex items-center gap-3 p-3 rounded-lg bg-slate-50 dark:bg-slate-800/30 hover:bg-slate-100 dark:hover:bg-slate-700/30 transition-colors"
+                    className="flex items-center gap-3 px-3 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors"
                   >
                     <div className="flex-shrink-0">
                       {incident.resolved ? (

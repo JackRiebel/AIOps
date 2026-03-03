@@ -455,7 +455,7 @@ export const SessionsTable = memo(({
       <div className="bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 hover:border-cyan-300 dark:hover:border-cyan-500/30 transition-colors overflow-hidden">
         <div className="overflow-x-auto">
         <table className="w-full">
-          <thead>
+          <thead className="sticky top-0 bg-slate-50 dark:bg-slate-800/80 z-10">
             <tr className="border-b border-slate-200 dark:border-slate-700/50">
               <th className="px-4 py-2.5 text-left text-[10px] font-semibold text-slate-500 dark:text-slate-500 uppercase tracking-wider w-8" />
               <th className="px-4 py-2.5 text-left text-[10px] font-semibold text-slate-500 dark:text-slate-500 uppercase tracking-wider">
@@ -600,7 +600,7 @@ export const SessionsTable = memo(({
                   {selectedSessionId === session.id && (
                     <tr>
                       <td colSpan={onLinkIncident ? 10 : 9} className="px-0 py-0">
-                        <div className="border-t border-b border-cyan-200 dark:border-cyan-500/20 bg-slate-50 dark:bg-slate-800/20">
+                        <div className="border-t border-b border-cyan-200/50 dark:border-cyan-500/10 bg-cyan-50/30 dark:bg-cyan-900/5">
                           <div className="p-4">
                             <AISessionSummaryCard session={session} embedded />
                             {/* View Timeline Button */}
@@ -611,7 +611,7 @@ export const SessionsTable = memo(({
                                     e.stopPropagation();
                                     handleViewTimeline(session);
                                   }}
-                                  className="flex items-center gap-2 px-4 py-2 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-600 dark:text-blue-400 rounded-lg transition-colors font-medium text-sm"
+                                  className="flex items-center gap-2 px-4 py-2 bg-cyan-50 dark:bg-cyan-900/30 hover:bg-cyan-100 dark:hover:bg-cyan-900/50 text-cyan-600 dark:text-cyan-400 rounded-lg transition-colors font-medium text-sm"
                                 >
                                   <ListTree className="w-4 h-4" />
                                   View Session Timeline ({session.total_events} events)

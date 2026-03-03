@@ -25,6 +25,7 @@ from src.models.user import User
 from src.services.unified_chat_service import create_chat_service
 from src.services.credential_pool import get_initialized_pool
 from src.services.cost_logger import get_cost_logger
+from src.config.model_pricing import calculate_cost
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,8 @@ class StreamingChatRequest(BaseModel):
     """Request model for streaming chat."""
     message: str
     organization: Optional[str] = None
-    network_id: Optional[str] = None  # User's currently selected network (for card context)
+    network_id: Optional[str] = None  # User's currently selected network ID (for card context)
+    network_name: Optional[str] = None  # User's selected network name (for entity resolution)
     session_id: Optional[str] = None
     history: Optional[List[Dict[str, Any]]] = None
     conversation_id: Optional[int] = None
@@ -48,6 +50,7 @@ async def _create_unified_stream(
     message: str,
     organization: str,
     network_id: Optional[str],
+    network_name: Optional[str],
     session_id: str,
     history: List[Dict[str, Any]],
     user: User,
@@ -67,6 +70,8 @@ async def _create_unified_stream(
     Args:
         message: User message
         organization: Organization hint (can be empty for auto-resolve)
+        network_id: User's selected network ID
+        network_name: User's selected network name (for entity resolution)
         session_id: Session ID for context persistence
         history: Conversation history
         user: Authenticated user
@@ -105,84 +110,27 @@ async def _create_unified_stream(
             # Comma-separated or empty = auto-resolve mode
             logger.info(f"[Stream] Auto-resolve mode: organization='{organization}'")
 
-        # Get user's preferred model and API keys
-        preferred_model = user.preferred_model if user else None
-        logger.info(f"[MODEL SELECT] User '{user.username if user else 'anon'}' preferred_model from DB: {preferred_model}")
+        # Use unified model selector for consistent provider priority
+        from src.services.model_selector import select_model, build_user_api_keys
 
-        # Build user API keys FIRST (needed for provider availability check)
-        from src.api.routes.settings import get_user_api_key
-        user_api_keys = {}
-        user_has_anthropic = False
-        user_has_openai = False
-        user_has_google = False
-        user_has_cisco = False
-        if user:
-            for provider in ["anthropic", "openai", "google"]:
-                key = get_user_api_key(user, provider)
-                if key:
-                    user_api_keys[provider] = key
-                    if provider == "anthropic":
-                        user_has_anthropic = True
-                    elif provider == "openai":
-                        user_has_openai = True
-                    elif provider == "google":
-                        user_has_google = True
-            # Check for user's Cisco credentials
-            if user.user_cisco_client_id and user.user_cisco_client_secret:
-                user_has_cisco = True
+        user_preferred = user.preferred_model if user else None
+        user_api_keys = build_user_api_keys(user)
 
-        # Check which providers are actually configured (admin + user keys)
-        from src.services.config_service import get_config_or_env
-        from src.config.settings import get_settings
-        from src.services.ai_service import get_provider_from_model
-        settings = get_settings()
-        all_models = settings.available_models
+        logger.info(f"[MODEL SELECT] User '{user.username if user else 'anon'}' preferred_model from DB: {user_preferred}")
 
-        db_anthropic = get_config_or_env("anthropic_api_key", "ANTHROPIC_API_KEY")
-        db_cisco_id = get_config_or_env("cisco_circuit_client_id", "CISCO_CIRCUIT_CLIENT_ID")
-        db_cisco_secret = get_config_or_env("cisco_circuit_client_secret", "CISCO_CIRCUIT_CLIENT_SECRET")
-        db_openai = get_config_or_env("openai_api_key", "OPENAI_API_KEY")
-        db_google = get_config_or_env("google_api_key", "GOOGLE_API_KEY")
+        # Select model using unified logic (Cisco → Anthropic → OpenAI → Google)
+        preferred_model, selected_provider = select_model(
+            preferred_model=user_preferred,
+            user=user,
+            user_api_keys=user_api_keys
+        )
 
-        # Include BOTH admin keys AND user-provided keys in availability check
-        has_anthropic = bool(db_anthropic or settings.anthropic_api_key or user_has_anthropic)
-        has_cisco = bool((db_cisco_id and db_cisco_secret) or user_has_cisco)
-        has_openai = bool(db_openai or settings.openai_api_key or user_has_openai)
-        has_google = bool(db_google or settings.google_api_key or user_has_google)
-
-        # Debug: show which keys were found
-        logger.info(f"[MODEL SELECT] Key sources: db_anthropic={bool(db_anthropic)}, settings.anthropic={bool(settings.anthropic_api_key)}, user_anthropic={user_has_anthropic}")
-        logger.info(f"[MODEL SELECT] Configured providers: cisco={has_cisco}, anthropic={has_anthropic}, openai={has_openai}, google={has_google}")
-
-        # Check if user's preferred model provider is actually configured
-        if preferred_model:
-            provider = get_provider_from_model(preferred_model)
-            provider_available = (
-                (provider == "cisco" and has_cisco) or
-                (provider == "anthropic" and has_anthropic) or
-                (provider == "openai" and has_openai) or
-                (provider == "google" and has_google)
-            )
-            if not provider_available:
-                logger.info(f"[MODEL SELECT] User's preferred model '{preferred_model}' (provider={provider}) not available, finding alternative")
-                preferred_model = None  # Reset to find an available model
-
-        # If no valid preferred model, select first available (Cisco priority)
         if not preferred_model:
-            if has_cisco:
-                preferred_model = all_models["cisco"][0]["id"]
-            elif has_anthropic:
-                preferred_model = all_models["anthropic"][0]["id"]
-            elif has_openai:
-                preferred_model = all_models["openai"][0]["id"]
-            elif has_google:
-                preferred_model = all_models["google"][0]["id"]
-            else:
-                # No AI provider configured at all
-                yield f"data: {json.dumps({'type': 'error', 'error': 'No AI provider configured. Please configure an AI provider in Settings.'})}\n\n"
-                return
+            # No AI provider configured at all
+            yield f"data: {json.dumps({'type': 'error', 'error': 'No AI provider configured. Please configure an AI provider in Settings.'})}\n\n"
+            return
 
-        logger.info(f"[MODEL SELECT] Final selected model: {preferred_model}")
+        logger.info(f"[MODEL SELECT] Final selected model: {preferred_model} (provider={selected_provider})")
 
         # Create unified service
         try:
@@ -207,16 +155,22 @@ async def _create_unified_stream(
             session_id=session_id or "stream",
             org_id=org_id,
             org_name=org_name,
-            network_id=network_id,  # User's currently selected network for card context
+            network_id=network_id,  # User's currently selected network ID for card context
+            network_name=network_name,  # User's selected network name for entity resolution
             edit_mode=edit_mode,  # Pass through from request
             verbosity=verbosity,  # Response detail level
             card_context=card_context,  # Context from "Ask about this" card feature
+            user_id=user.id if user else None,  # For AI trace tracking
         ):
             event_count += 1
             event_type = event.get("type")
             logger.info(f"[SSE] Event {event_count}: {event_type}")
 
-            if event_type == "text_delta":
+            if event_type == "thinking":
+                # Forward thinking keepalive to prevent SSE connection drop
+                yield f"data: {json.dumps({'type': 'thinking'})}\n\n"
+
+            elif event_type == "text_delta":
                 sse_data = f"data: {json.dumps({'type': 'text_delta', 'text': event.get('text', '')})}\n\n"
                 logger.debug(f"[SSE] Yielding: {sse_data[:80]}...")
                 yield sse_data
@@ -265,14 +219,22 @@ async def _create_unified_stream(
                     except Exception as e:
                         logger.error(f"[SSE] Failed to log streaming cost: {e}")
 
+                # Calculate cost for frontend display
+                cost_usd = float(calculate_cost(preferred_model, input_tokens, output_tokens))
+
                 done_data = {
                     'type': 'done',
-                    'usage': usage,
+                    'usage': {
+                        **usage,
+                        'input_tokens': input_tokens,
+                        'output_tokens': output_tokens,
+                        'cost_usd': cost_usd,
+                    },
                     'tool_data': tool_data,
                     'tools_used': event.get('tools_used', []),
                     'platforms': event.get('platforms', []),
                 }
-                logger.info(f"[SSE][DEBUG] Sending done_data to frontend: tools_used={len(done_data['tools_used'])}, platforms={done_data['platforms']}")
+                logger.info(f"[SSE][DEBUG] Sending done_data to frontend: tools_used={len(done_data['tools_used'])}, cost_usd={cost_usd:.6f}")
                 yield f"data: {json.dumps(done_data)}\n\n"
 
             elif event_type == "card_suggestion":
@@ -349,6 +311,7 @@ async def agent_chat_stream(
             message=body.message,
             organization=body.organization,
             network_id=body.network_id,
+            network_name=body.network_name,
             session_id=effective_session_id,
             history=body.history or [],
             user=user,

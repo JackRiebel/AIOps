@@ -26,7 +26,7 @@ from src.models.knowledge_feedback import (
 )
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/knowledge/feedback", tags=["knowledge-feedback"])
+router = APIRouter(prefix="/api/knowledge/feedback", tags=["knowledge-feedback"])
 
 # Service instance
 _feedback_service: Optional[FeedbackService] = None

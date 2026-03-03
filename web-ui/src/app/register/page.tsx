@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'https://localhost:8002';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
 
 interface SetupStatus {
   setup_required: boolean;
@@ -28,6 +28,8 @@ export default function RegisterPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
+  const [copiedKey, setCopiedKey] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
   const [checkingSetup, setCheckingSetup] = useState(true);
@@ -48,8 +50,8 @@ export default function RegisterPage() {
             router.push('/login?message=setup_complete');
           }
         }
-      } catch (err) {
-        console.error('Failed to fetch setup status:', err);
+      } catch {
+        // Silently handle setup check failure
       } finally {
         setCheckingSetup(false);
       }
@@ -88,11 +90,12 @@ export default function RegisterPage() {
         throw new Error(data.detail || 'Setup failed');
       }
 
+      // Store recovery key to display
+      if (data.recovery_key) {
+        setRecoveryKey(data.recovery_key);
+      }
       setSuccess(true);
-      // Redirect to login after 2 seconds
-      setTimeout(() => {
-        router.push('/login');
-      }, 2000);
+      // Don't auto-redirect - user needs to save recovery key first
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Setup failed');
     } finally {
@@ -121,7 +124,7 @@ export default function RegisterPage() {
               </svg>
             </div>
             <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Already Set Up</h2>
-            <p className="text-slate-600 dark:text-slate-400 mb-6">Lumen has already been configured with an admin account.</p>
+            <p className="text-slate-600 dark:text-slate-400 mb-6">AI Ops Center has already been configured with an admin account.</p>
             <p className="text-sm text-slate-500 dark:text-slate-500 mb-4">To create additional users, log in and go to Security settings.</p>
             <Link
               href="/login"
@@ -138,19 +141,81 @@ export default function RegisterPage() {
     );
   }
 
+  const handleCopyKey = async () => {
+    if (recoveryKey) {
+      await navigator.clipboard.writeText(recoveryKey);
+      setCopiedKey(true);
+      setTimeout(() => setCopiedKey(false), 2000);
+    }
+  };
+
   if (success) {
     return (
       <div className="min-h-screen bg-slate-100 dark:bg-slate-950 flex items-center justify-center p-8" role="status" aria-live="polite">
-        <div className="w-full max-w-md">
-          <div className="bg-white dark:bg-slate-900/50 backdrop-blur-xl rounded-2xl border border-slate-200 dark:border-slate-800/50 p-8 shadow-xl text-center">
-            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-emerald-100 dark:bg-emerald-500/10 flex items-center justify-center" aria-hidden="true">
-              <svg className="w-8 h-8 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
+        <div className="w-full max-w-lg">
+          <div className="bg-white dark:bg-slate-900/50 backdrop-blur-xl rounded-2xl border border-slate-200 dark:border-slate-800/50 p-8 shadow-xl">
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-emerald-100 dark:bg-emerald-500/10 flex items-center justify-center" aria-hidden="true">
+                <svg className="w-8 h-8 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Setup Complete!</h2>
+              <p className="text-slate-600 dark:text-slate-400">Your admin account has been created successfully.</p>
             </div>
-            <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Setup Complete!</h2>
-            <p className="text-slate-600 dark:text-slate-400 mb-4">Your admin account has been created successfully.</p>
-            <p className="text-sm text-slate-500 dark:text-slate-500">Redirecting to login...</p>
+
+            {/* Recovery Key Display */}
+            {recoveryKey && (
+              <div className="mb-6">
+                <div className="px-4 py-3 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 rounded-xl mb-4">
+                  <div className="flex gap-3">
+                    <svg className="w-6 h-6 text-amber-600 dark:text-amber-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <div>
+                      <p className="font-semibold text-amber-800 dark:text-amber-300">Save Your Recovery Key!</p>
+                      <p className="text-sm text-amber-700 dark:text-amber-400 mt-1">
+                        This key will NOT be shown again. You need it to reset your password if you get locked out.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="relative">
+                  <div className="p-4 bg-slate-100 dark:bg-slate-800 rounded-xl font-mono text-center text-lg tracking-wider break-all select-all border-2 border-dashed border-slate-300 dark:border-slate-600">
+                    {recoveryKey}
+                  </div>
+                  <button
+                    onClick={handleCopyKey}
+                    className="absolute top-2 right-2 p-2 bg-white dark:bg-slate-700 rounded-lg shadow hover:bg-slate-50 dark:hover:bg-slate-600 transition"
+                    title="Copy to clipboard"
+                  >
+                    {copiedKey ? (
+                      <svg className="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                    ) : (
+                      <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 text-center mt-2">
+                  Click the key to select it, or use the copy button
+                </p>
+              </div>
+            )}
+
+            <Link
+              href="/login"
+              className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-cyan-600 to-purple-600 text-white font-semibold rounded-xl transition-all hover:from-cyan-500 hover:to-purple-500"
+            >
+              I&apos;ve Saved My Key - Continue to Login
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+              </svg>
+            </Link>
           </div>
         </div>
       </div>
@@ -180,8 +245,8 @@ export default function RegisterPage() {
                 </svg>
               </div>
               <div>
-                <h1 className="text-3xl font-bold text-slate-900 dark:text-white">Lumen</h1>
-                <p className="text-cyan-600 dark:text-cyan-400 font-medium">Illuminating Your Network</p>
+                <h1 className="text-3xl font-bold text-slate-900 dark:text-white">AI Ops Center</h1>
+                <p className="text-cyan-600 dark:text-cyan-400 font-medium">Intelligent Network Operations</p>
               </div>
             </div>
           </div>
@@ -195,7 +260,7 @@ export default function RegisterPage() {
               </div>
               <div>
                 <h3 className="text-slate-900 dark:text-white font-semibold mb-1">Create Admin Account</h3>
-                <p className="text-slate-600 dark:text-slate-400 text-sm">Set up the first administrator account to manage your Lumen instance.</p>
+                <p className="text-slate-600 dark:text-slate-400 text-sm">Set up the first administrator account to manage your AI Ops Center instance.</p>
               </div>
             </div>
 
@@ -238,14 +303,14 @@ export default function RegisterPage() {
                 </svg>
               </div>
             </div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Lumen</h1>
-            <p className="text-cyan-600 dark:text-cyan-400 text-sm font-medium">Illuminating Your Network</p>
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white">AI Ops Center</h1>
+            <p className="text-cyan-600 dark:text-cyan-400 text-sm font-medium">Intelligent Network Operations</p>
           </div>
 
           {/* Registration Card */}
           <div className="bg-white dark:bg-slate-900/50 backdrop-blur-xl rounded-2xl border border-slate-200 dark:border-slate-800/50 p-8 shadow-xl dark:shadow-2xl">
             <div className="mb-8">
-              <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Set Up Lumen</h2>
+              <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Set Up AI Ops Center</h2>
               <p className="text-slate-600 dark:text-slate-400 text-sm">Create your administrator account to get started</p>
             </div>
 
@@ -387,7 +452,7 @@ export default function RegisterPage() {
           {/* Footer */}
           <div className="mt-8 text-center">
             <p className="text-xs text-slate-500 dark:text-slate-600">
-              Lumen &bull; Illuminating your network with AI
+              AI Ops Center &bull; Intelligent network operations
             </p>
           </div>
         </div>

@@ -675,7 +675,7 @@ export default function WorkflowsPage() {
                         <div className="flex items-center gap-2 mt-2 text-xs text-slate-500 dark:text-slate-400">
                           <span>{execution.trigger_event_count} events</span>
                           <span>·</span>
-                          <span>{new Date(execution.created_at).toLocaleString()}</span>
+                          <span>{new Date(execution.created_at?.endsWith?.('Z') ? execution.created_at : execution.created_at + 'Z').toLocaleString()}</span>
                         </div>
                       </div>
                     ))}
@@ -721,7 +721,9 @@ export default function WorkflowsPage() {
                         <div className="flex items-center justify-between mt-3">
                           <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                             <Clock className="w-3.5 h-3.5" />
-                            <span>{execution.completed_at ? new Date(execution.completed_at).toLocaleString() : new Date(execution.created_at).toLocaleString()}</span>
+                            <span>{execution.completed_at
+                              ? new Date(execution.completed_at?.endsWith?.('Z') ? execution.completed_at : execution.completed_at + 'Z').toLocaleString()
+                              : new Date(execution.created_at?.endsWith?.('Z') ? execution.created_at : execution.created_at + 'Z').toLocaleString()}</span>
                           </div>
                           {canRecordOutcome && (
                             <button
@@ -776,6 +778,10 @@ export default function WorkflowsPage() {
                     setSelectedWorkflow(updated);
                   }}
                   onClose={() => setSelectedWorkflow(null)}
+                  onEditCanvas={(workflow) => {
+                    setSelectedWorkflow(null);
+                    handleOpenCanvas(workflow);
+                  }}
                 />
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-slate-400 dark:text-slate-500">
@@ -854,6 +860,19 @@ export default function WorkflowsPage() {
           onClose={() => {
             setMonitoringExecutionId(null);
             setMonitoringWorkflowId(null);
+          }}
+          onEdit={(workflowId) => {
+            // Find the workflow and open it in the canvas editor
+            // Use Number() to handle potential string/number type mismatch from API
+            const workflow = workflows.find(w => Number(w.id) === Number(workflowId));
+            console.log('[ExecutionMonitor] onEdit called:', { workflowId, found: !!workflow, workflows: workflows.map(w => ({ id: w.id, name: w.name })) });
+            if (workflow) {
+              setMonitoringExecutionId(null);
+              setMonitoringWorkflowId(null);
+              handleOpenCanvas(workflow);
+            } else {
+              console.error('[ExecutionMonitor] Workflow not found for ID:', workflowId);
+            }
           }}
           onRetry={async () => {
             // Re-run the workflow

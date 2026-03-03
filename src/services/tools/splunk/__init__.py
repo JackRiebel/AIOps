@@ -36,6 +36,7 @@ class SplunkClient:
         password: str = None,
         token: str = None,
         verify_ssl: bool = False,  # Default False for self-signed certs
+        transport=None,
     ):
         """Initialize Splunk client.
 
@@ -45,12 +46,14 @@ class SplunkClient:
             password: Splunk password (for basic auth)
             token: Splunk auth token (preferred over basic auth)
             verify_ssl: Whether to verify SSL certificates
+            transport: Optional httpx transport (e.g. InstrumentedAsyncTransport)
         """
         self.base_url = base_url.rstrip("/") if base_url else ""
         self.username = username
         self.password = password
         self.token = token
         self.verify_ssl = verify_ssl
+        self._transport = transport
 
     def _get_headers(self) -> Dict[str, str]:
         """Get request headers with authentication."""
@@ -99,7 +102,10 @@ class SplunkClient:
         if "output_mode" not in params:
             params["output_mode"] = "json"
 
-        async with httpx.AsyncClient(verify=self.verify_ssl, timeout=timeout) as client:
+        client_kwargs = {"verify": self.verify_ssl, "timeout": timeout}
+        if self._transport is not None:
+            client_kwargs["transport"] = self._transport
+        async with httpx.AsyncClient(**client_kwargs) as client:
             if method.upper() == "GET":
                 response = await client.get(url, headers=headers, params=params, auth=auth)
             elif method.upper() == "POST":
@@ -249,7 +255,7 @@ class SplunkExecutionContext:
         username: str = None,
         password: str = None,
         token: str = None,
-        verify_ssl: bool = True,
+        verify_ssl: bool = False,  # Default False for self-signed certs (common in Splunk)
     ):
         """Initialize Splunk execution context.
 
@@ -260,14 +266,48 @@ class SplunkExecutionContext:
             token: Splunk auth token (preferred)
             verify_ssl: Whether to verify SSL certificates
         """
+        from src.services.instrumented_httpx import InstrumentedAsyncTransport
+        self._transport = InstrumentedAsyncTransport(verify=verify_ssl)
         self.client = SplunkClient(
             base_url=base_url or "",
             username=username,
             password=password,
             token=token,
             verify_ssl=verify_ssl,
+            transport=self._transport,
         )
         self.base_url = base_url
+
+    def pop_timing(self):
+        """Pop and return the last captured network timing."""
+        if self._transport:
+            return self._transport.pop_timing()
+        return None
+
+
+class SplunkMCPExecutionContext:
+    """Execution context that routes tool calls through MCP with REST fallback.
+
+    Wraps a SplunkExecutionContext (direct REST) and adds MCP routing.
+    Exposes `client` for backward compatibility with handlers that access
+    context.client directly.
+    """
+
+    def __init__(self, fallback_context: SplunkExecutionContext, mcp_service, mcp_creds: dict):
+        self._fallback = fallback_context
+        self._mcp_service = mcp_service
+        self._mcp_creds = mcp_creds
+        # Expose client for backward compatibility with handlers
+        self.client = fallback_context.client
+        self.base_url = fallback_context.base_url
+
+    async def call_mcp_tool(self, tool_name: str, params: dict) -> dict:
+        """Call a tool via MCP server."""
+        return await self._mcp_service.call_tool(tool_name, params)
+
+    def pop_timing(self):
+        """Pop and return the last captured network timing."""
+        return self._fallback.pop_timing()
 
 
 # =============================================================================
@@ -627,7 +667,7 @@ SPLUNK_TOOLS = [
     # Search Tools - with examples for improved accuracy (per Anthropic: 72% → 90%)
     create_tool(
         name="splunk_run_search",
-        description="Run a Splunk search query and return results",
+        description="Run a Splunk SPL search query and return results. Primary tool for log analysis and event correlation. Use to find error patterns, correlate events with timestamps from Meraki/ThousandEyes, check connectivity events (device_offline, failover, packet_loss), and review config changes. Always use sourcetype filters and stats/table commands.",
         platform="splunk",
         category="search",
         properties={
@@ -646,7 +686,7 @@ SPLUNK_TOOLS = [
     ),
     create_tool(
         name="splunk_create_search_job",
-        description="Create an async search job",
+        description="Create an async Splunk search job for long-running queries. Returns a job_id to poll with splunk_get_search_job_status and retrieve with splunk_get_search_results. Use instead of splunk_run_search when queries may exceed 30 seconds. For most troubleshooting, prefer splunk_run_search.",
         platform="splunk",
         category="search",
         properties={
@@ -668,7 +708,7 @@ SPLUNK_TOOLS = [
     ),
     create_tool(
         name="splunk_get_search_results",
-        description="Get results from a search job",
+        description="Get results from a completed async search job. Requires job_id from splunk_create_search_job. Check status first with splunk_get_search_job_status. For most queries, prefer splunk_run_search which handles the lifecycle automatically.",
         platform="splunk",
         category="search",
         properties={
@@ -927,3 +967,53 @@ try:
     logger.info("[Splunk Tools] Loaded generated tool modules")
 except ImportError as e:
     logger.warning(f"[Splunk Tools] Could not load some generated modules: {e}")
+
+
+# =============================================================================
+# MCP WRAPPER APPLICATION
+# =============================================================================
+
+def _apply_mcp_wrappers():
+    """Wrap all Splunk tools that have MCP equivalents with MCP-first handlers."""
+    try:
+        from src.services.tools.splunk.mcp_handler import wrap_handler_with_mcp
+        from src.services.splunk_mcp_service import has_mcp_equivalent
+
+        wrapped_count = 0
+        all_tool_lists = [SPLUNK_TOOLS]
+
+        # Include generated module tool lists if available
+        try:
+            all_tool_lists.append(search.SPLUNK_SEARCH_TOOLS)
+        except (NameError, AttributeError):
+            pass
+        try:
+            all_tool_lists.append(system.SPLUNK_SYSTEM_TOOLS)
+        except (NameError, AttributeError):
+            pass
+        try:
+            all_tool_lists.append(users.SPLUNK_USERS_TOOLS)
+        except (NameError, AttributeError):
+            pass
+        try:
+            all_tool_lists.append(knowledge.SPLUNK_KNOWLEDGE_TOOLS)
+        except (NameError, AttributeError):
+            pass
+        try:
+            all_tool_lists.append(assistant.SPLUNK_ASSISTANT_TOOLS)
+        except (NameError, AttributeError):
+            pass
+
+        for tool_list in all_tool_lists:
+            for tool in tool_list:
+                if has_mcp_equivalent(tool.name):
+                    tool.handler = wrap_handler_with_mcp(tool.name, tool.handler)
+                    wrapped_count += 1
+
+        if wrapped_count > 0:
+            logger.info(f"[Splunk Tools] Applied MCP wrappers to {wrapped_count} tools")
+    except ImportError as e:
+        logger.debug(f"[Splunk Tools] MCP wrappers not applied (import failed): {e}")
+
+
+_apply_mcp_wrappers()

@@ -584,7 +584,7 @@ CATALYST_TOOLS = [
     # Site Tools - with examples for improved accuracy (per Anthropic: 72% → 90%)
     create_tool(
         name="catalyst_get_sites",
-        description="Get all sites in the Catalyst Center hierarchy",
+        description="Get all sites in the Catalyst Center hierarchy (areas, buildings, floors). Returns site ID, name, type, parent hierarchy, and health score. Use FIRST to discover sites before querying devices or health. Site IDs are required for most Catalyst queries.",
         platform="catalyst",
         category="sites",
         properties={
@@ -596,6 +596,7 @@ CATALYST_TOOLS = [
             {"query": "List all sites in Catalyst Center", "params": {}},
             {"query": "Show site hierarchy", "params": {}},
             {"query": "Get all buildings", "params": {"type": "building"}},
+            {"query": "What buildings are in the campus?", "params": {"type": "building"}},
         ],
     ),
     create_tool(
@@ -623,7 +624,7 @@ CATALYST_TOOLS = [
     ),
     create_tool(
         name="catalyst_get_site_health",
-        description="Get site health summary",
+        description="Get health summary for Catalyst Center sites. Returns overall health score, device health breakdown (routers, switches, APs), and client health. Use as primary health check alongside Meraki health — Catalyst provides enterprise device health while Meraki covers cloud-managed devices.",
         platform="catalyst",
         category="sites",
         properties={
@@ -633,8 +634,9 @@ CATALYST_TOOLS = [
         handler=handle_get_site_health,
         examples=[
             {"query": "What is the health of all sites?", "params": {}},
-            {"query": "Show site health summary", "params": {}},
+            {"query": "How healthy is Building-A?", "params": {}},
             {"query": "Get building health scores", "params": {"siteType": "building"}},
+            {"query": "Check the health of the downtown site", "params": {}},
         ],
     ),
     create_tool(
@@ -661,7 +663,7 @@ CATALYST_TOOLS = [
     # Device Tools - with examples for improved accuracy
     create_tool(
         name="catalyst_get_device_list",
-        description="Get list of network devices with optional filters",
+        description="Get network devices in Catalyst Center inventory with optional filters (family, hostname, IP, platform, role, reachability). Returns device UUID, hostname, management IP, platform, software version, and reachability status. Use to find specific devices by hostname or IP for troubleshooting.",
         platform="catalyst",
         category="devices",
         properties={
@@ -766,7 +768,7 @@ CATALYST_TOOLS = [
     # Health Tools - with examples for improved accuracy
     create_tool(
         name="catalyst_get_overall_network_health",
-        description="Get overall network health score",
+        description="Get overall network health from Catalyst Center Assurance. Returns aggregated health scores for all device categories. Use alongside Meraki network health for organizations running both platforms. Provides enterprise-grade health metrics that complement Meraki's cloud-managed view.",
         platform="catalyst",
         category="health",
         properties={"timestamp": {"type": "string", "description": "Timestamp for historical data"}},
@@ -779,7 +781,7 @@ CATALYST_TOOLS = [
     ),
     create_tool(
         name="catalyst_get_device_health",
-        description="Get device health list with scores",
+        description="Get device health data from Catalyst Center Assurance. Returns health score, CPU/memory utilization, interface status, and issue counts. Critical for troubleshooting — compare with Meraki device status and ThousandEyes monitoring for comprehensive view. Health scores below 7 indicate significant issues.",
         platform="catalyst",
         category="health",
         properties={
@@ -796,7 +798,7 @@ CATALYST_TOOLS = [
     ),
     create_tool(
         name="catalyst_get_device_detail_health",
-        description="Get detailed device health by identifier",
+        description="Get detailed device info by UUID from Catalyst Center. Returns hostname, management IP, serial, platform, software version, uptime, health score, and interface summary. Use after finding device UUID from get_device_list. Check reachability and health score for quick status assessment.",
         platform="catalyst",
         category="health",
         properties={
@@ -821,11 +823,15 @@ CATALYST_TOOLS = [
     # Client Tools
     create_tool(
         name="catalyst_get_client_health",
-        description="Get client health summary",
+        description="Get client health summary from Catalyst Center. Returns healthy/unhealthy client counts, health scores by connection type (wired/wireless), and top issues. Compare with Meraki client data for networks with both platforms. Low wireless client health often correlates with RF issues visible in Meraki.",
         platform="catalyst",
         category="clients",
         properties={"timestamp": {"type": "string", "description": "Timestamp"}},
         handler=handle_get_client_health,
+        examples=[
+            {"query": "How are clients doing?", "params": {}},
+            {"query": "Show client health summary", "params": {}},
+        ],
     ),
     create_tool(
         name="catalyst_get_client_detail",
@@ -850,7 +856,7 @@ CATALYST_TOOLS = [
     # Issue Tools
     create_tool(
         name="catalyst_get_issues",
-        description="Get network issues with optional filters",
+        description="Get active network issues detected by Catalyst Center AI-driven analytics. Returns issue type, severity, affected devices, and suggested resolution. Check during troubleshooting — Catalyst uses ML to detect anomalies that simple threshold alerts miss. Correlate issue timestamps with Meraki alerts and ThousandEyes data.",
         platform="catalyst",
         category="issues",
         properties={
@@ -862,6 +868,11 @@ CATALYST_TOOLS = [
             "issueStatus": {"type": "string", "description": "Filter by status"},
         },
         handler=handle_get_issues,
+        examples=[
+            {"query": "Any network issues right now?", "params": {}},
+            {"query": "What problems has Catalyst detected?", "params": {"priority": "P1"}},
+            {"query": "Show AI-detected issues", "params": {"aiDriven": True}},
+        ],
     ),
     create_tool(
         name="catalyst_get_issue_enrichment",
@@ -884,7 +895,7 @@ CATALYST_TOOLS = [
     # Topology Tools
     create_tool(
         name="catalyst_get_physical_topology",
-        description="Get physical network topology",
+        description="Get physical network topology from Catalyst Center. Returns device interconnections, link types, and interface mappings. Use to understand network architecture when investigating connectivity issues. Shows physical topology that helps identify single points of failure.",
         platform="catalyst",
         category="topology",
         properties={"nodeType": {"type": "string", "description": "Filter by node type"}},
@@ -916,7 +927,7 @@ CATALYST_TOOLS = [
     # Path Trace Tools
     create_tool(
         name="catalyst_create_path_trace",
-        description="Create a network path trace between two IP addresses",
+        description="Run a path trace between two devices in Catalyst Center. Returns hop-by-hop path with device names, interfaces, and protocol details. Complementary to ThousandEyes path visualization — Catalyst shows internal network path while TE shows internet/WAN path. Use both for end-to-end troubleshooting.",
         platform="catalyst",
         category="path_trace",
         properties={
@@ -928,10 +939,14 @@ CATALYST_TOOLS = [
         },
         required=["source_ip", "dest_ip"],
         handler=handle_create_path_trace,
+        examples=[
+            {"query": "Trace the path between switch-01 and core-rtr", "params": {"source_ip": "10.1.1.1", "dest_ip": "10.1.2.1"}},
+            {"query": "Path trace from 192.168.1.1 to 10.0.0.1", "params": {"source_ip": "192.168.1.1", "dest_ip": "10.0.0.1"}},
+        ],
     ),
     create_tool(
         name="catalyst_get_path_trace_result",
-        description="Get path trace result by flow ID",
+        description="Get path trace result by flow ID. Returns the hop-by-hop path analysis results from a previously created path trace. Use after catalyst_create_path_trace to retrieve the actual path data.",
         platform="catalyst",
         category="path_trace",
         properties={"flow_id": {"type": "string", "description": "Flow analysis ID"}},

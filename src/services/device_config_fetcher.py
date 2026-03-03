@@ -78,8 +78,8 @@ class DeviceConfigFetcher:
         return config
 
     def _is_wireless_device(self, model: str) -> bool:
-        """Check if device is a wireless AP."""
-        return model.startswith(("MR", "CW"))
+        """Check if device is a wireless AP (MR, CW, or GR series)."""
+        return model.startswith(("MR", "CW", "GR"))
 
     def _is_switch_device(self, model: str) -> bool:
         """Check if device is a switch."""

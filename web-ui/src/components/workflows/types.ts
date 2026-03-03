@@ -94,7 +94,7 @@ export interface WorkflowExecution {
 
 export interface FlowNode {
   id: string;
-  type: 'trigger' | 'condition' | 'ai' | 'action' | 'notify';
+  type: 'trigger' | 'condition' | 'ai' | 'action' | 'notify' | 'approval';
   position: { x: number; y: number };
   data: Record<string, unknown>;
 }

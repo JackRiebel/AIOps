@@ -1,5 +1,6 @@
 # MCP dependencies
-mcp==1.0.0
+mcp>=1.7.0
+fastmcp>=2.2.0
 
 # Web framework (compatible version with MCP)
 fastapi>=0.115.0
@@ -11,31 +12,34 @@ pgserver>=0.1.0
 psycopg2-binary==2.9.10
 asyncpg==0.30.0
 alembic==1.14.0
+greenlet>=3.0.0
+aiosqlite>=0.20.0
 
 # Authentication & Security
 cryptography==44.0.0
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+bcrypt>=4.0.1,<5.0.0  # Must be <5.0 for passlib 1.7.4 compatibility
 python-multipart==0.0.12
 
 # HTTP Client
 httpx==0.28.1
 aiohttp==3.11.10
 
-# Meraki Dashboard API
-meraki==1.48.0
+# Meraki Dashboard API (>=2.0 for Meraki Magic MCP compatibility)
+meraki>=2.0.0
 
 # Cisco Catalyst Center SDK
 catalystcentersdk>=2.7.0
 
 # AI / LLM
-anthropic==0.40.0
+anthropic>=0.84.0
 openai>=1.40.0
 google-generativeai>=0.8.0
 
 # Configuration & Environment
 python-dotenv==1.0.1
-pydantic==2.10.3
+pydantic[email]==2.10.3
 pydantic-settings==2.6.1
 
 # Utilities
@@ -49,6 +53,9 @@ pgvector==0.2.4
 tiktoken>=0.5.0
 sentence-transformers>=3.0.0  # Local embedding models (e5-small-v2)
 tf-keras>=2.16.0  # Keras 2 compatibility for sentence-transformers
+
+# Safe expression evaluation
+simpleeval>=0.9.13
 
 # Document Parsing
 pypdf>=4.0.0

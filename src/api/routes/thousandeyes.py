@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from src.api.dependencies import require_viewer, require_editor, require_operator, require_admin
 from src.config.settings import get_settings
+from src.services.network_service import get_aggregated_cache_data
 
 router = APIRouter(prefix="/api/thousandeyes", tags=["thousandeyes"])
 
@@ -104,6 +105,224 @@ async def validate_te_org(organization: str = None):
     """Validate ThousandEyes config (organization parameter ignored, kept for compatibility)."""
     return await validate_te_config()
 
+
+# ============================================================================
+# MCP Helper Functions
+# ============================================================================
+
+import logging
+import asyncio
+te_logger = logging.getLogger(__name__)
+
+# Limit concurrent MCP subprocess connections to prevent resource exhaustion
+_te_mcp_semaphore = asyncio.Semaphore(2)
+TE_MCP_TIMEOUT_SECONDS = 60
+
+async def _get_te_mcp_creds() -> Optional[dict]:
+    """Get ThousandEyes MCP credentials from config. Returns None if MCP not configured."""
+    from src.services.config_service import ConfigService
+
+    config_service = ConfigService()
+    mcp_endpoint = await config_service.get_config("thousandeyes_mcp_endpoint")
+    if not mcp_endpoint:
+        return None
+
+    mcp_token = await config_service.get_config("thousandeyes_mcp_token")
+    if not mcp_token:
+        # Fall back to OAuth token
+        mcp_token = await _get_te_token_async()
+
+    if not mcp_token:
+        return None
+
+    verify_ssl_config = await config_service.get_config("thousandeyes_verify_ssl")
+    verify_ssl = True
+    if verify_ssl_config is not None:
+        verify_ssl = str(verify_ssl_config).lower() in ('true', '1', 'yes')
+
+    return {
+        "mcp_endpoint": mcp_endpoint,
+        "token": mcp_token,
+        "verify_ssl": verify_ssl,
+    }
+
+
+def _get_te_mcp_client_params(mcp_endpoint: str, token: str, verify_ssl: bool = True):
+    """Get MCP client parameters for ThousandEyes MCP server."""
+    import shutil
+    from mcp import StdioServerParameters
+
+    npx_path = shutil.which("npx")
+    if not npx_path:
+        for path in ["/opt/homebrew/bin/npx", "/usr/local/bin/npx", "/usr/bin/npx"]:
+            if os.path.exists(path):
+                npx_path = path
+                break
+
+    if not npx_path:
+        raise FileNotFoundError("npx not found. Please ensure Node.js and npm are installed.")
+
+    env = os.environ.copy()
+    if not verify_ssl:
+        env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0'
+
+    return StdioServerParameters(
+        command=npx_path,
+        args=[
+            "-y",
+            "mcp-remote",
+            mcp_endpoint,
+            "--header",
+            f"Authorization: Bearer {token}"
+        ],
+        env=env,
+    )
+
+
+def _parse_te_mcp_content(content) -> Any:
+    """Parse MCP tool result content into Python objects."""
+    if not content:
+        return None
+
+    if isinstance(content, dict):
+        return content
+
+    if isinstance(content, list):
+        texts = []
+        for item in content:
+            text_value = None
+            if hasattr(item, 'text'):
+                text_value = item.text
+            elif isinstance(item, dict) and 'text' in item:
+                text_value = item['text']
+
+            if text_value is not None:
+                try:
+                    parsed = json.loads(text_value)
+                    texts.append(parsed)
+                except (json.JSONDecodeError, TypeError):
+                    texts.append(text_value)
+            elif isinstance(item, dict):
+                texts.append(item)
+            else:
+                texts.append(item)
+
+        if len(texts) == 1:
+            return texts[0]
+        return texts
+
+    if isinstance(content, str):
+        try:
+            return json.loads(content)
+        except (json.JSONDecodeError, TypeError):
+            return content
+
+    return content
+
+
+def _extract_te_mcp_result(result) -> Any:
+    """Extract data from MCP CallToolResult, preferring structuredContent over text content."""
+    structured = getattr(result, 'structuredContent', None)
+    if structured is not None:
+        if isinstance(structured, dict) and "results" in structured:
+            return structured["results"]
+        return structured
+    return _parse_te_mcp_content(result.content)
+
+
+async def _call_te_mcp_tool(tool_name: str, arguments: dict = {}, creds: dict = None):
+    """Call a single MCP tool on the ThousandEyes MCP server."""
+    from mcp import ClientSession
+    from mcp.client.stdio import stdio_client
+
+    if creds is None:
+        creds = await _get_te_mcp_creds()
+        if not creds:
+            raise HTTPException(status_code=503, detail="ThousandEyes MCP is not configured")
+
+    try:
+        server_params = _get_te_mcp_client_params(creds["mcp_endpoint"], creds["token"], creds["verify_ssl"])
+    except (FileNotFoundError, OSError) as e:
+        raise HTTPException(status_code=502, detail=f"MCP runtime not available: {str(e)}")
+
+    try:
+        async with _te_mcp_semaphore:
+            async with asyncio.timeout(TE_MCP_TIMEOUT_SECONDS):
+                async with stdio_client(server_params) as (read, write):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+
+                        tools_response = await session.list_tools()
+                        tool_names = [t.name for t in tools_response.tools]
+                        if tool_name not in tool_names:
+                            raise HTTPException(
+                                status_code=501,
+                                detail=f"Tool '{tool_name}' not found. Available: {tool_names}"
+                            )
+
+                        result = await session.call_tool(tool_name, arguments=arguments)
+                        return _extract_te_mcp_result(result)
+    except HTTPException:
+        raise
+    except asyncio.TimeoutError:
+        te_logger.error(f"TE MCP call timed out for {tool_name} after {TE_MCP_TIMEOUT_SECONDS}s")
+        raise HTTPException(status_code=504, detail=f"ThousandEyes MCP call timed out after {TE_MCP_TIMEOUT_SECONDS}s")
+    except (ConnectionError, OSError, Exception) as e:
+        error_type = type(e).__name__
+        te_logger.error(f"TE MCP connection failed for {tool_name}: {error_type}: {e}")
+        raise HTTPException(status_code=502, detail=f"ThousandEyes MCP server unreachable: {error_type}: {str(e)}")
+
+
+async def _call_te_mcp_tools(tool_calls: list, creds: dict = None) -> list:
+    """Call multiple MCP tools in a single session."""
+    from mcp import ClientSession
+    from mcp.client.stdio import stdio_client
+
+    if creds is None:
+        creds = await _get_te_mcp_creds()
+        if not creds:
+            raise HTTPException(status_code=503, detail="ThousandEyes MCP is not configured")
+
+    try:
+        server_params = _get_te_mcp_client_params(creds["mcp_endpoint"], creds["token"], creds["verify_ssl"])
+    except (FileNotFoundError, OSError) as e:
+        raise HTTPException(status_code=502, detail=f"MCP runtime not available: {str(e)}")
+
+    try:
+        async with _te_mcp_semaphore:
+            async with asyncio.timeout(TE_MCP_TIMEOUT_SECONDS):
+                async with stdio_client(server_params) as (read, write):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+
+                        tools_response = await session.list_tools()
+                        available = {t.name for t in tools_response.tools}
+
+                        results = []
+                        for tool_name, arguments in tool_calls:
+                            if tool_name not in available:
+                                te_logger.warning(f"Tool '{tool_name}' not available, skipping")
+                                results.append(None)
+                                continue
+                            try:
+                                result = await session.call_tool(tool_name, arguments=arguments)
+                                results.append(_extract_te_mcp_result(result))
+                            except Exception as e:
+                                te_logger.error(f"Error calling {tool_name}: {e}")
+                                results.append(None)
+
+                        return results
+    except HTTPException:
+        raise
+    except asyncio.TimeoutError:
+        te_logger.error(f"TE MCP batch call timed out after {TE_MCP_TIMEOUT_SECONDS}s")
+        raise HTTPException(status_code=504, detail=f"ThousandEyes MCP batch call timed out after {TE_MCP_TIMEOUT_SECONDS}s")
+    except (ConnectionError, OSError, Exception) as e:
+        error_type = type(e).__name__
+        te_logger.error(f"TE MCP connection failed: {error_type}: {e}")
+        raise HTTPException(status_code=502, detail=f"ThousandEyes MCP server unreachable: {error_type}: {str(e)}")
+
+
 # === All ThousandEyes API Functions (formerly @mcp.tool) ===
 
 async def get_endpoint_agents(aid: Optional[str] = None, max_results: Optional[int] = None, expand: Optional[List[str]] = None) -> str:
@@ -111,33 +330,33 @@ async def get_endpoint_agents(aid: Optional[str] = None, max_results: Optional[i
     if aid: params["aid"] = aid
     if max_results: params["maxResults"] = max_results
     if expand: params["expand"] = ",".join(expand)
-    data = await make_api_request("GET", "endpoint-agents", params=params)
+    data = await make_api_request("GET", "endpoint/agents", params=params)
     return json.dumps(data, indent=2)
 
 async def get_endpoint_agent(agent_id: str, expand: Optional[List[str]] = None) -> str:
     params = {"expand": ",".join(expand)} if expand else {}
-    data = await make_api_request("GET", f"endpoint-agents/{agent_id}", params=params)
+    data = await make_api_request("GET", f"endpoint/agents/{agent_id}", params=params)
     return json.dumps(data, indent=2)
 
 async def update_endpoint_agent(agent_id: str, update_data: Dict[str, Any]) -> str:
-    data = await make_api_request("PATCH", f"endpoint-agents/{agent_id}", data=update_data)
+    data = await make_api_request("PATCH", f"endpoint/agents/{agent_id}", data=update_data)
     return json.dumps(data, indent=2)
 
 async def delete_endpoint_agent(agent_id: str) -> str:
-    data = await make_api_request("DELETE", f"endpoint-agents/{agent_id}")
+    data = await make_api_request("DELETE", f"endpoint/agents/{agent_id}")
     return json.dumps(data, indent=2)
 
 async def enable_endpoint_agent(agent_id: str) -> str:
-    data = await make_api_request("POST", f"endpoint-agents/{agent_id}/enable")
+    data = await make_api_request("POST", f"endpoint/agents/{agent_id}/enable")
     return json.dumps(data, indent=2)
 
 async def disable_endpoint_agent(agent_id: str) -> str:
-    data = await make_api_request("POST", f"endpoint-agents/{agent_id}/disable")
+    data = await make_api_request("POST", f"endpoint/agents/{agent_id}/disable")
     return json.dumps(data, indent=2)
 
 async def get_endpoint_agents_connection_string(aid: Optional[str] = None) -> str:
     params = {"aid": aid} if aid else {}
-    data = await make_api_request("GET", "endpoint-agents/connection-string", params=params)
+    data = await make_api_request("GET", "endpoint/agents/connection-string", params=params)
     return json.dumps(data, indent=2)
 
 async def get_agents(agent_types: Optional[List[str]] = None, labels: Optional[List[str]] = None, expand: Optional[List[str]] = None) -> str:
@@ -608,10 +827,197 @@ async def te_create_test(
 ):
     """Create a new ThousandEyes test."""
     await validate_te_org(organization)
-    data = await make_api_request("POST", "tests", data=test_data)
+    test_type = test_data.pop("type", "http-server")
+    # TE v7 API requires type-specific endpoints
+    type_map = {
+        "http-server": "http-server",
+        "page-load": "page-load",
+        "agent-to-server": "agent-to-server",
+        "dns-server": "dns-server",
+        "dns-trace": "dns-trace",
+        "dns-dnssec": "dns-dnssec",
+        "ftp-server": "ftp-server",
+        "sip-server": "sip-server",
+        "voice": "voice",
+        "web-transactions": "web-transactions",
+    }
+    endpoint_type = type_map.get(test_type, test_type)
+    data = await make_api_request("POST", f"tests/{endpoint_type}", data=test_data)
     if "error" in data:
         raise HTTPException(status_code=500, detail=data["error"])
     return data
+
+
+async def _build_infrastructure_context(max_networks: int = 30, max_devices_per_net: int = 5) -> str:
+    """Build infrastructure context string from cached network/device data for AI prompt enrichment."""
+    try:
+        cache_data = await get_aggregated_cache_data()
+        networks = cache_data.get("networks", [])
+        if not networks:
+            return ""
+
+        lines = ["INFRASTRUCTURE CONTEXT (your managed networks and devices):"]
+        for net in networks[:max_networks]:
+            net_name = net.get("name", "Unknown")
+            org_type = net.get("organizationType", "unknown")
+            devices = net.get("devices", [])[:max_devices_per_net]
+            if devices:
+                dev_parts = []
+                for d in devices:
+                    name = d.get("name") or d.get("model", "device")
+                    ip = d.get("lanIp") or d.get("wan1Ip") or d.get("publicIp") or ""
+                    if ip:
+                        dev_parts.append(f"{name} ({ip})")
+                    else:
+                        dev_parts.append(name)
+                lines.append(f"  Network '{net_name}' ({org_type}): {', '.join(dev_parts)}")
+            else:
+                lines.append(f"  Network '{net_name}' ({org_type}): no devices cached")
+
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
+@router.post("/tests/ai")
+async def te_create_test_from_ai(
+    organization: str = Query(...),
+    request: Dict[str, Any] = Body(...),
+    _: Any = Depends(require_editor)
+):
+    """Create a ThousandEyes test using AI to interpret natural language.
+
+    Takes a natural language prompt describing what to test and uses AI
+    to generate the appropriate test configuration.
+    """
+    await validate_te_org(organization)
+
+    prompt = request.get("prompt", "")
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Prompt is required")
+
+    # Use multi-provider AI (async, works with database config)
+    from src.services.multi_provider_ai import generate_text
+    from src.services.config_service import get_configured_ai_provider
+
+    # Check if AI is configured
+    ai_config = await get_configured_ai_provider()
+    if not ai_config:
+        raise HTTPException(status_code=503, detail="AI service not configured. Please configure an AI provider in Admin > System Config.")
+
+    # Build infrastructure context from cached network/device data
+    infra_context = await _build_infrastructure_context()
+
+    # Rebuild with smaller limits if prompt would be too long
+    if infra_context and len(infra_context) > 3000:
+        infra_context = await _build_infrastructure_context(max_networks=10, max_devices_per_net=2)
+
+    infra_block = f"\n\n{infra_context}\n" if infra_context else ""
+
+    # Build the AI prompt to generate test configuration
+    ai_prompt = f"""You are a ThousandEyes test configuration expert. Based on the user's request, generate a valid ThousandEyes test configuration JSON.
+{infra_block}
+USER REQUEST: {prompt}
+
+Generate a JSON object for ONE of these test types based on the request:
+1. **HTTP Server Test** (for website/API monitoring):
+   {{"testName": "...", "type": "http-server", "url": "https://...", "interval": 300, "alertsEnabled": true}}
+
+2. **Page Load Test** (for full page performance):
+   {{"testName": "...", "type": "page-load", "url": "https://...", "interval": 300, "alertsEnabled": true}}
+
+3. **Network Test** (for connectivity/latency):
+   {{"testName": "...", "type": "agent-to-server", "server": "hostname or IP", "port": 443, "protocol": "TCP", "interval": 300, "alertsEnabled": true}}
+
+4. **DNS Test** (for DNS resolution):
+   {{"testName": "...", "type": "dns-server", "domain": "example.com", "dnsServers": ["8.8.8.8"], "interval": 300, "alertsEnabled": true}}
+
+Rules:
+- Use interval of 300 (5 minutes) unless user specifies otherwise
+- Always enable alerts
+- Generate a descriptive testName
+- If user references a network or device from the infrastructure context above, use the corresponding IP address
+- For connectivity tests between sites, use agent-to-server with the target site's public/WAN IP
+- Only return the JSON object, no explanation
+
+JSON:"""
+
+    # Final prompt length guard
+    if len(ai_prompt) > 6000:
+        infra_context = await _build_infrastructure_context(max_networks=10, max_devices_per_net=2)
+        infra_block = f"\n\n{infra_context}\n" if infra_context else ""
+        ai_prompt = ai_prompt[:ai_prompt.index("USER REQUEST")] + f"USER REQUEST: {prompt}" + ai_prompt[ai_prompt.rindex("\n\nJSON:"):]
+
+    try:
+        # Generate test configuration using AI
+        result = await generate_text(ai_prompt, max_tokens=500)
+
+        if not result:
+            raise HTTPException(status_code=503, detail="AI provider returned no response")
+
+        ai_response = result.get("text", "")
+
+        # Parse the JSON from AI response
+        import json
+        import re
+
+        # Extract JSON from response (handle markdown code blocks, nested objects)
+        # Try to find outermost { ... } pair with brace matching
+        start = ai_response.find('{')
+        if start == -1:
+            raise HTTPException(status_code=500, detail="AI did not generate valid test configuration")
+        depth = 0
+        end = start
+        for i in range(start, len(ai_response)):
+            if ai_response[i] == '{':
+                depth += 1
+            elif ai_response[i] == '}':
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+
+        json_str = ai_response[start:end]
+        test_config = json.loads(json_str)
+
+        # Validate required fields
+        if "testName" not in test_config or "type" not in test_config:
+            raise HTTPException(status_code=500, detail="AI generated incomplete test configuration")
+
+        # TE v7 API requires type-specific endpoints
+        test_type = test_config.pop("type", "http-server")
+        type_map = {
+            "http-server": "http-server",
+            "page-load": "page-load",
+            "agent-to-server": "agent-to-server",
+            "dns-server": "dns-server",
+            "dns-trace": "dns-trace",
+            "dns-dnssec": "dns-dnssec",
+            "ftp-server": "ftp-server",
+            "sip-server": "sip-server",
+            "voice": "voice",
+            "web-transactions": "web-transactions",
+        }
+        endpoint_type = type_map.get(test_type, test_type)
+
+        # Create the test via ThousandEyes API
+        data = await make_api_request("POST", f"tests/{endpoint_type}", data=test_config)
+        if "error" in data:
+            raise HTTPException(status_code=500, detail=data["error"])
+
+        return {
+            "success": True,
+            "message": f"Created test: {test_config.get('testName')}",
+            "test": data,
+            "ai_config": test_config
+        }
+
+    except json.JSONDecodeError as e:
+        te_logger.error(f"Failed to parse AI response as JSON: {e}")
+        raise HTTPException(status_code=500, detail="AI generated invalid JSON configuration")
+    except Exception as e:
+        te_logger.error(f"AI test creation error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create test: {str(e)}")
 
 @router.put("/tests/{test_id}")
 async def te_update_test(
@@ -663,8 +1069,12 @@ async def te_get_alerts(
         raise HTTPException(status_code=500, detail=data["error"])
 
     # Filter to active alerts only if requested
-    if active_only and "alerts" in data:
-        data["alerts"] = [alert for alert in data["alerts"] if alert.get("active") == 1]
+    # Handle both HAL+JSON (_embedded.alerts) and direct (alerts) formats
+    if active_only:
+        if "_embedded" in data and "alerts" in data["_embedded"]:
+            data["_embedded"]["alerts"] = [a for a in data["_embedded"]["alerts"] if a.get("active") == 1]
+        elif "alerts" in data:
+            data["alerts"] = [a for a in data["alerts"] if a.get("active") == 1]
 
     return data
 
@@ -756,6 +1166,406 @@ async def te_get_test_results(
     }
 
 
+# === EVENTS ENDPOINTS ===
+
+@router.get("/events")
+async def te_get_events(
+    organization: str = Query(...),
+    aid: Optional[str] = Query(None),
+    window: Optional[str] = Query(None),
+    from_date: Optional[str] = Query(None, alias="from"),
+    to_date: Optional[str] = Query(None, alias="to"),
+    _: Any = Depends(require_viewer)
+):
+    """Get ThousandEyes events."""
+    await validate_te_org(organization)
+    params = {}
+    if aid: params["aid"] = aid
+    if window: params["window"] = window
+    if from_date: params["from"] = from_date
+    if to_date: params["to"] = to_date
+    data = await make_api_request("GET", "events", params=params)
+    if "error" in data:
+        raise HTTPException(status_code=500, detail=data["error"])
+    return data
+
+@router.get("/events/{event_id}")
+async def te_get_event(
+    event_id: str,
+    organization: str = Query(...),
+    _: Any = Depends(require_viewer)
+):
+    """Get details of a specific event."""
+    await validate_te_org(organization)
+    data = await make_api_request("GET", f"events/{event_id}")
+    if "error" in data:
+        raise HTTPException(status_code=500, detail=data["error"])
+    return data
+
+# === OUTAGES ENDPOINTS ===
+
+@router.get("/outages")
+async def te_get_outages(
+    organization: str = Query(...),
+    aid: Optional[str] = Query(None),
+    window: Optional[str] = Query(None),
+    outage_type: Optional[str] = Query(None, alias="type"),
+    _: Any = Depends(require_viewer)
+):
+    """Search ThousandEyes outages (application/network)."""
+    await validate_te_org(organization)
+    params = {}
+    if aid: params["aid"] = aid
+    if window: params["window"] = window
+    if outage_type: params["type"] = outage_type
+    data = await make_api_request("GET", "outages", params=params)
+    if "error" in data:
+        raise HTTPException(status_code=500, detail=data["error"])
+    return data
+
+# === INSTANT TESTS ENDPOINT ===
+
+@router.post("/instant-tests")
+async def te_run_instant_test(
+    organization: str = Query(...),
+    test_config: Dict[str, Any] = Body(...),
+    _: Any = Depends(require_operator)
+):
+    """Run an instant test."""
+    await validate_te_org(organization)
+    data = await make_api_request("POST", "instant-tests", data=test_config)
+    if "error" in data:
+        raise HTTPException(status_code=500, detail=data["error"])
+    return data
+
+# === ANOMALIES ENDPOINT ===
+
+@router.get("/tests/{test_id}/anomalies")
+async def te_get_test_anomalies(
+    test_id: str,
+    organization: str = Query(...),
+    window: Optional[str] = Query(None),
+    metric: Optional[str] = Query(None),
+    _: Any = Depends(require_viewer)
+):
+    """Get anomalies for a specific test."""
+    await validate_te_org(organization)
+    params = {}
+    if window: params["window"] = window
+    if metric: params["metric"] = metric
+    data = await make_api_request("GET", f"tests/{test_id}/anomalies", params=params)
+    if "error" in data:
+        raise HTTPException(status_code=500, detail=data["error"])
+    return data
+
+# === METRICS ENDPOINT ===
+
+@router.get("/tests/{test_id}/metrics")
+async def te_get_test_metrics(
+    test_id: str,
+    organization: str = Query(...),
+    window: Optional[str] = Query(None),
+    metric: Optional[str] = Query(None),
+    _: Any = Depends(require_viewer)
+):
+    """Get aggregated metrics for a specific test."""
+    await validate_te_org(organization)
+    params = {}
+    if window: params["window"] = window
+    if metric: params["metric"] = metric
+    data = await make_api_request("GET", f"test-results/{test_id}/metrics", params=params)
+    if "error" in data:
+        raise HTTPException(status_code=500, detail=data["error"])
+    return data
+
+# === PATH VISUALIZATION ENDPOINTS ===
+
+@router.get("/tests/{test_id}/path-vis")
+async def te_get_path_vis(
+    test_id: str,
+    organization: str = Query(...),
+    window: Optional[str] = Query(None),
+    _: Any = Depends(require_viewer)
+):
+    """Get path visualization summary (agents/rounds, no hop details)."""
+    await validate_te_org(organization)
+    params = {}
+    if window: params["window"] = window
+    data = await make_api_request("GET", f"test-results/{test_id}/path-vis", params=params)
+    if "error" in data:
+        raise HTTPException(status_code=500, detail=data["error"])
+    return data
+
+@router.get("/tests/{test_id}/path-vis/agent/{agent_id}/round/{round_id}")
+async def te_get_path_vis_detail(
+    test_id: str,
+    agent_id: str,
+    round_id: str,
+    organization: str = Query(...),
+    direction: Optional[str] = Query(None),
+    _: Any = Depends(require_viewer)
+):
+    """Get detailed hop-by-hop path visualization for a specific agent and round."""
+    await validate_te_org(organization)
+    params = {}
+    if direction: params["direction"] = direction
+    data = await make_api_request(
+        "GET",
+        f"test-results/{test_id}/path-vis/agent/{agent_id}/round/{round_id}",
+        params=params
+    )
+    if "error" in data:
+        raise HTTPException(status_code=500, detail=data["error"])
+    return data
+
+@router.get("/tests/{test_id}/path-vis/detailed")
+async def te_get_path_vis_detailed(
+    test_id: str,
+    organization: str = Query(...),
+    window: Optional[str] = Query("2h"),
+    _: Any = Depends(require_viewer)
+):
+    """Get full hop-by-hop path visualization data with automatic two-step fetch.
+
+    Step 1: Calls the path-vis summary to discover agents and latest roundIds.
+    Step 2: For each unique agent, calls the detail endpoint to get hop-by-hop data.
+    Returns the combined results with full hop details.
+    """
+    await validate_te_org(organization)
+
+    # Step 1: Get summary with agents and rounds
+    params = {"window": window} if window else {}
+    summary = await make_api_request("GET", f"test-results/{test_id}/path-vis", params=params)
+    if "error" in summary:
+        raise HTTPException(status_code=500, detail=summary["error"])
+
+    summary_results = summary.get("results", [])
+    if not summary_results:
+        return {"results": [], "test": summary.get("test", {})}
+
+    # Step 2: Pick the most recent round per agent, then fetch detail
+    # Group by agentId → pick the latest roundId
+    agent_rounds: Dict[str, tuple] = {}
+    for r in summary_results:
+        agent = r.get("agent", {})
+        aid = agent.get("agentId") or str(agent.get("agentId", ""))
+        rid = r.get("roundId")
+        if not aid or not rid:
+            continue
+        # Keep the latest round per agent
+        existing_rid = agent_rounds.get(aid, (None, None))[1]
+        if existing_rid is None or int(rid) > int(existing_rid):
+            agent_rounds[aid] = (r, str(rid))
+
+    if not agent_rounds:
+        return {"results": summary_results, "test": summary.get("test", {})}
+
+    # Fetch detail for each agent (limit to first 5 to avoid too many calls)
+    import asyncio
+    detailed_results = []
+
+    async def fetch_agent_detail(aid: str, rid: str, summary_result: dict):
+        try:
+            detail = await make_api_request(
+                "GET",
+                f"test-results/{test_id}/path-vis/agent/{aid}/round/{rid}"
+            )
+            if "error" not in detail:
+                detail_results = detail.get("results", [])
+                if detail_results:
+                    return detail_results
+        except Exception as e:
+            te_logger.warning(f"Failed to fetch path-vis detail for agent {aid} round {rid}: {e}")
+        # Return the summary result as fallback
+        return [summary_result]
+
+    tasks = []
+    for aid, (summary_result, rid) in list(agent_rounds.items())[:5]:
+        tasks.append(fetch_agent_detail(aid, rid, summary_result))
+
+    all_results = await asyncio.gather(*tasks)
+    for result_list in all_results:
+        detailed_results.extend(result_list)
+
+    return {"results": detailed_results, "test": summary.get("test", {})}
+
+# === BGP ENDPOINTS ===
+
+@router.get("/tests/{test_id}/bgp")
+async def te_get_bgp_results(
+    test_id: str,
+    organization: str = Query(...),
+    window: Optional[str] = Query(None),
+    _: Any = Depends(require_viewer)
+):
+    """Get BGP test results."""
+    await validate_te_org(organization)
+    params = {}
+    if window: params["window"] = window
+    data = await make_api_request("GET", f"test-results/{test_id}/bgp", params=params)
+    if "error" in data:
+        raise HTTPException(status_code=500, detail=data["error"])
+    return data
+
+@router.get("/tests/{test_id}/bgp/{prefix_id}")
+async def te_get_bgp_route(
+    test_id: str,
+    prefix_id: str,
+    organization: str = Query(...),
+    _: Any = Depends(require_viewer)
+):
+    """Get BGP route details for a specific prefix."""
+    await validate_te_org(organization)
+    data = await make_api_request("GET", f"test-results/{test_id}/bgp/{prefix_id}")
+    if "error" in data:
+        raise HTTPException(status_code=500, detail=data["error"])
+    return data
+
+# === ENDPOINT AGENT METRICS ===
+
+@router.get("/endpoint-agents/metrics")
+async def te_get_endpoint_agent_metrics(
+    organization: str = Query(...),
+    window: Optional[str] = Query(None),
+    metric_type: Optional[str] = Query(None),
+    _: Any = Depends(require_viewer)
+):
+    """Get endpoint agent metrics."""
+    await validate_te_org(organization)
+    params = {}
+    if window: params["window"] = window
+    if metric_type: params["metricType"] = metric_type
+    data = await make_api_request("GET", "endpoint-data/network-topology", params=params)
+    if "error" in data:
+        raise HTTPException(status_code=500, detail=data["error"])
+    return data
+
+# === ENDPOINT SCHEDULED TESTS ===
+
+@router.get("/endpoint-tests")
+async def te_get_endpoint_tests(
+    organization: str = Query(...),
+    _: Any = Depends(require_viewer)
+):
+    """List endpoint scheduled tests."""
+    await validate_te_org(organization)
+    try:
+        data = await make_api_request("GET", "endpoint/tests")
+        if "error" in data:
+            raise HTTPException(status_code=500, detail=data["error"])
+        return data
+    except HTTPException:
+        raise
+    except Exception:
+        return {"tests": [], "_embedded": {"tests": []}}
+
+@router.get("/endpoint-tests/{test_id}")
+async def te_get_endpoint_test_detail(
+    test_id: str,
+    organization: str = Query(...),
+    _: Any = Depends(require_viewer)
+):
+    """Get endpoint test detail."""
+    await validate_te_org(organization)
+    try:
+        data = await make_api_request("GET", f"endpoint/tests/{test_id}")
+        if "error" in data:
+            raise HTTPException(status_code=500, detail=data["error"])
+        return data
+    except HTTPException:
+        raise
+    except Exception:
+        return {}
+
+@router.get("/endpoint-data/net-metrics/{test_id}")
+async def te_get_endpoint_net_metrics(
+    test_id: str,
+    organization: str = Query(...),
+    agent_id: Optional[str] = Query(None, alias="agentId"),
+    window: Optional[str] = Query(None),
+    _: Any = Depends(require_viewer)
+):
+    """Get network metrics per endpoint test."""
+    await validate_te_org(organization)
+    params = {}
+    if agent_id: params["agentId"] = agent_id
+    if window: params["window"] = window
+    try:
+        data = await make_api_request("GET", f"endpoint-data/tests/net-metrics/{test_id}", params=params)
+        if "error" in data:
+            raise HTTPException(status_code=500, detail=data["error"])
+        return data
+    except HTTPException:
+        raise
+    except Exception:
+        return {"results": [], "_embedded": {"results": []}}
+
+@router.get("/endpoint-data/http-server/{test_id}")
+async def te_get_endpoint_http_server(
+    test_id: str,
+    organization: str = Query(...),
+    agent_id: Optional[str] = Query(None, alias="agentId"),
+    window: Optional[str] = Query(None),
+    _: Any = Depends(require_viewer)
+):
+    """Get HTTP server results for endpoint tests."""
+    await validate_te_org(organization)
+    params = {}
+    if agent_id: params["agentId"] = agent_id
+    if window: params["window"] = window
+    try:
+        data = await make_api_request("GET", f"endpoint-data/tests/http-server/{test_id}", params=params)
+        if "error" in data:
+            raise HTTPException(status_code=500, detail=data["error"])
+        return data
+    except HTTPException:
+        raise
+    except Exception:
+        return {"results": [], "_embedded": {"results": []}}
+
+@router.get("/internet-insights/outages")
+async def te_get_internet_insights_outages(
+    organization: str = Query(...),
+    window: Optional[str] = Query(None),
+    _: Any = Depends(require_viewer)
+):
+    """Get Internet Insights outage feed."""
+    await validate_te_org(organization)
+    params = {}
+    if window: params["window"] = window
+    try:
+        data = await make_api_request("GET", "internet-insights/outages", params=params)
+        if "error" in data:
+            raise HTTPException(status_code=500, detail=data["error"])
+        return data
+    except HTTPException:
+        raise
+    except Exception:
+        return {"outages": [], "_embedded": {"outages": []}}
+
+@router.get("/endpoint-data/automated-sessions/{test_id}/results")
+async def te_get_automated_session_results(
+    test_id: str,
+    organization: str = Query(...),
+    agent_id: Optional[str] = Query(None, alias="agentId"),
+    window: Optional[str] = Query(None),
+    _: Any = Depends(require_viewer)
+):
+    """Get automated session test results for agent score timeline."""
+    await validate_te_org(organization)
+    params = {}
+    if agent_id: params["agentId"] = agent_id
+    if window: params["window"] = window
+    try:
+        data = await make_api_request("GET", f"endpoint-data/automated-session-tests/{test_id}/results", params=params)
+        if "error" in data:
+            raise HTTPException(status_code=500, detail=data["error"])
+        return data
+    except HTTPException:
+        raise
+    except Exception:
+        return {"results": [], "_embedded": {"results": []}}
+
 # === DEBUG ENDPOINTS ===
 
 @router.get("/debug-config")
@@ -775,6 +1585,10 @@ async def debug_te_config():
     # Check via the async _get_te_token function
     resolved_token = await _get_te_token_async()
 
+    # Check MCP config
+    mcp_endpoint = await config_service.get_config("thousandeyes_mcp_endpoint")
+    mcp_token = await config_service.get_config("thousandeyes_mcp_token")
+
     return {
         "thousandeyes": {
             "db_token_set": bool(db_token),
@@ -783,5 +1597,175 @@ async def debug_te_config():
             "env_token_preview": env_token[:10] + "..." if env_token else None,
             "resolved_token_set": bool(resolved_token),
             "api_base_url": API_BASE_URL,
+            "mcp_endpoint": mcp_endpoint,
+            "mcp_token_set": bool(mcp_token),
         }
     }
+
+
+# ============================================================================
+# MCP-POWERED ENDPOINTS
+# ============================================================================
+
+@router.get("/mcp/status", dependencies=[Depends(require_viewer)])
+async def te_mcp_status(organization: str = Query("default")):
+    """Check if ThousandEyes MCP is configured and list available tools."""
+    creds = await _get_te_mcp_creds()
+    if not creds:
+        return {"available": False, "tools": [], "message": "MCP not configured"}
+
+    try:
+        from mcp import ClientSession
+        from mcp.client.stdio import stdio_client
+
+        server_params = _get_te_mcp_client_params(creds["mcp_endpoint"], creds["token"], creds["verify_ssl"])
+
+        async with stdio_client(server_params) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                tools_response = await session.list_tools()
+                tool_names = [t.name for t in tools_response.tools]
+                return {
+                    "available": True,
+                    "tools": tool_names,
+                    "endpoint": creds["mcp_endpoint"],
+                }
+    except Exception as e:
+        te_logger.error(f"Error checking MCP status: {e}")
+        return {"available": False, "tools": [], "error": str(e)}
+
+
+@router.get("/dashboards", dependencies=[Depends(require_viewer)])
+async def te_list_dashboards(organization: str = Query("default")):
+    """List ThousandEyes dashboards via MCP or REST fallback."""
+    # Try MCP first
+    creds = await _get_te_mcp_creds()
+    if creds:
+        try:
+            result = await _call_te_mcp_tool("te_list_dashboards", {}, creds=creds)
+            return {"dashboards": result}
+        except Exception as e:
+            te_logger.warning(f"MCP dashboard fetch failed, trying REST: {e}")
+
+    # REST fallback
+    await validate_te_config()
+    data = await make_api_request("GET", "dashboards")
+    if "error" in data:
+        raise HTTPException(status_code=500, detail=data["error"])
+    dashboards = data.get("_embedded", {}).get("dashboards", data.get("dashboards", []))
+    return {"dashboards": dashboards}
+
+
+@router.get("/dashboards/{dashboard_id}", dependencies=[Depends(require_viewer)])
+async def te_get_dashboard(dashboard_id: str, organization: str = Query("default")):
+    """Get dashboard detail + widgets via MCP or REST fallback."""
+    creds = await _get_te_mcp_creds()
+    if creds:
+        try:
+            result = await _call_te_mcp_tool("te_get_dashboard", {"dashboard_id": dashboard_id}, creds=creds)
+            return {"dashboard": result}
+        except Exception as e:
+            te_logger.warning(f"MCP dashboard detail failed, trying REST: {e}")
+
+    await validate_te_config()
+    data = await make_api_request("GET", f"dashboards/{dashboard_id}")
+    if "error" in data:
+        raise HTTPException(status_code=500, detail=data["error"])
+    return {"dashboard": data}
+
+
+@router.get("/dashboards/{dashboard_id}/widgets/{widget_id}", dependencies=[Depends(require_viewer)])
+async def te_get_dashboard_widget(dashboard_id: str, widget_id: str, organization: str = Query("default")):
+    """Get widget data via MCP."""
+    creds = await _get_te_mcp_creds()
+    if creds:
+        try:
+            result = await _call_te_mcp_tool("te_get_dashboard_widget", {
+                "dashboard_id": dashboard_id,
+                "widget_id": widget_id,
+            }, creds=creds)
+            return {"widget": result}
+        except Exception as e:
+            te_logger.warning(f"MCP widget fetch failed: {e}")
+            raise HTTPException(status_code=500, detail=f"Widget fetch failed: {str(e)}")
+
+    raise HTTPException(status_code=503, detail="MCP not configured. Dashboard widgets require MCP.")
+
+
+@router.get("/mcp/path-vis/{test_id}", dependencies=[Depends(require_viewer)])
+async def te_mcp_path_vis(test_id: str, organization: str = Query("default")):
+    """Get path visualization via MCP for richer data."""
+    try:
+        result = await _call_te_mcp_tool("te_get_path_vis", {"test_id": test_id})
+        return {"path_vis": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        te_logger.error(f"MCP path vis error: {e}")
+        raise HTTPException(status_code=500, detail=f"MCP path vis failed: {str(e)}")
+
+
+@router.post("/cross-platform/correlate", dependencies=[Depends(require_viewer)])
+async def te_cross_platform_correlate(request: Dict[str, Any] = Body(...)):
+    """Cross-reference ThousandEyes agent IPs with Splunk logs and Meraki/Catalyst devices."""
+    agent_ips = request.get("agent_ips", [])
+    alert_ips = request.get("alert_ips", [])
+
+    all_ips = list(set(agent_ips + alert_ips))
+    if not all_ips:
+        return {"correlatedDevices": [], "splunkMatches": []}
+
+    result = {"correlatedDevices": [], "splunkMatches": []}
+
+    try:
+        # Check Splunk for matching logs
+        from src.services.config_service import ConfigService
+        config_service = ConfigService()
+        splunk_url = await config_service.get_config("splunk_api_url")
+        splunk_token = await config_service.get_config("splunk_bearer_token")
+
+        if splunk_url and splunk_token:
+            # Query Splunk for events matching these IPs
+            ip_filter = " OR ".join(f'host="{ip}"' for ip in all_ips[:20])
+            try:
+                from src.api.routes.splunk import _call_splunk_tool
+                splunk_result = await _call_splunk_tool("splunk_run_query", {
+                    "query": f"search ({ip_filter}) | stats count by host | sort -count",
+                    "earliest_time": "-24h",
+                    "latest_time": "now",
+                    "max_results": 50,
+                })
+                if isinstance(splunk_result, list):
+                    result["splunkMatches"] = splunk_result
+                elif isinstance(splunk_result, dict):
+                    result["splunkMatches"] = [splunk_result]
+            except Exception as e:
+                te_logger.warning(f"Splunk correlation query failed: {e}")
+
+        # Check network cache for device matches
+        async with httpx.AsyncClient(verify=False, timeout=15.0) as client:
+            cache_response = await client.get(
+                "https://localhost:8002/api/network/cache",
+                headers={"Content-Type": "application/json"},
+            )
+            if cache_response.status_code == 200:
+                cache_data = cache_response.json()
+                search_ips = set(ip.lower() for ip in all_ips)
+
+                for org in cache_data.get("organizations", []):
+                    for net in org.get("networks", []):
+                        for dev in net.get("devices", []):
+                            dev_ip = (dev.get("lanIp") or dev.get("wan1Ip") or dev.get("managementIpAddress") or "").lower()
+                            if dev_ip in search_ips:
+                                result["correlatedDevices"].append({
+                                    "ip": dev_ip,
+                                    "hostname": dev.get("name") or dev.get("hostname"),
+                                    "platform": "meraki" if dev.get("serial") else "catalyst",
+                                    "device": dev,
+                                    "networkName": net.get("name"),
+                                })
+
+    except Exception as e:
+        te_logger.error(f"Cross-platform correlation error: {e}")
+
+    return result

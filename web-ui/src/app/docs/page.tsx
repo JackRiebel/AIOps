@@ -344,8 +344,8 @@ export default function DocsPage() {
                 <BookOpen className="w-6 h-6 text-white" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Lumen User Guide</h1>
-                <p className="text-sm text-slate-500 dark:text-slate-400">Complete documentation for the Lumen platform</p>
+                <h1 className="text-2xl font-bold text-slate-900 dark:text-white">AI Ops Center User Guide</h1>
+                <p className="text-sm text-slate-500 dark:text-slate-400">Complete documentation for the AI Ops Center platform</p>
               </div>
             </div>
 
@@ -558,7 +558,7 @@ export default function DocsPage() {
           {!loading && !error && (
             <footer className="mt-12 pt-6 border-t border-slate-200 dark:border-slate-700/50">
               <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-slate-500 dark:text-slate-400">
-                <p>Lumen Network Intelligence Platform</p>
+                <p>AI Ops Center</p>
                 <div className="flex items-center gap-4">
                   <button
                     onClick={scrollToTop}

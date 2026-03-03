@@ -1,6 +1,7 @@
 'use client';
 
-import { memo, useState } from 'react';
+import { memo, useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { Loader2, X, Zap } from 'lucide-react';
 import {
   LineChart,
@@ -59,6 +60,7 @@ export const TestPerformanceChart = memo(({
   selectedOrg,
   onAskAI,
 }: TestPerformanceChartProps) => {
+  const router = useRouter();
   const [selectedDataPoint, setSelectedDataPoint] = useState<SelectedDataPoint | null>(null);
   const [aiQuery, setAiQuery] = useState('');
 
@@ -66,44 +68,50 @@ export const TestPerformanceChart = memo(({
     setSelectedDataPoint({ testId, data });
   };
 
-  const handleAskAI = () => {
+  const handleAskAI = useCallback(() => {
     if (!selectedDataPoint || !aiQuery.trim()) return;
 
-    // Build context string with data point information and user's question
-    let context = `I have a question about a ThousandEyes test data point:\n\n`;
-    context += `**Test Information:**\n`;
-    context += `- Test Name: ${testName}\n`;
-    context += `- Test ID: ${testId}\n`;
-    context += `- Test Type: ${testType}\n`;
-    context += `- Organization: ${selectedOrg}\n`;
-    context += `- Timestamp: ${selectedDataPoint.data.timestamp}\n\n`;
+    const dp = selectedDataPoint.data;
 
-    context += `**Metrics at this time:**\n`;
-    if (selectedDataPoint.data.responseTime !== undefined) {
-      context += `- Response Time: ${selectedDataPoint.data.responseTime} ms\n`;
-    }
-    if (selectedDataPoint.data.latency !== undefined) {
-      context += `- Latency: ${selectedDataPoint.data.latency} ms\n`;
-    }
-    if (selectedDataPoint.data.loss !== undefined) {
-      context += `- Packet Loss: ${selectedDataPoint.data.loss}%\n`;
-    }
-    if (selectedDataPoint.data.jitter !== undefined) {
-      context += `- Jitter: ${selectedDataPoint.data.jitter} ms\n`;
-    }
-    if (selectedDataPoint.data.availability !== undefined) {
-      context += `- Availability: ${selectedDataPoint.data.availability}%\n`;
-    }
-    if (selectedDataPoint.data.throughput !== undefined) {
-      context += `- Throughput: ${selectedDataPoint.data.throughput}\n`;
-    }
+    // Build structured context for the card
+    const contextData = {
+      testName,
+      testId,
+      testType,
+      organization: selectedOrg,
+      timestamp: dp.timestamp,
+      metrics: {
+        responseTime: dp.responseTime,
+        latency: dp.latency,
+        loss: dp.loss,
+        jitter: dp.jitter,
+        availability: dp.availability,
+        throughput: dp.throughput,
+      },
+      userQuestion: aiQuery,
+    };
 
-    context += `\n**My Question:**\n${aiQuery}\n`;
+    // Build AI-facing message
+    let aiMessage = `ThousandEyes test "${testName}" (${testType}, ID: ${testId}) data point at ${dp.timestamp}:\n`;
+    if (dp.responseTime != null) aiMessage += `Response Time: ${dp.responseTime}ms. `;
+    if (dp.latency != null) aiMessage += `Latency: ${dp.latency}ms. `;
+    if (dp.loss != null) aiMessage += `Loss: ${dp.loss}%. `;
+    if (dp.jitter != null) aiMessage += `Jitter: ${dp.jitter}ms. `;
+    if (dp.availability != null) aiMessage += `Availability: ${dp.availability}%. `;
+    if (dp.throughput != null) aiMessage += `Throughput: ${dp.throughput}. `;
+    aiMessage += `\n\nUser question: ${aiQuery}\n\nAll test metrics are already provided inline — no need to fetch them again from ThousandEyes.`;
 
-    onAskAI(context);
+    const payload = {
+      message: aiMessage,
+      context: { type: 'test_data_point' as const, data: contextData },
+    };
+    const encoded = btoa(encodeURIComponent(JSON.stringify(payload)));
+
     setAiQuery('');
     setSelectedDataPoint(null);
-  };
+
+    router.push(`/chat-v2?new_session=true&test_data_point=${encodeURIComponent(encoded)}`);
+  }, [selectedDataPoint, aiQuery, testName, testId, testType, selectedOrg, router]);
 
   if (loading) {
     return (
@@ -305,7 +313,7 @@ export const TestPerformanceChart = memo(({
               className="w-full px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white text-xs rounded-lg hover:from-purple-700 hover:to-blue-700 transition font-medium shadow-lg hover:shadow-purple-500/30 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               <Zap className="w-4 h-4" />
-              Ask Agents
+              Ask AI
             </button>
           </div>
         </div>

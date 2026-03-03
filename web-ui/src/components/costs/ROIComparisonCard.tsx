@@ -79,12 +79,12 @@ export function ROIComparisonCard({ data, className = '' }: ROIComparisonCardPro
   }, [data.manualCostEstimate, data.aiCostTotal]);
 
   return (
-    <div className={`bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 overflow-hidden ${className}`}>
+    <div className={`bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 border-l-4 border-l-cyan-500 overflow-hidden ${className}`}>
       {/* Header */}
       <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700/50">
         <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-lg bg-gradient-to-br from-cyan-500/20 to-blue-500/20">
-            <Zap className="w-4 h-4 text-cyan-500" />
+          <div className="p-1.5 rounded-lg bg-cyan-100 dark:bg-cyan-500/10">
+            <Zap className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
           </div>
           <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
             ROI Comparison
@@ -97,7 +97,7 @@ export function ROIComparisonCard({ data, className = '' }: ROIComparisonCardPro
         {/* Without AI vs With AI - Cost */}
         <div>
           <div className="flex items-center justify-between mb-2">
-            <span className="flex items-center gap-1 text-xs font-medium text-slate-500 dark:text-slate-400">
+            <span className="flex items-center gap-1 text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
               Cost Comparison
               <HelpTooltip content="Compares estimated manual labor costs (based on engineer time × hourly rate) vs actual AI API costs for the same tasks." />
             </span>
@@ -132,7 +132,7 @@ export function ROIComparisonCard({ data, className = '' }: ROIComparisonCardPro
                   return (
                     <>
                       <div
-                        className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-all duration-500"
+                        className="h-full bg-gradient-to-r from-cyan-500 to-emerald-500 transition-all duration-500"
                         style={{ width: `${barWidth}%` }}
                       />
                       <span
@@ -159,7 +159,7 @@ export function ROIComparisonCard({ data, className = '' }: ROIComparisonCardPro
         {/* Stats Grid */}
         <div className="grid grid-cols-2 gap-4">
           {/* Time Saved */}
-          <div className="flex items-start gap-3">
+          <div className="flex items-start gap-3 border-l-2 border-l-emerald-500 pl-3">
             <div className="p-2 rounded-lg bg-emerald-100 dark:bg-emerald-500/10">
               <Clock className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
             </div>
@@ -175,7 +175,7 @@ export function ROIComparisonCard({ data, className = '' }: ROIComparisonCardPro
           </div>
 
           {/* ROI */}
-          <div className="flex items-start gap-3">
+          <div className="flex items-start gap-3 border-l-2 border-l-cyan-500 pl-3">
             <div className={`p-2 rounded-lg ${roiColors.bg}/10`}>
               {data.roiPercentage >= 100 ? (
                 <TrendingUp className={`w-4 h-4 ${roiColors.text}`} />
@@ -195,7 +195,7 @@ export function ROIComparisonCard({ data, className = '' }: ROIComparisonCardPro
           </div>
 
           {/* Sessions */}
-          <div className="flex items-start gap-3">
+          <div className="flex items-start gap-3 border-l-2 border-l-blue-500 pl-3">
             <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-500/10">
               <Zap className="w-4 h-4 text-blue-600 dark:text-blue-400" />
             </div>
@@ -211,7 +211,7 @@ export function ROIComparisonCard({ data, className = '' }: ROIComparisonCardPro
           </div>
 
           {/* Net Savings */}
-          <div className="flex items-start gap-3">
+          <div className="flex items-start gap-3 border-l-2 border-l-violet-500 pl-3">
             <div className="p-2 rounded-lg bg-cyan-100 dark:bg-cyan-500/10">
               <DollarSign className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
             </div>

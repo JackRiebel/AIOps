@@ -12,7 +12,7 @@ import { getActionDescription, isNotificationAction } from './actionDescriptions
 
 export interface PreviewNode {
   id: string;
-  type: 'trigger' | 'condition' | 'ai' | 'action' | 'notify';
+  type: 'trigger' | 'condition' | 'ai' | 'action' | 'notify' | 'approval';
   position: { x: number; y: number };
   data: Record<string, unknown>;
 }
@@ -51,6 +51,125 @@ const LAYOUT = {
  * Generate a preview flow from a workflow definition
  */
 export function generateFlowFromWorkflow(workflow: Workflow): PreviewFlow {
+  // If workflow has flow_data with nodes, use those directly
+  if (workflow.flow_data?.nodes && workflow.flow_data.nodes.length > 0) {
+    return generateFromFlowData(workflow);
+  }
+
+  // Otherwise, fall back to generating from basic workflow properties
+  return generateFromWorkflowProperties(workflow);
+}
+
+/**
+ * Generate preview flow from flow_data (canvas-created workflows)
+ */
+function generateFromFlowData(workflow: Workflow): PreviewFlow {
+  const flowData = workflow.flow_data!;
+  const nodes: PreviewNode[] = [];
+  const edges: PreviewEdge[] = [];
+
+  // Sort nodes by x position for display order
+  const sortedNodes = [...flowData.nodes].sort(
+    (a, b) => (a.position?.x || 0) - (b.position?.x || 0)
+  );
+
+  // Convert flow_data nodes to preview nodes
+  sortedNodes.forEach((node, index) => {
+    const nodeType = node.type as PreviewNode['type'];
+    const nodeData = node.data || {};
+
+    // Map node type to preview type
+    let previewType: PreviewNode['type'] = 'action';
+    if (nodeType === 'trigger') previewType = 'trigger';
+    else if (nodeType === 'condition') previewType = 'condition';
+    else if (nodeType === 'ai') previewType = 'ai';
+    else if (nodeType === 'notify') previewType = 'notify';
+    else if (nodeType === 'approval') previewType = 'approval';
+    else if (nodeType === 'action') previewType = 'action';
+
+    // Build preview node data based on type
+    let data: Record<string, unknown> = { ...nodeData };
+
+    if (previewType === 'trigger') {
+      data = {
+        triggerType: nodeData.triggerType || workflow.trigger_type,
+        splunkQuery: nodeData.splunkQuery || workflow.splunk_query,
+        scheduleCron: nodeData.schedule || workflow.schedule_cron,
+        pollInterval: workflow.poll_interval_seconds,
+        label: nodeData.label,
+      };
+    } else if (previewType === 'condition') {
+      data = {
+        conditions: nodeData.conditions || [],
+        conditionCount: (nodeData.conditions as unknown[])?.length || 1,
+        expression: nodeData.expression,
+        label: nodeData.label,
+      };
+    } else if (previewType === 'ai') {
+      data = {
+        enabled: true,
+        confidenceThreshold: workflow.ai_confidence_threshold,
+        prompt: nodeData.prompt || workflow.ai_prompt,
+        label: nodeData.label,
+      };
+    } else if (previewType === 'action') {
+      const actionId = nodeData.actionId || nodeData.tool || 'custom';
+      const actionDesc = getActionDescription(String(actionId));
+      data = {
+        tool: actionId,
+        label: nodeData.label || actionDesc.label,
+        description: actionDesc.description,
+        icon: actionDesc.icon,
+        category: actionDesc.category,
+        riskLevel: actionDesc.riskLevel,
+        requiresApproval: nodeData.requiresApproval,
+        params: nodeData.params || nodeData.parameters,
+      };
+    } else if (previewType === 'approval') {
+      data = {
+        label: nodeData.label || 'Approval Required',
+        description: nodeData.description || 'Manual approval step',
+        requiresApproval: true,
+        riskLevel: 'high',
+      };
+    } else if (previewType === 'notify') {
+      const tool = nodeData.notifyType || nodeData.tool || 'notification';
+      data = {
+        tool: tool,
+        label: nodeData.label || 'Notification',
+        channel: nodeData.channel || getNotificationChannel(String(tool)),
+        target: nodeData.target || nodeData.channel || '',
+      };
+    }
+
+    nodes.push({
+      id: node.id || `node-${index}`,
+      type: previewType,
+      position: { x: LAYOUT.startX + index * (LAYOUT.nodeWidth + LAYOUT.nodeGap), y: LAYOUT.centerY },
+      data,
+    });
+  });
+
+  // Convert edges
+  if (flowData.edges) {
+    flowData.edges.forEach((edge, index) => {
+      edges.push({
+        id: edge.id || `edge-${index}`,
+        source: edge.source,
+        target: edge.target,
+        sourceHandle: edge.sourceHandle,
+        targetHandle: edge.targetHandle,
+      });
+    });
+  }
+
+  return { nodes, edges };
+}
+
+/**
+ * Generate preview flow from basic workflow properties (legacy workflows)
+ */
+function generateFromWorkflowProperties(workflow: Workflow): PreviewFlow {
   const nodes: PreviewNode[] = [];
   const edges: PreviewEdge[] = [];
 

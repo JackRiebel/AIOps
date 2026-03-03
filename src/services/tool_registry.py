@@ -113,6 +113,11 @@ Parameters:
 """
 
 
+async def _think_tool_handler(params: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """Think tool handler - returns the thought unchanged. Zero-cost reasoning tool."""
+    return {"success": True, "thought": params.get("thought", "")}
+
+
 class ToolRegistry:
     """Central registry for all AI tools.
 
@@ -372,6 +377,38 @@ class ToolRegistry:
                 canvas.register_canvas_tools()
             except Exception as e:
                 logger.warning(f"[ToolRegistry] Could not load canvas tools: {e}")
+
+            # Load network configuration tools (for performance change cards)
+            try:
+                from src.services.tools import network_config
+                network_config.register_network_config_tools()
+            except Exception as e:
+                logger.warning(f"[ToolRegistry] Could not load network config tools: {e}")
+
+            # Register think tool - zero-cost reasoning checkpoint for multi-step analysis
+            think_tool = create_tool(
+                name="think",
+                description=(
+                    "Use this tool to reason step-by-step between tool calls during investigations. "
+                    "Use it to: (1) analyze results you just received and what they mean, "
+                    "(2) form or update hypotheses about root causes, "
+                    "(3) plan which tools to call next and why, "
+                    "(4) cross-reference data from Meraki, ThousandEyes, and Splunk to find correlations. "
+                    "This tool is free (no API cost). Use it after receiving results for any troubleshooting query."
+                ),
+                platform="system",
+                category="reasoning",
+                properties={
+                    "thought": {
+                        "type": "string",
+                        "description": "Your reasoning, analysis, hypothesis, or plan for next steps.",
+                    },
+                },
+                required=["thought"],
+                handler=_think_tool_handler,
+                tags=["reasoning", "planning", "analysis"],
+            )
+            self.register(think_tool)
 
             stats = self.get_stats()
             logger.info(

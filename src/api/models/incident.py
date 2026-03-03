@@ -19,6 +19,8 @@ class IncidentResponse(BaseModel):
     affected_services: Optional[List[str]]
     organizations: Optional[List[str]]
     event_count: int
+    network_id: Optional[str] = None
+    network_name: Optional[str] = None
 
 
 class EventResponse(BaseModel):

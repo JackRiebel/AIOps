@@ -176,7 +176,7 @@ class OAuthService:
             token_data["code_verifier"] = code_verifier
             logger.debug("Including PKCE code_verifier in token exchange")
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
             response = await client.post(
                 GOOGLE_TOKEN_URL,
                 data=token_data,
@@ -198,7 +198,7 @@ class OAuthService:
         Returns:
             User info dict with id, email, name, picture, etc.
         """
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
             response = await client.get(
                 GOOGLE_USERINFO_URL,
                 headers={"Authorization": f"Bearer {access_token}"},
@@ -284,7 +284,7 @@ class OAuthService:
         """
         client_id, client_secret = OAuthService.get_credentials()
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
             response = await client.post(
                 GOOGLE_TOKEN_URL,
                 data={

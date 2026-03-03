@@ -988,6 +988,7 @@ const NotifyFields = memo(({
             { value: 'webex', label: 'Webex', icon: Globe },
             { value: 'pagerduty', label: 'PagerDuty', icon: Bell },
             { value: 'webhook', label: 'Webhook', icon: Globe },
+            { value: 'incident_timeline', label: 'Incident', icon: FileText },
           ].map(({ value, label, icon: Icon }) => (
             <button
               key={value}
@@ -1115,8 +1116,56 @@ const NotifyFields = memo(({
         </>
       )}
 
+      {channel === 'incident_timeline' && (
+        <>
+          <div>
+            <FieldLabel hint="The incident to add this event to">Incident ID</FieldLabel>
+            <Input
+              type="number"
+              value={(data.incidentId as string) || ''}
+              onChange={(e) => onUpdate({ incidentId: e.target.value })}
+              placeholder="123"
+            />
+          </div>
+          <div>
+            <FieldLabel>Event Type</FieldLabel>
+            <Select
+              value={(data.eventType as string) || 'workflow_action'}
+              onChange={(e) => onUpdate({ eventType: e.target.value })}
+            >
+              <option value="workflow_action">Workflow Action</option>
+              <option value="investigation_update">Investigation Update</option>
+              <option value="remediation">Remediation</option>
+              <option value="manual_note">Manual Note</option>
+            </Select>
+          </div>
+          <div>
+            <FieldLabel>Severity</FieldLabel>
+            <Select
+              value={(data.severity as string) || 'info'}
+              onChange={(e) => onUpdate({ severity: e.target.value })}
+            >
+              <option value="info">Info</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="critical">Critical</option>
+            </Select>
+          </div>
+          <div>
+            <FieldLabel hint="Optional: Device, service, or resource affected">Affected Resource</FieldLabel>
+            <Input
+              type="text"
+              value={(data.affectedResource as string) || ''}
+              onChange={(e) => onUpdate({ affectedResource: e.target.value })}
+              placeholder="e.g., switch-01, network-prod"
+            />
+          </div>
+        </>
+      )}
+
       <div>
-        <FieldLabel hint="Use {{variable}} for dynamic content">Message</FieldLabel>
+        <FieldLabel hint="Use {{variable}} for dynamic content">{channel === 'incident_timeline' ? 'Title' : 'Message'}</FieldLabel>
         <Textarea
           value={(data.message as string) || ''}
           onChange={(e) => onUpdate({ message: e.target.value })}
@@ -1125,7 +1174,7 @@ const NotifyFields = memo(({
         />
       </div>
 
-      {channel !== 'pagerduty' && (
+      {channel !== 'pagerduty' && channel !== 'incident_timeline' && (
         <div>
           <FieldLabel>Priority</FieldLabel>
           <Select

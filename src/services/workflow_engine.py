@@ -106,6 +106,58 @@ class WorkflowEngine:
             self._executor = get_workflow_executor()
         return self._executor
 
+    def _extract_actions_from_flow_data(self, workflow: Workflow) -> List[Dict[str, Any]]:
+        """Extract actions from workflow flow_data (canvas format).
+
+        Canvas workflows store actions as nodes in flow_data. This method
+        extracts action nodes in execution order (by x position) and converts
+        them to the standard action format.
+
+        Args:
+            workflow: Workflow with flow_data
+
+        Returns:
+            List of action dictionaries
+        """
+        # First try workflow.actions (standard format)
+        if workflow.actions:
+            return workflow.actions
+
+        # Then try flow_data (canvas format)
+        flow_data = workflow.flow_data
+        if not flow_data:
+            return []
+
+        nodes = flow_data.get("nodes", [])
+        if not nodes:
+            return []
+
+        # Extract action nodes (type='action') sorted by x position for execution order
+        action_nodes = [
+            n for n in nodes
+            if n.get("type") == "action"
+        ]
+
+        # Sort by x position to maintain visual execution order
+        action_nodes.sort(key=lambda n: n.get("position", {}).get("x", 0))
+
+        actions = []
+        for node in action_nodes:
+            data = node.get("data", {})
+            action_id = data.get("actionId") or data.get("tool") or "custom.webhook"
+            # Check both 'params' (PropertiesPanel) and 'parameters' (templates) for compatibility
+            params = data.get("params") or data.get("parameters") or {}
+            requires_approval = data.get("requiresApproval", False)
+
+            actions.append({
+                "tool": action_id,
+                "params": params if isinstance(params, dict) else {},
+                "requires_approval": requires_approval,
+            })
+
+        logger.debug(f"Extracted {len(actions)} actions from flow_data for workflow {workflow.id}")
+        return actions
+
     async def get_splunk_client(self):
         """Get Splunk client for queries (lazy init if not injected)."""
         if self._splunk_client is None:
@@ -131,6 +183,13 @@ class WorkflowEngine:
                     get_config_or_env("splunk_bearer_token", "SPLUNK_BEARER_TOKEN") or
                     settings.splunk_token
                 )
+                # Load per-credential verify_ssl from DB, fall back to settings
+                splunk_verify_ssl_str = get_config_or_env("splunk_verify_ssl", "SPLUNK_VERIFY_SSL")
+                if splunk_verify_ssl_str is not None:
+                    # DB stores as string "true"/"false"
+                    splunk_verify_ssl = str(splunk_verify_ssl_str).lower() == "true"
+                else:
+                    splunk_verify_ssl = settings.splunk_verify_ssl
 
                 if splunk_host:
                     self._splunk_client = SplunkClient(
@@ -138,7 +197,7 @@ class WorkflowEngine:
                         username=splunk_username,
                         password=splunk_password,
                         token=splunk_token,
-                        verify_ssl=settings.splunk_verify_ssl,
+                        verify_ssl=splunk_verify_ssl,
                     )
             except Exception as e:
                 logger.warning(f"Failed to initialize Splunk client: {e}")
@@ -188,7 +247,8 @@ class WorkflowEngine:
                 ai_analysis = None
                 ai_confidence = None
                 ai_risk_level = None
-                recommended_actions = workflow.actions
+                # Extract actions from workflow.actions or flow_data (canvas format)
+                recommended_actions = self._extract_actions_from_flow_data(workflow)
                 ai_cost = 0.0
                 ai_input_tokens = 0
                 ai_output_tokens = 0
@@ -558,12 +618,18 @@ class WorkflowEngine:
         except Exception as e:
             logger.warning(f"Failed to send workflow notification: {e}")
 
-    async def test_workflow(self, workflow_id: int, model: Optional[str] = None) -> Dict[str, Any]:
+    async def test_workflow(
+        self,
+        workflow_id: int,
+        model: Optional[str] = None,
+        simulation_time_range: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """Test run a workflow without executing actions.
 
         Args:
             workflow_id: ID of the workflow to test
             model: Optional AI model to use (user's preferred model)
+            simulation_time_range: Optional time range for simulating time-based queries
 
         Returns:
             Test results including what would be triggered

@@ -17,3 +17,4 @@ export { SessionTimeline, type TimelineEvent } from './SessionTimeline';
 export { MTTRDashboard, type MTTRData, type IncidentSession } from './MTTRDashboard';
 export { WeeklyROIReport, type WeeklyReportData, type TopWin, type OptimizationOpportunity } from './WeeklyROIReport';
 export { RAGMetricsDashboard } from './RAGMetricsDashboard';
+export { NetworkCostImpactCard } from './NetworkCostImpactCard';

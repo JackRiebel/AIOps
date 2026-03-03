@@ -19,8 +19,8 @@ The launcher handles **everything** - including installing Python and Node.js if
    ```
 
 2. **Double-click the launcher for your platform:**
-   - **macOS/Linux**: `Start Lumen.command`
-   - **Windows**: `Start Lumen.bat`
+   - **macOS/Linux**: `Start AI Ops Center.command`
+   - **Windows**: `Start AI Ops Center.bat`
 
 3. **That's it!** The launcher automatically:
    - Installs Python 3.11 (if not present)

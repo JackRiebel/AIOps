@@ -178,7 +178,7 @@ export const TopNavbar = memo(({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
           </div>
-          <span className="font-bold text-slate-900 dark:text-white hidden sm:inline">Lumen AI</span>
+          <span className="font-bold text-slate-900 dark:text-white hidden sm:inline">AI Ops Center</span>
         </Link>
 
         {/* System Status */}

@@ -13,12 +13,13 @@ logger = logging.getLogger(__name__)
 class ThousandEyesClient:
     """Client for ThousandEyes API integration."""
 
-    def __init__(self, oauth_token: str, base_url: str = "https://api.thousandeyes.com/v7"):
+    def __init__(self, oauth_token: str, base_url: str = "https://api.thousandeyes.com/v7", transport=None):
         """Initialize ThousandEyes client.
 
         Args:
             oauth_token: ThousandEyes OAuth Bearer token
             base_url: ThousandEyes API base URL
+            transport: Optional httpx transport (e.g. InstrumentedAsyncTransport)
         """
         self.oauth_token = oauth_token
         self.base_url = base_url
@@ -26,6 +27,15 @@ class ThousandEyesClient:
             "Authorization": f"Bearer {oauth_token}",
             "Content-Type": "application/json"
         }
+        self._transport = transport
+
+    def _make_client(self, timeout: float = 30.0) -> httpx.AsyncClient:
+        """Create an httpx client, using the instrumented transport if available."""
+        settings = get_settings()
+        kwargs = {"timeout": timeout, "verify": settings.thousandeyes_verify_ssl}
+        if self._transport is not None:
+            kwargs["transport"] = self._transport
+        return httpx.AsyncClient(**kwargs)
 
     async def get_tests(self, test_type: Optional[str] = None) -> Dict[str, Any]:
         """Get all tests or filter by type.
@@ -37,8 +47,7 @@ class ThousandEyesClient:
             Dictionary with tests data
         """
         try:
-            settings = get_settings()
-            async with httpx.AsyncClient(timeout=30.0, verify=settings.verify_ssl) as client:
+            async with self._make_client() as client:
                 response = await client.get(
                     f"{self.base_url}/tests",
                     headers=self.headers
@@ -80,8 +89,7 @@ class ThousandEyesClient:
             Dictionary with alerts data
         """
         try:
-            settings = get_settings()
-            async with httpx.AsyncClient(timeout=30.0, verify=settings.verify_ssl) as client:
+            async with self._make_client() as client:
                 endpoint = f"{self.base_url}/alerts"
                 if active_only:
                     endpoint += "?window=1d"
@@ -122,8 +130,7 @@ class ThousandEyesClient:
             Dictionary with agents data
         """
         try:
-            settings = get_settings()
-            async with httpx.AsyncClient(timeout=30.0, verify=settings.verify_ssl) as client:
+            async with self._make_client() as client:
                 response = await client.get(
                     f"{self.base_url}/agents",
                     headers=self.headers
@@ -157,21 +164,21 @@ class ThousandEyesClient:
                 "agents": []
             }
 
-    async def get_test_results(self, test_id: int, window: str = "12h") -> Dict[str, Any]:
+    async def get_test_results(self, test_id: int, result_type: str = "network", window: str = "12h") -> Dict[str, Any]:
         """Get results for a specific test.
 
         Args:
             test_id: Test ID
+            result_type: Result type endpoint suffix (network, http-server, page-load, path-vis, etc.)
             window: Time window (12h, 1d, 7d, etc.)
 
         Returns:
             Dictionary with test results
         """
         try:
-            settings = get_settings()
-            async with httpx.AsyncClient(timeout=30.0, verify=settings.verify_ssl) as client:
+            async with self._make_client() as client:
                 response = await client.get(
-                    f"{self.base_url}/test-results/{test_id}",
+                    f"{self.base_url}/test-results/{test_id}/{result_type}",
                     headers=self.headers,
                     params={"window": window}
                 )
@@ -236,11 +243,10 @@ class ThousandEyesClient:
             # Verbose logging for debugging
             endpoint = f"{self.base_url}/tests/{test_type}"
             logger.info(f"ThousandEyes Create Test: POST {endpoint}")
-            logger.debug(f"Headers: Authorization: Bearer {self.oauth_token[:10]}...")
+            logger.debug("Headers: Authorization: Bearer [REDACTED]")
             logger.debug(f"Test config: {test_config}")
 
-            settings = get_settings()
-            async with httpx.AsyncClient(timeout=30.0, verify=settings.verify_ssl) as client:
+            async with self._make_client() as client:
                 response = await client.post(
                     endpoint,
                     headers=self.headers,
@@ -282,8 +288,7 @@ class ThousandEyesClient:
             Dictionary with endpoint agents data
         """
         try:
-            settings = get_settings()
-            async with httpx.AsyncClient(timeout=30.0, verify=settings.verify_ssl) as client:
+            async with self._make_client() as client:
                 response = await client.get(
                     f"{self.base_url}/endpoint/agents",
                     headers=self.headers

@@ -10,6 +10,11 @@ from src.models.network_cache import CachedNetwork, CachedDevice
 from src.models.security import SecurityConfig
 from src.models.splunk_insight import SplunkLogInsight, InsightSeverity
 from src.models.system_config import SystemConfig
+from src.models.canvas import CanvasArtifact, ArtifactType
+from src.models.ai_trace import AIQueryTrace
+from src.models.mfa_challenge import MfaChallenge
+from src.models.pending_action import PendingAction, ActionStatus
+from src.models.te_test_metric import TETestMetric
 from src.models.workflow import (
     Workflow,
     WorkflowExecution,
@@ -66,4 +71,16 @@ __all__ = [
     "UserDelegation",
     "AccessRestriction",
     "PermissionAuditLog",
+    # Canvas Models
+    "CanvasArtifact",
+    "ArtifactType",
+    # AI Trace Models
+    "AIQueryTrace",
+    # MFA Challenge Model
+    "MfaChallenge",
+    # Pending Action Models
+    "PendingAction",
+    "ActionStatus",
+    # ThousandEyes Metrics
+    "TETestMetric",
 ]

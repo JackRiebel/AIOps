@@ -33,8 +33,27 @@ class SplunkDrivenCorrelationService:
     ROUTINE_EVENT_PATTERNS = [
         # DHCP - routine address management
         r"dhcp.*(?:ack|request|discover|offer|release|renew)",
-        r"dhcp_(?:ack|request|discover|offer|release|renew)",
+        r"dhcp_(?:ack|request|discover|offer|release|renew|lease|no_lease)",
+        r"dhcp_lease",
+        r"dhcp_no_lease",
         r"(?:ip|address).*(?:assigned|renewed|released)",
+        # WiFi client lifecycle (routine association/auth events)
+        r"\bwpa_(?:auth|deauth)\b",
+        r"\bassociation\b",
+        r"\bdisassociation\b",
+        r"\b8021x_(?:auth|deauth)\b",
+        r"\bsplash_auth\b",
+        # Meraki operational events (routine logging, not actionable)
+        r"\bevents_dropped",
+        r"\baps_association_reject\b",
+        # IDS alerts that were successfully blocked (no breach — informational)
+        r"ids.*alert.*blocked",
+        r"intrusion.*blocked",
+        r"blocked.*true",
+        # HTTP client errors (4xx) — noisy, usually misconfigured clients, not incidents
+        r"http\s*4\d{2}\b",
+        r"http.*(?:400|401|403|404|405|408|429)\b.*(?:error|bad request)",
+        r"bad\s*request",
         # Heartbeats and keepalives
         r"heartbeat",
         r"keepalive",
@@ -44,13 +63,13 @@ class SplunkDrivenCorrelationService:
         r"(?:auth|login).*(?:success|succeeded|successful)",
         r"user.*logged.*in",
         r"session.*(?:started|established)",
-        # Routine status messages
-        r"status.*(?:normal|ok|healthy|up|online)",
+        # Routine status messages (only health-check-style, not general status changes)
+        r"(?:health.*check|heartbeat|keepalive|monitoring).*(?:normal|ok|healthy|up|online)",
         r"interface.*(?:up|online)",
         r"link.*(?:up|established)",
-        # Normal traffic/connections
-        r"connection.*(?:established|opened)",
-        r"client.*(?:connected|associated)",
+        # Normal traffic/connections (only routine protocol-level, not VPN or security events)
+        r"(?:tcp|http|ssl|tls|socket).*connection.*(?:established|opened)",
+        r"(?:wifi|wireless|wlan|802\.11).*client.*(?:connected|associated)",
         r"(?:association|disassociation).*(?:success|complete)",
         # Scheduled tasks and maintenance
         r"scheduled.*(?:task|job|backup)",
@@ -502,16 +521,14 @@ class SplunkDrivenCorrelationService:
         # Extract key identifying fields
         components = []
 
-        # 1. MANDATORY: Network ID - prevents cross-network grouping
+        # 1. Network ID - prevents cross-network grouping
         network_id, _ = self._extract_network_info(raw_event)
         if network_id:
             components.append(f"network:{network_id}")
         else:
-            # No network ID = unique fingerprint (won't group with others)
-            import uuid
-            unique_id = uuid.uuid4().hex[:8]
-            components.append(f"network:unknown-{unique_id}")
-            logger.debug(f"Event has no network_id, assigned unique fingerprint suffix: {unique_id}")
+            # No network ID — group by title so identical events still merge
+            # (e.g., all "HTTP 400 Errors" from the same source get grouped)
+            components.append("network:unknown")
 
         # 2. Event type/category (for grouping similar issues within same network)
         event_type = (
@@ -613,6 +630,7 @@ class SplunkDrivenCorrelationService:
 
         if not splunk_events:
             logger.info("No Splunk events found - no incidents to create")
+            self._last_run_stats = {"events_found": 0, "events_filtered": 0}
             return []
 
         # Step 1b: Filter out routine/normal events
@@ -620,6 +638,9 @@ class SplunkDrivenCorrelationService:
         filtered_events = [e for e in splunk_events if not self._is_routine_event(e)]
         filtered_count = len(splunk_events) - len(filtered_events)
         logger.info(f"  → Filtered out {filtered_count} routine events, {len(filtered_events)} remaining")
+
+        # Track stats for callers
+        self._last_run_stats = {"events_found": len(splunk_events), "events_filtered": filtered_count}
 
         if not filtered_events:
             logger.info("All events were routine - no incidents to create")
@@ -629,6 +650,15 @@ class SplunkDrivenCorrelationService:
         logger.info("Step 1c: Grouping similar events to prevent duplicates...")
         grouped_events = self._group_similar_events(filtered_events)
         logger.info(f"  → Grouped into {len(grouped_events)} unique event types")
+
+        # Cap the number of groups to process to avoid extremely long runs.
+        # Prioritize groups with more occurrences (likely real issues, not noise).
+        MAX_EVENT_GROUPS = 50
+        if len(grouped_events) > MAX_EVENT_GROUPS:
+            grouped_events.sort(key=lambda e: e.get("_grouped_count", 1), reverse=True)
+            skipped = len(grouped_events) - MAX_EVENT_GROUPS
+            grouped_events = grouped_events[:MAX_EVENT_GROUPS]
+            logger.warning(f"  → Capped to {MAX_EVENT_GROUPS} groups (skipped {skipped} low-count groups)")
 
         for i, event in enumerate(grouped_events, 1):
             count = event.get("_grouped_count", 1)
@@ -726,6 +756,19 @@ class SplunkDrivenCorrelationService:
         splunk_username = await config_service.get_config("splunk_username")
         splunk_password = await config_service.get_config("splunk_password")
 
+        # Get SSL verification setting from database (default False for self-signed certs)
+        splunk_verify_ssl_str = await config_service.get_config("splunk_verify_ssl")
+        splunk_verify_ssl = splunk_verify_ssl_str.lower() == "true" if splunk_verify_ssl_str else False
+
+        # Get configurable Splunk query settings
+        # splunk_correlation_indexes: comma-separated list of indexes (default: * for all)
+        # splunk_correlation_query: custom SPL query (overrides default if set)
+        # splunk_correlation_limit: max events to fetch (default: 500)
+        splunk_indexes = await config_service.get_config("splunk_correlation_indexes")
+        splunk_custom_query = await config_service.get_config("splunk_correlation_query")
+        splunk_limit_str = await config_service.get_config("splunk_correlation_limit")
+        splunk_limit = int(splunk_limit_str) if splunk_limit_str else 500
+
         credentials_list = []
 
         # Add system_config Splunk if configured
@@ -736,7 +779,7 @@ class SplunkDrivenCorrelationService:
                 "api_key": splunk_bearer_token,
                 "username": splunk_username,
                 "password": splunk_password,
-                "verify_ssl": False,
+                "verify_ssl": splunk_verify_ssl,
             })
 
         # Also check clusters table for backward compatibility
@@ -791,10 +834,36 @@ class SplunkDrivenCorrelationService:
                 earliest_time = f"-{hours}h"
 
                 async with httpx.AsyncClient(verify=credentials.get("verify_ssl", False), timeout=60.0) as client:
-                    # Create search job - use broad search, AI will filter
-                    search_query = f'search earliest={earliest_time} index=* | head 100'
+                    # Build optimized search query
+                    # Priority: custom query > indexed query with filters > fallback broad query
+                    if splunk_custom_query:
+                        # User-defined custom query - use as-is with time filter
+                        search_query = f'search earliest={earliest_time} {splunk_custom_query} | head {splunk_limit}'
+                        logger.info(f"      Using custom correlation query")
+                    elif splunk_indexes:
+                        # User-specified indexes with severity filtering
+                        index_list = [idx.strip() for idx in splunk_indexes.split(",") if idx.strip()]
+                        index_clause = " OR ".join([f'index="{idx}"' for idx in index_list])
+                        search_query = f'search earliest={earliest_time} ({index_clause}) | head {splunk_limit}'
+                        logger.info(f"      Searching indexes: {index_list}")
+                    else:
+                        # Smart default: search for notable/alert events across common indexes
+                        # This query prioritizes actionable events:
+                        # 1. Searches common network/security indexes
+                        # 2. Filters for events with severity or alert indicators
+                        # 3. Falls back to all indexes if no matches
+                        search_query = f'''search earliest={earliest_time} (
+                            (index=meraki OR index=cisco OR index=network OR index=security OR index=main OR index=notable OR index=*)
+                            AND (
+                                severity=* OR priority=* OR alert=* OR critical OR high OR warning OR error
+                                OR type="*_down" OR type="*_offline" OR type="*_failed"
+                                OR "packet loss" OR "high latency" OR "connectivity" OR "vpn"
+                                OR sourcetype=meraki:* OR sourcetype=cisco:*
+                            )
+                        ) | head {splunk_limit}'''
+                        logger.info(f"      Using smart default query (filtering for notable events)")
 
-                    logger.info(f"      Creating search job with query: {search_query}")
+                    logger.info(f"      Creating search job with limit: {splunk_limit} events")
                     create_job_response = await client.post(
                         f"{credentials['base_url']}/services/search/jobs",
                         headers=headers,
@@ -843,7 +912,7 @@ class SplunkDrivenCorrelationService:
                     results_response = await client.get(
                         f"{credentials['base_url']}/services/search/jobs/{job_id}/results",
                         headers=headers,
-                        params={"output_mode": "json", "count": 100},
+                        params={"output_mode": "json", "count": splunk_limit},
                     )
 
                     logger.info(f"      Results response: HTTP {results_response.status_code}")
@@ -959,7 +1028,7 @@ class SplunkDrivenCorrelationService:
                         )
 
                         events.append({
-                            "organization": cluster.name,
+                            "organization": credentials["name"],
                             "raw_event": {**event, **parsed_fields},  # Merge parsed JSON fields
                             "title": event_title,
                             "description": event_desc,
@@ -977,7 +1046,7 @@ class SplunkDrivenCorrelationService:
                     logger.info(f"      → Found {len(splunk_events)} events")
 
             except Exception as e:
-                logger.error(f"      Error fetching from {cluster.name}: {e}")
+                logger.error(f"      Error fetching from {credentials['name']}: {e}")
 
         return events
 
@@ -1083,198 +1152,609 @@ class SplunkDrivenCorrelationService:
     async def _fetch_meraki_context(self, resources: Dict[str, Set[str]]) -> List[Dict[str, Any]]:
         """Fetch Meraki context for the affected resources.
 
+        Uses credential_pool to find Meraki credentials (from system_config or clusters),
+        then fetches device info, status, uplink health, and network context.
+
         Args:
-            resources: Dictionary of resource identifiers
+            resources: Dictionary of resource identifiers (device_serials, network_ids, ips, etc.)
 
         Returns:
-            List of Meraki context dictionaries (devices, networks, etc.)
+            List of Meraki context dictionaries with enriched device and network data
         """
         context = []
+        base_url = "https://api.meraki.com/api/v1"
 
-        # Get all Meraki organizations
-        clusters = await self.credential_manager.list_clusters(active_only=True)
+        # Use credential_pool to get Meraki credentials (includes system_config AND clusters)
+        try:
+            from src.services.credential_pool import get_initialized_pool
+            pool = await get_initialized_pool()
+            meraki_cred = pool.get_for_meraki()
 
-        for cluster in clusters:
-            try:
-                credentials = await self.credential_manager.get_credentials(cluster.name)
-                if not credentials:
-                    continue
+            if not meraki_cred:
+                logger.debug("    No Meraki credentials found in credential_pool")
+                return context
 
-                # Check if this is Meraki
-                base_url = credentials["base_url"].lower()
-                if "meraki" not in base_url:
-                    continue
-            except Exception as e:
-                logger.debug(f"Skipping cluster {cluster.name}: {e}")
-                continue
+            api_key = (
+                meraki_cred.credentials.get("api_key") or
+                meraki_cred.credentials.get("meraki_api_key")
+            )
+            if not api_key:
+                logger.warning("    Meraki credentials found but no API key")
+                return context
 
-            try:
-                headers = {
-                    "X-Cisco-Meraki-API-Key": credentials["api_key"],
-                    "Content-Type": "application/json",
-                }
+            cred_name = meraki_cred.cluster_name or "system_config"
+            logger.debug(f"    Using Meraki credentials from: {cred_name}")
 
-                async with httpx.AsyncClient(verify=credentials.get("verify_ssl", False), timeout=30.0) as client:
-                    # Get organization ID
-                    org_response = await client.get(
-                        f"{credentials['base_url']}/organizations", headers=headers
-                    )
+        except Exception as e:
+            logger.warning(f"    Error getting Meraki credentials from pool: {e}")
+            return context
 
-                    if org_response.status_code != 200:
-                        continue
+        headers = {
+            "X-Cisco-Meraki-API-Key": api_key,
+            "Content-Type": "application/json",
+        }
 
-                    orgs = org_response.json()
-                    if not orgs:
-                        continue
+        try:
+            async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
+                # Step 1: Get organization ID
+                org_response = await client.get(f"{base_url}/organizations", headers=headers)
+                if org_response.status_code != 200:
+                    logger.warning(f"    Failed to get Meraki orgs: HTTP {org_response.status_code}")
+                    return context
 
-                    org_id = orgs[0]["id"]
+                orgs = org_response.json()
+                if not orgs:
+                    logger.warning("    No Meraki organizations found")
+                    return context
 
-                    # Get all devices in the organization
-                    devices_response = await client.get(
-                        f"{credentials['base_url']}/organizations/{org_id}/devices",
+                org_id = orgs[0]["id"]
+                org_name = orgs[0].get("name", "Unknown")
+                logger.debug(f"    Using Meraki org: {org_name} ({org_id})")
+
+                # Step 2: Fetch devices with their statuses (combined endpoint)
+                devices_response = await client.get(
+                    f"{base_url}/organizations/{org_id}/devices/statuses",
+                    headers=headers,
+                )
+
+                devices = []
+                device_statuses = {}
+                if devices_response.status_code == 200:
+                    device_status_list = devices_response.json()
+                    # This endpoint returns device info WITH status
+                    for ds in device_status_list:
+                        device_statuses[ds.get("serial", "").upper()] = {
+                            "status": ds.get("status"),
+                            "lastReportedAt": ds.get("lastReportedAt"),
+                            "publicIp": ds.get("publicIp"),
+                            "lanIp": ds.get("lanIp"),
+                        }
+                    logger.debug(f"    Fetched status for {len(device_statuses)} devices")
+
+                # Step 3: Fetch full device details
+                devices_detail_response = await client.get(
+                    f"{base_url}/organizations/{org_id}/devices",
+                    headers=headers,
+                )
+                if devices_detail_response.status_code == 200:
+                    devices = devices_detail_response.json()
+                    logger.debug(f"    Fetched details for {len(devices)} devices")
+
+                # Step 4: Fetch uplink statuses for appliances (MX, Z-series)
+                uplink_statuses = {}
+                try:
+                    uplink_response = await client.get(
+                        f"{base_url}/organizations/{org_id}/appliance/uplink/statuses",
                         headers=headers,
                     )
+                    if uplink_response.status_code == 200:
+                        uplinks = uplink_response.json()
+                        for uplink in uplinks:
+                            serial = uplink.get("serial", "").upper()
+                            uplink_statuses[serial] = uplink.get("uplinks", [])
+                        logger.debug(f"    Fetched uplink status for {len(uplink_statuses)} appliances")
+                except Exception as e:
+                    logger.debug(f"    Could not fetch uplink statuses: {e}")
 
-                    if devices_response.status_code == 200:
-                        devices = devices_response.json()
+                # Step 4b: Fetch security events (IDS, malware, content filtering)
+                security_events = []
+                try:
+                    # Get security events from last 24 hours
+                    from datetime import datetime, timedelta
+                    t0 = (datetime.utcnow() - timedelta(hours=24)).isoformat() + "Z"
+                    t1 = datetime.utcnow().isoformat() + "Z"
 
-                        # Match devices by name, serial, or IP
-                        for device in devices:
-                            device_name = device.get("name", "").lower()
-                            device_serial = device.get("serial", "").lower()
-                            device_mac = device.get("mac", "").lower()
-                            device_ip = device.get("lanIp") or device.get("wan1Ip") or device.get("wan2Ip")
+                    security_response = await client.get(
+                        f"{base_url}/organizations/{org_id}/appliance/security/events",
+                        headers=headers,
+                        params={"t0": t0, "t1": t1, "perPage": 50},
+                    )
+                    if security_response.status_code == 200:
+                        events = security_response.json()
+                        if isinstance(events, list):
+                            security_events = events
+                        elif isinstance(events, dict):
+                            security_events = events.get("events", [])
+                        logger.debug(f"    Fetched {len(security_events)} security events")
 
-                            # Check if this device matches any of our resources
-                            matched = False
+                        # Add security events to context (these are critical for incident analysis)
+                        for event in security_events[:10]:  # Limit to 10 most recent
+                            context.append({
+                                "source": "meraki",
+                                "type": "security_event",
+                                "organization": org_name,
+                                "data": {
+                                    "eventType": event.get("eventType"),
+                                    "clientMac": event.get("clientMac"),
+                                    "clientIp": event.get("clientIp"),
+                                    "srcIp": event.get("srcIp"),
+                                    "destIp": event.get("destIp"),
+                                    "protocol": event.get("protocol"),
+                                    "ts": event.get("ts"),
+                                    "deviceSerial": event.get("deviceSerial"),
+                                    "message": event.get("message"),
+                                    "signature": event.get("signature"),
+                                    "priority": event.get("priority"),
+                                    "classification": event.get("classification"),
+                                    "blocked": event.get("blocked"),
+                                },
+                            })
+                except Exception as e:
+                    logger.debug(f"    Could not fetch security events: {e}")
 
-                            # Match by device serial
-                            for serial in resources["device_serials"]:
-                                if serial.lower() == device_serial:
-                                    matched = True
-                                    break
+                # Step 4c: Fetch loss and latency history for appliances
+                # This provides performance trends over time for matched devices
+                loss_latency_cache = {}
+                try:
+                    # Only fetch for devices that match our resources (to avoid too many API calls)
+                    # We'll populate this later when we have matched devices
+                    pass  # Will be populated per-device below
+                except Exception as e:
+                    logger.debug(f"    Could not fetch loss/latency data: {e}")
 
-                            # Match by MAC address
-                            if not matched:
-                                for mac in resources["mac_addresses"]:
-                                    if mac.lower() == device_mac:
-                                        matched = True
-                                        break
+                # Step 4d: Fetch organization-wide client summary
+                client_summary = {}
+                try:
+                    # Get top clients by usage for context
+                    from datetime import datetime, timedelta
+                    t0 = (datetime.utcnow() - timedelta(hours=24)).isoformat() + "Z"
+                    t1 = datetime.utcnow().isoformat() + "Z"
 
-                            # Match by hostname
-                            if not matched:
-                                for hostname in resources["hostnames"]:
-                                    if hostname.lower() in device_name or hostname.lower() == device_serial:
-                                        matched = True
-                                        break
+                    # Get organization-wide client count
+                    clients_response = await client.get(
+                        f"{base_url}/organizations/{org_id}/summary/top/clients/byUsage",
+                        headers=headers,
+                        params={"t0": t0, "t1": t1},
+                    )
+                    if clients_response.status_code == 200:
+                        top_clients = clients_response.json()
+                        if top_clients:
+                            client_summary = {
+                                "topClientsCount": len(top_clients),
+                                "topClients": [
+                                    {
+                                        "name": c.get("name") or c.get("mac", "Unknown"),
+                                        "mac": c.get("mac"),
+                                        "usage": c.get("usage", {}).get("total", 0),
+                                        "network": c.get("network", {}).get("name"),
+                                    }
+                                    for c in top_clients[:5]  # Top 5 clients
+                                ],
+                            }
+                            logger.debug(f"    Fetched top {len(top_clients)} clients summary")
+                except Exception as e:
+                    logger.debug(f"    Could not fetch client summary: {e}")
 
-                            # Match by IP
-                            if not matched and device_ip and device_ip in resources["ips"]:
+                # Step 5: Build network cache for quick lookup
+                networks_cache = {}
+                for device in devices:
+                    network_id = device.get("networkId")
+                    if network_id and network_id not in networks_cache:
+                        try:
+                            net_response = await client.get(
+                                f"{base_url}/networks/{network_id}",
+                                headers=headers,
+                            )
+                            if net_response.status_code == 200:
+                                networks_cache[network_id] = net_response.json()
+                        except Exception:
+                            pass
+
+                # Step 6: Match devices against resources
+                matched_devices = set()  # Track matched serials to avoid duplicates
+
+                for device in devices:
+                    device_name = device.get("name", "").lower()
+                    device_serial = device.get("serial", "").upper()
+                    device_mac = device.get("mac", "").lower() if device.get("mac") else ""
+                    device_network_id = device.get("networkId", "")
+                    device_ips = {
+                        device.get("lanIp"),
+                        device.get("wan1Ip"),
+                        device.get("wan2Ip"),
+                    }
+                    device_ips.discard(None)
+
+                    matched = False
+                    match_reason = ""
+
+                    # Match by device serial (highest priority)
+                    for serial in resources["device_serials"]:
+                        if serial.upper() == device_serial:
+                            matched = True
+                            match_reason = f"serial:{serial}"
+                            break
+
+                    # Match by network_id (if device is in affected network)
+                    if not matched and device_network_id:
+                        for network_id in resources["network_ids"]:
+                            if network_id == device_network_id:
                                 matched = True
+                                match_reason = f"network:{network_id}"
+                                break
 
-                            if matched:
-                                context.append({
-                                    "source": "meraki",
-                                    "type": "device",
-                                    "organization": cluster.name,
-                                    "data": device,
-                                })
+                    # Match by MAC address
+                    if not matched and device_mac:
+                        for mac in resources["mac_addresses"]:
+                            if mac.lower().replace(":", "").replace("-", "") == device_mac.replace(":", ""):
+                                matched = True
+                                match_reason = f"mac:{mac}"
+                                break
 
-            except Exception as e:
-                logger.error(f"      Error fetching Meraki context: {e}")
+                    # Match by IP address
+                    if not matched:
+                        for ip in resources["ips"]:
+                            if ip in device_ips:
+                                matched = True
+                                match_reason = f"ip:{ip}"
+                                break
+
+                    if matched and device_serial not in matched_devices:
+                        matched_devices.add(device_serial)
+
+                        # Enrich device data with status
+                        status_info = device_statuses.get(device_serial, {})
+                        device["status"] = status_info.get("status", "unknown")
+                        device["lastReportedAt"] = status_info.get("lastReportedAt")
+
+                        # Enrich with uplink health for appliances
+                        if device_serial in uplink_statuses:
+                            device["uplinkHealth"] = {}
+                            for uplink in uplink_statuses[device_serial]:
+                                interface = uplink.get("interface", "unknown")
+                                device["uplinkHealth"][interface] = {
+                                    "status": uplink.get("status"),
+                                    "ip": uplink.get("ip"),
+                                    "gateway": uplink.get("gateway"),
+                                    "publicIp": uplink.get("publicIp"),
+                                    "primaryDns": uplink.get("primaryDns"),
+                                }
+
+                        # Fetch loss and latency history for this device (appliances only)
+                        device_model = device.get("model", "").upper()
+                        if device_model.startswith(("MX", "Z", "MG")):  # Appliances and cellular gateways
+                            try:
+                                # Get uplink IP for loss/latency check (use gateway or public IP)
+                                uplink_ip = None
+                                if device_serial in uplink_statuses:
+                                    for uplink in uplink_statuses[device_serial]:
+                                        if uplink.get("status") == "active":
+                                            uplink_ip = uplink.get("gateway") or uplink.get("publicIp")
+                                            break
+
+                                if uplink_ip:
+                                    # Fetch loss and latency history (last 2 hours)
+                                    from datetime import datetime, timedelta
+                                    t0 = (datetime.utcnow() - timedelta(hours=2)).isoformat() + "Z"
+                                    t1 = datetime.utcnow().isoformat() + "Z"
+
+                                    ll_response = await client.get(
+                                        f"{base_url}/devices/{device_serial}/lossAndLatencyHistory",
+                                        headers=headers,
+                                        params={"ip": uplink_ip, "t0": t0, "t1": t1, "resolution": 300},
+                                    )
+                                    if ll_response.status_code == 200:
+                                        ll_data = ll_response.json()
+                                        if ll_data:
+                                            # Calculate average loss and latency
+                                            loss_values = [d.get("lossPercent", 0) for d in ll_data if d.get("lossPercent") is not None]
+                                            latency_values = [d.get("latencyMs", 0) for d in ll_data if d.get("latencyMs") is not None]
+
+                                            device["lossLatencyHistory"] = {
+                                                "targetIp": uplink_ip,
+                                                "samples": len(ll_data),
+                                                "avgLossPercent": round(sum(loss_values) / len(loss_values), 2) if loss_values else 0,
+                                                "maxLossPercent": max(loss_values) if loss_values else 0,
+                                                "avgLatencyMs": round(sum(latency_values) / len(latency_values), 1) if latency_values else 0,
+                                                "maxLatencyMs": max(latency_values) if latency_values else 0,
+                                                "recentData": ll_data[-5:] if len(ll_data) > 5 else ll_data,  # Last 5 data points
+                                            }
+                                            logger.debug(f"      Got loss/latency history for {device_serial}: avg loss={device['lossLatencyHistory']['avgLossPercent']}%")
+                            except Exception as e:
+                                logger.debug(f"      Could not fetch loss/latency for {device_serial}: {e}")
+
+                        # Add client summary to device context
+                        if client_summary:
+                            device["clientSummary"] = client_summary
+
+                        # Add network context
+                        network_info = None
+                        if device_network_id and device_network_id in networks_cache:
+                            net = networks_cache[device_network_id]
+                            network_info = {
+                                "id": net.get("id"),
+                                "name": net.get("name"),
+                                "type": net.get("productTypes", []),
+                                "timeZone": net.get("timeZone"),
+                                "tags": net.get("tags", []),
+                            }
+
+                        context.append({
+                            "source": "meraki",
+                            "type": "device",
+                            "organization": org_name,
+                            "matchReason": match_reason,
+                            "data": device,
+                            "network": network_info,
+                        })
+                        logger.debug(f"      Matched device: {device.get('name')} ({device_serial}) via {match_reason}")
+
+                logger.info(f"    → Matched {len(context)} Meraki devices")
+
+        except Exception as e:
+            logger.error(f"    Error fetching Meraki context: {e}", exc_info=True)
 
         return context
 
     async def _fetch_thousandeyes_context(self, resources: Dict[str, Set[str]]) -> List[Dict[str, Any]]:
         """Fetch ThousandEyes context for the affected resources.
 
+        Uses credential_pool to find ThousandEyes credentials, then fetches:
+        - Active alerts
+        - Tests matching affected resources
+        - Test results with metrics
+        - Agent health summary
+
         Args:
-            resources: Dictionary of resource identifiers
+            resources: Dictionary of resource identifiers (ips, hostnames, etc.)
 
         Returns:
-            List of ThousandEyes context dictionaries (tests, results, etc.)
+            List of ThousandEyes context dictionaries with alerts, tests, and results
         """
         context = []
+        base_url = "https://api.thousandeyes.com/v7"
 
-        # Get all ThousandEyes organizations
-        clusters = await self.credential_manager.list_clusters(active_only=True)
+        # Use credential_pool to get ThousandEyes credentials
+        try:
+            from src.services.credential_pool import get_initialized_pool
+            pool = await get_initialized_pool()
+            te_cred = pool.get_for_thousandeyes()
 
-        for cluster in clusters:
-            credentials = await self.credential_manager.get_credentials(cluster.name)
-            if not credentials:
-                continue
+            if not te_cred:
+                logger.debug("    No ThousandEyes credentials found in credential_pool")
+                return context
 
-            # Check if this is ThousandEyes
-            base_url = credentials["base_url"].lower()
-            if "thousandeyes" not in base_url:
-                continue
+            api_key = (
+                te_cred.credentials.get("api_key") or
+                te_cred.credentials.get("thousandeyes_token") or
+                te_cred.credentials.get("bearer_token")
+            )
+            if not api_key:
+                logger.warning("    ThousandEyes credentials found but no API key/token")
+                return context
 
-            try:
-                headers = {
-                    "Authorization": f"Bearer {credentials['api_key']}",
-                    "Content-Type": "application/json",
-                    "Accept": "application/hal+json",
-                }
+            cred_name = te_cred.cluster_name or "system_config"
+            logger.debug(f"    Using ThousandEyes credentials from: {cred_name}")
 
-                # Ensure base URL includes /v7 path
-                if not base_url.endswith('/v7'):
-                    base_url = f"{base_url}/v7"
+        except Exception as e:
+            logger.warning(f"    Error getting ThousandEyes credentials from pool: {e}")
+            return context
 
-                async with httpx.AsyncClient(verify=credentials.get("verify_ssl", False), timeout=30.0) as client:
-                    # Get all tests
-                    tests_response = await client.get(
-                        f"{base_url}/tests",
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/hal+json",
+        }
+
+        try:
+            async with httpx.AsyncClient(verify=True, timeout=30.0) as client:
+                # Step 1: Fetch active alerts (critical for incident correlation)
+                try:
+                    alerts_response = await client.get(
+                        f"{base_url}/alerts",
                         headers=headers,
+                        params={"window": "1d"},
                     )
+                    if alerts_response.status_code == 200:
+                        alerts_data = alerts_response.json()
+                        alerts = alerts_data.get("alert", [])
+                        active_alerts = [a for a in alerts if a.get("active", 0) == 1]
 
-                    if tests_response.status_code != 200:
-                        continue
+                        # Add active alerts to context
+                        for alert in active_alerts:
+                            alert_target = alert.get("testName", "") + " " + alert.get("ruleName", "")
 
-                    tests_data = tests_response.json()
-                    tests = tests_data.get("tests", [])
+                            # Check if alert relates to our resources
+                            matched = False
+                            for ip in resources["ips"]:
+                                if ip in alert_target:
+                                    matched = True
+                                    break
+                            for hostname in resources["hostnames"]:
+                                if hostname.lower() in alert_target.lower():
+                                    matched = True
+                                    break
 
-                    # Match tests by target IPs or hostnames
-                    for test in tests:
-                        test_target = test.get("server") or test.get("url") or test.get("targetName", "")
-
-                        matched = False
-
-                        # Check if target matches any IP
-                        for ip in resources["ips"]:
-                            if ip in test_target:
-                                matched = True
-                                break
-
-                        # Check if target matches any hostname
-                        for hostname in resources["hostnames"]:
-                            if hostname.lower() in test_target.lower():
-                                matched = True
-                                break
-
-                        if matched:
-                            # Fetch recent results for this test
-                            test_id = test.get("testId")
-                            test_type = test.get("type", "agent-to-server")
-
-                            results_response = await client.get(
-                                f"{base_url}/tests/{test_id}/results",
-                                headers=headers,
-                                params={"window": "12h"},
-                            )
-
-                            if results_response.status_code == 200:
-                                results_data = results_response.json()
-
+                            # Include all alerts if no specific resource match (could be related)
+                            if matched or not resources["ips"] and not resources["hostnames"]:
                                 context.append({
                                     "source": "thousandeyes",
-                                    "type": "test",
-                                    "organization": cluster.name,
-                                    "test": test,
-                                    "results": results_data.get("results", []),
+                                    "type": "alert",
+                                    "organization": cred_name,
+                                    "data": {
+                                        "alertId": alert.get("alertId"),
+                                        "testName": alert.get("testName"),
+                                        "ruleName": alert.get("ruleName"),
+                                        "alertState": "active" if alert.get("active") else "cleared",
+                                        "severity": alert.get("severity"),
+                                        "dateStart": alert.get("dateStart"),
+                                        "violationCount": alert.get("violationCount"),
+                                        "agents": alert.get("agents", []),
+                                    },
                                 })
 
-            except Exception as e:
-                logger.error(f"      Error fetching ThousandEyes context: {e}")
+                        logger.debug(f"    Fetched {len(active_alerts)} active ThousandEyes alerts")
+                except Exception as e:
+                    logger.debug(f"    Could not fetch ThousandEyes alerts: {e}")
+
+                # Step 2: Fetch agent health summary
+                try:
+                    agents_response = await client.get(
+                        f"{base_url}/agents",
+                        headers=headers,
+                    )
+                    if agents_response.status_code == 200:
+                        agents_data = agents_response.json()
+                        agents = agents_data.get("agents", [])
+                        online_agents = [a for a in agents if a.get("enabled", 0) == 1]
+                        offline_agents = [a for a in agents if a.get("enabled", 0) == 0]
+
+                        # Add agent health summary
+                        context.append({
+                            "source": "thousandeyes",
+                            "type": "agent_health",
+                            "organization": cred_name,
+                            "data": {
+                                "totalAgents": len(agents),
+                                "onlineAgents": len(online_agents),
+                                "offlineAgents": len(offline_agents),
+                                "offlineAgentNames": [a.get("agentName") for a in offline_agents[:5]],
+                            },
+                        })
+                        logger.debug(f"    ThousandEyes agents: {len(online_agents)} online, {len(offline_agents)} offline")
+                except Exception as e:
+                    logger.debug(f"    Could not fetch ThousandEyes agents: {e}")
+
+                # Step 3: Fetch tests and match against resources
+                tests_response = await client.get(
+                    f"{base_url}/tests",
+                    headers=headers,
+                )
+
+                if tests_response.status_code != 200:
+                    logger.warning(f"    Failed to get ThousandEyes tests: HTTP {tests_response.status_code}")
+                    return context
+
+                tests_data = tests_response.json()
+                tests = tests_data.get("tests", [])
+                logger.debug(f"    Fetched {len(tests)} ThousandEyes tests")
+
+                # Match tests by target IPs or hostnames
+                matched_tests = 0
+                for test in tests:
+                    test_target = (
+                        test.get("server", "") +
+                        test.get("url", "") +
+                        test.get("targetName", "") +
+                        test.get("testName", "")
+                    ).lower()
+
+                    matched = False
+                    match_reason = ""
+
+                    # Check if target matches any IP
+                    for ip in resources["ips"]:
+                        if ip in test_target:
+                            matched = True
+                            match_reason = f"ip:{ip}"
+                            break
+
+                    # Check if target matches any hostname
+                    if not matched:
+                        for hostname in resources["hostnames"]:
+                            if hostname.lower() in test_target:
+                                matched = True
+                                match_reason = f"hostname:{hostname}"
+                                break
+
+                    if matched:
+                        matched_tests += 1
+                        test_id = test.get("testId")
+                        test_type = test.get("type", "agent-to-server")
+
+                        # Fetch recent results for this test
+                        test_context = {
+                            "source": "thousandeyes",
+                            "type": "test",
+                            "organization": cred_name,
+                            "matchReason": match_reason,
+                            "test": {
+                                "testId": test_id,
+                                "testName": test.get("testName"),
+                                "type": test_type,
+                                "server": test.get("server"),
+                                "url": test.get("url"),
+                                "enabled": test.get("enabled", 1),
+                                "interval": test.get("interval"),
+                            },
+                            "results": None,
+                            "metrics": None,
+                        }
+
+                        # Fetch test results based on test type
+                        try:
+                            # Get network results (loss, latency, jitter)
+                            if test_type in ["agent-to-server", "agent-to-agent", "network"]:
+                                results_response = await client.get(
+                                    f"{base_url}/test-results/{test_id}/network",
+                                    headers=headers,
+                                    params={"window": "12h"},
+                                )
+                                if results_response.status_code == 200:
+                                    results = results_response.json().get("results", [])
+                                    if results:
+                                        # Calculate summary metrics
+                                        avg_loss = sum(r.get("loss", 0) for r in results) / len(results)
+                                        avg_latency = sum(r.get("avgLatency", 0) for r in results) / len(results)
+                                        max_latency = max(r.get("maxLatency", 0) for r in results)
+
+                                        test_context["metrics"] = {
+                                            "avgLossPercent": round(avg_loss, 2),
+                                            "avgLatencyMs": round(avg_latency, 2),
+                                            "maxLatencyMs": round(max_latency, 2),
+                                            "sampleCount": len(results),
+                                        }
+                                        test_context["results"] = results[:5]  # Last 5 results
+
+                            # Get HTTP results (response time, errors)
+                            elif test_type in ["http-server", "page-load", "web-transactions"]:
+                                results_response = await client.get(
+                                    f"{base_url}/test-results/{test_id}/http-server",
+                                    headers=headers,
+                                    params={"window": "12h"},
+                                )
+                                if results_response.status_code == 200:
+                                    results = results_response.json().get("results", [])
+                                    if results:
+                                        avg_response = sum(r.get("responseTime", 0) for r in results) / len(results)
+                                        error_count = sum(1 for r in results if r.get("errorType"))
+
+                                        test_context["metrics"] = {
+                                            "avgResponseTimeMs": round(avg_response, 2),
+                                            "errorCount": error_count,
+                                            "sampleCount": len(results),
+                                        }
+                                        test_context["results"] = results[:5]
+
+                        except Exception as e:
+                            logger.debug(f"    Could not fetch results for test {test_id}: {e}")
+
+                        context.append(test_context)
+
+                logger.info(f"    → Matched {matched_tests} ThousandEyes tests")
+
+        except Exception as e:
+            logger.error(f"    Error fetching ThousandEyes context: {e}", exc_info=True)
 
         return context
 
@@ -1347,16 +1827,146 @@ AFFECTED RESOURCES:
   Hostnames: {', '.join(resources['hostnames']) if resources['hostnames'] else 'None'}
   Devices: {', '.join(resources['devices']) if resources['devices'] else 'None'}
 
-MERAKI CONTEXT ({len(meraki_context)} devices):
+MERAKI CONTEXT:
 """
-            for ctx in meraki_context[:5]:  # Limit to first 5
-                device = ctx.get("data", {})
-                summary += f"  - {device.get('name')}: Status={device.get('status')}, Model={device.get('model')}\n"
+            # Separate Meraki devices from security events
+            meraki_devices = [c for c in meraki_context if c.get("type") == "device"]
+            meraki_security = [c for c in meraki_context if c.get("type") == "security_event"]
 
-            summary += f"\nTHOUSANDEYES CONTEXT ({len(te_context)} tests):\n"
-            for ctx in te_context[:5]:  # Limit to first 5
-                test = ctx.get("test", {})
-                summary += f"  - {test.get('testName')}: Type={test.get('type')}\n"
+            # Security events (critical - show first)
+            if meraki_security:
+                summary += f"  Security Events ({len(meraki_security)} in last 24h):\n"
+                for ctx in meraki_security[:5]:
+                    event = ctx.get("data", {})
+                    event_type = event.get("eventType", "unknown")
+                    src_ip = event.get("srcIp") or event.get("clientIp", "")
+                    dest_ip = event.get("destIp", "")
+                    blocked = "BLOCKED" if event.get("blocked") else "detected"
+                    classification = event.get("classification", "")
+                    signature = event.get("signature", "")
+
+                    summary += f"    - {event_type}: {src_ip} → {dest_ip} [{blocked}]\n"
+                    if signature:
+                        summary += f"      Signature: {signature}\n"
+                    if classification:
+                        summary += f"      Classification: {classification}\n"
+
+            # Devices
+            summary += f"  Devices ({len(meraki_devices)} matched):\n"
+            for ctx in meraki_devices[:5]:  # Limit to first 5
+                device = ctx.get("data", {})
+                network = ctx.get("network", {})
+                match_reason = ctx.get("matchReason", "")
+
+                # Basic device info
+                device_line = f"    Device: {device.get('name', 'Unknown')} ({device.get('model', 'Unknown')})\n"
+                device_line += f"      Serial: {device.get('serial')}\n"
+                device_line += f"      Status: {device.get('status', 'unknown')}"
+                if device.get('lastReportedAt'):
+                    device_line += f" (last seen: {device.get('lastReportedAt')})"
+                device_line += "\n"
+
+                # IPs
+                ips = []
+                if device.get('lanIp'):
+                    ips.append(f"LAN={device.get('lanIp')}")
+                if device.get('wan1Ip'):
+                    ips.append(f"WAN1={device.get('wan1Ip')}")
+                if device.get('wan2Ip'):
+                    ips.append(f"WAN2={device.get('wan2Ip')}")
+                if ips:
+                    device_line += f"      IPs: {', '.join(ips)}\n"
+
+                # Uplink health (for appliances)
+                uplink_health = device.get('uplinkHealth', {})
+                if uplink_health:
+                    uplink_info = []
+                    for iface, health in uplink_health.items():
+                        status = health.get('status', 'unknown')
+                        ip = health.get('publicIp') or health.get('ip', '')
+                        uplink_info.append(f"{iface}={status}" + (f" ({ip})" if ip else ""))
+                    if uplink_info:
+                        device_line += f"      Uplinks: {', '.join(uplink_info)}\n"
+
+                # Loss/latency history (for appliances)
+                ll_history = device.get('lossLatencyHistory', {})
+                if ll_history:
+                    device_line += f"      Performance (last 2h): "
+                    device_line += f"Loss avg={ll_history.get('avgLossPercent', 0)}% max={ll_history.get('maxLossPercent', 0)}%, "
+                    device_line += f"Latency avg={ll_history.get('avgLatencyMs', 0)}ms max={ll_history.get('maxLatencyMs', 0)}ms\n"
+                    # Flag if there are performance issues
+                    if ll_history.get('avgLossPercent', 0) > 1 or ll_history.get('maxLossPercent', 0) > 5:
+                        device_line += f"      ⚠ ELEVATED PACKET LOSS DETECTED\n"
+                    if ll_history.get('avgLatencyMs', 0) > 100 or ll_history.get('maxLatencyMs', 0) > 200:
+                        device_line += f"      ⚠ HIGH LATENCY DETECTED\n"
+
+                # Network context
+                if network:
+                    device_line += f"      Network: {network.get('name', 'Unknown')} ({network.get('id', '')})\n"
+                    if network.get('type'):
+                        device_line += f"      Network Type: {', '.join(network.get('type', []))}\n"
+
+                # Match reason (for debugging)
+                if match_reason:
+                    device_line += f"      Matched via: {match_reason}\n"
+
+                summary += device_line
+
+            # Client summary (organization-wide)
+            if meraki_devices:
+                # Get client summary from first device (it's org-wide)
+                first_device = meraki_devices[0].get("data", {})
+                client_summary = first_device.get("clientSummary", {})
+                if client_summary:
+                    summary += f"  Client Summary:\n"
+                    summary += f"    Top clients by usage (last 24h):\n"
+                    for c in client_summary.get("topClients", []):
+                        usage_mb = round(c.get("usage", 0) / (1024 * 1024), 1)
+                        summary += f"      - {c.get('name', 'Unknown')}: {usage_mb} MB on {c.get('network', 'Unknown')}\n"
+
+            # ThousandEyes context - separate alerts, agent health, and tests
+            te_alerts = [c for c in te_context if c.get("type") == "alert"]
+            te_agent_health = [c for c in te_context if c.get("type") == "agent_health"]
+            te_tests = [c for c in te_context if c.get("type") == "test"]
+
+            summary += f"\nTHOUSANDEYES CONTEXT:\n"
+
+            # Active alerts
+            if te_alerts:
+                summary += f"  Active Alerts ({len(te_alerts)}):\n"
+                for ctx in te_alerts[:3]:
+                    alert = ctx.get("data", {})
+                    summary += f"    - {alert.get('testName')}: {alert.get('ruleName')}\n"
+                    summary += f"      Severity: {alert.get('severity')}, Violations: {alert.get('violationCount')}\n"
+
+            # Agent health summary
+            for ctx in te_agent_health:
+                health = ctx.get("data", {})
+                summary += f"  Agent Health: {health.get('onlineAgents', 0)}/{health.get('totalAgents', 0)} online\n"
+                if health.get('offlineAgentNames'):
+                    summary += f"    Offline: {', '.join(health.get('offlineAgentNames', []))}\n"
+
+            # Test results with metrics
+            if te_tests:
+                summary += f"  Tests ({len(te_tests)} matched):\n"
+                for ctx in te_tests[:5]:
+                    test = ctx.get("test", {})
+                    metrics = ctx.get("metrics", {})
+                    match_reason = ctx.get("matchReason", "")
+
+                    test_line = f"    - {test.get('testName')} ({test.get('type')})\n"
+                    if metrics:
+                        if "avgLossPercent" in metrics:
+                            test_line += f"      Loss: {metrics.get('avgLossPercent')}%, "
+                            test_line += f"Latency: {metrics.get('avgLatencyMs')}ms avg, {metrics.get('maxLatencyMs')}ms max\n"
+                        elif "avgResponseTimeMs" in metrics:
+                            test_line += f"      Response: {metrics.get('avgResponseTimeMs')}ms, Errors: {metrics.get('errorCount')}\n"
+                    if match_reason:
+                        test_line += f"      Matched via: {match_reason}\n"
+                    summary += test_line
+
+            if not te_alerts and not te_tests and not te_agent_health:
+                summary += "  No ThousandEyes data available\n"
 
             incident_summaries.append(summary)
 
@@ -1394,32 +2004,41 @@ MERGE DECISION:
 
 IMPORTANT GUIDELINES:
 1. Each event group may contain multiple similar occurrences of the same issue - these have already been deduplicated.
-2. CREATE incidents for events that indicate problems, failures, or require attention:
-   - Authentication failures (401 Unauthorized, Invalid API key, credential errors)
-   - Configuration errors affecting data collection or integrations
-   - Network device issues (offline, connectivity problems, high latency)
-   - Security alerts (intrusion attempts, policy violations)
-   - Service degradation or outages
-   - Warning or error level events from monitoring systems
-3. DO NOT create incidents ONLY for truly routine operations such as:
-   - DHCP address assignments or renewals (unless they fail)
-   - Successful authentication events
-   - Normal heartbeats or keepalives showing healthy status
-   - Info-level logs with no issues indicated
-4. Be INCLUSIVE - if there's any indication of a problem (error, warning, failure, unauthorized), CREATE an incident.
-5. If an event group appears to be purely info/routine activity with no issues, return skip_incident: true for that group.
+2. CREATE incidents ONLY for events that pose a real risk or require human action:
+   - Device offline, unreachable, or dormant (VPN down, uplink disconnected)
+   - Security breaches or unblocked intrusion attempts
+   - Sustained connectivity or performance degradation (high packet loss, latency spikes)
+   - Service outages affecting users
+   - Configuration errors causing data loss or integration failures
+3. DO NOT create incidents for:
+   - IDS alerts that were BLOCKED — the firewall handled it, no breach occurred. Skip these.
+   - HTTP 4xx client errors (400 Bad Request, 401 Unauthorized, 404 Not Found) — these are client-side issues, not network incidents
+   - DHCP, WiFi association, authentication lifecycle events
+   - Info-level operational logs, heartbeats, keepalives
+   - Normal syslog noise from network devices
+   - Events where the system already auto-remediated (e.g., blocked attacks, auto-reconnects)
+4. Be SELECTIVE — only create incidents for things a network operator would need to investigate or fix. If the system already handled it (blocked, auto-recovered), skip it.
+5. If an event group is informational, already handled, or not actionable, return skip_incident: true with a clear skip_reason.
 {merge_instructions}
-For each EVENT GROUP that represents an actual problem, provide:
+For each EVENT GROUP that represents an actual actionable problem, provide:
 1. A clear, concise title that describes the specific issue AND includes the network name
    - Format: "[Issue Type] on [Device/Service] - [Network Name]"
-   - Example: "High Packet Loss on MR42 - Riebel Home"
-   - Example: "VLAN Violations on MX68 - MojoDojoCasaHouse"
+   - Example: "High Packet Loss on MR42 - Demo Home"
+   - Example: "Site-to-Site VPN Down on Z3 - Grieves"
    - ALWAYS include the network name from the event data
-2. Root cause analysis combining all data sources
+2. DETAILED root cause analysis — this is shown to the user as the main summary. It MUST include:
+   - Specific device names, models, and serials involved
+   - Specific IP addresses, ports, and protocols from the event data
+   - Exact timestamps or time ranges when the issue occurred
+   - What the Meraki/ThousandEyes context reveals about the impact
+   - Whether traffic was blocked, degraded, or lost
+   - Quantitative data: how many occurrences, error counts, latency values, loss percentages
+   - A clear explanation of what this means for the network operator
+   Do NOT write vague summaries like "issues detected" — be specific with IPs, devices, and numbers.
 3. Confidence score (0-100%)
 4. Severity (critical/high/medium/low) - do NOT use "info" for actual incidents
-5. List of affected services/resources
-6. Recommended remediation steps
+5. List of affected services/resources (use specific names: "Internet Gateway (MX68 - Garage)", "Site-to-Site VPN (Grieves)", etc.)
+6. Specific, actionable remediation steps (not generic advice — reference the actual devices and configurations)
 7. The occurrence_count from the event group
 8. EITHER "merge_with_incident_id" (if merging with existing) OR leave it null (to create new)
 {existing_summary}
@@ -1494,7 +2113,7 @@ Respond in JSON format:
                         model=model,
                         input_tokens=input_tokens,
                         output_tokens=output_tokens,
-                        alert_count=len(enriched_events),
+                        alert_count=len(enriched_incidents),
                     )
                 )
             except Exception as cost_error:
@@ -1614,6 +2233,57 @@ Respond in JSON format:
                             new_services = set(ai_incident.get("affected_services", []))
                             incident.affected_services = list(existing_services | new_services)
 
+                            # Merge enrichment context
+                            if enriched.get("meraki_context"):
+                                existing_meraki = incident.meraki_context or []
+                                # Deduplicate by device serial
+                                existing_serials = {
+                                    m.get("data", {}).get("serial")
+                                    for m in existing_meraki if isinstance(m, dict)
+                                }
+                                for new_item in enriched.get("meraki_context", []):
+                                    if isinstance(new_item, dict):
+                                        serial = new_item.get("data", {}).get("serial")
+                                        if not serial or serial not in existing_serials:
+                                            existing_meraki.append(new_item)
+                                            if serial:
+                                                existing_serials.add(serial)
+                                incident.meraki_context = existing_meraki
+
+                            if enriched.get("te_context"):
+                                existing_te = incident.thousandeyes_context or []
+                                # Deduplicate by test ID or alert ID
+                                existing_ids = {
+                                    t.get("data", {}).get("testId") or t.get("data", {}).get("alertId")
+                                    for t in existing_te if isinstance(t, dict)
+                                }
+                                for new_item in enriched.get("te_context", []):
+                                    if isinstance(new_item, dict):
+                                        item_id = new_item.get("data", {}).get("testId") or new_item.get("data", {}).get("alertId")
+                                        if not item_id or item_id not in existing_ids:
+                                            existing_te.append(new_item)
+                                            if item_id:
+                                                existing_ids.add(item_id)
+                                incident.thousandeyes_context = existing_te
+
+                            # Merge enrichment sources
+                            existing_sources = set(incident.enrichment_sources or [])
+                            if enriched.get("meraki_context"):
+                                existing_sources.add("meraki")
+                            if enriched.get("te_context"):
+                                existing_sources.add("thousandeyes")
+                            incident.enrichment_sources = list(existing_sources)
+
+                            # Append to raw Splunk events
+                            existing_raw = incident.splunk_events_raw or []
+                            if splunk_event.get("raw_event"):
+                                existing_raw.append(splunk_event.get("raw_event"))
+                            incident.splunk_events_raw = existing_raw[-20:]  # Keep last 20
+
+                            # Accumulate AI costs
+                            incident.ai_analysis_cost = (incident.ai_analysis_cost or 0) + cost_per_event
+                            incident.ai_tokens_used = (incident.ai_tokens_used or 0) + tokens_per_event
+
                             # Update severity if new events are more severe
                             new_severity = severity_map.get(ai_severity, EventSeverity.MEDIUM)
                             severity_order = [EventSeverity.INFO, EventSeverity.LOW, EventSeverity.MEDIUM, EventSeverity.HIGH, EventSeverity.CRITICAL]
@@ -1668,6 +2338,23 @@ Respond in JSON format:
                             except Exception as e:
                                 logger.warning(f"    → Failed to fetch device config: {e}")
 
+                        # Extract performance metrics from Meraki context
+                        performance_metrics = {}
+                        for meraki_item in enriched.get("meraki_context", []):
+                            if isinstance(meraki_item, dict):
+                                data = meraki_item.get("data", {}) if isinstance(meraki_item.get("data"), dict) else {}
+                                if data.get("lossLatencyHistory"):
+                                    performance_metrics["lossLatencyHistory"] = data.get("lossLatencyHistory")
+                                if data.get("clientSummary"):
+                                    performance_metrics["clientSummary"] = data.get("clientSummary")
+
+                        # Build enrichment sources list
+                        enrichment_sources = []
+                        if enriched.get("meraki_context"):
+                            enrichment_sources.append("meraki")
+                        if enriched.get("te_context"):
+                            enrichment_sources.append("thousandeyes")
+
                         incident = Incident(
                             title=formatted_title,
                             status=IncidentStatus.OPEN,
@@ -1682,6 +2369,15 @@ Respond in JSON format:
                             network_id=network_id,
                             network_name=network_name,
                             device_config=device_config,
+                            # Enrichment context
+                            meraki_context=enriched.get("meraki_context"),
+                            thousandeyes_context=enriched.get("te_context"),
+                            performance_metrics=performance_metrics if performance_metrics else None,
+                            enrichment_sources=enrichment_sources if enrichment_sources else None,
+                            splunk_events_raw=[splunk_event.get("raw_event")],
+                            # AI analysis tracking
+                            ai_analysis_cost=cost_per_event,
+                            ai_tokens_used=tokens_per_event,
                         )
                         session.add(incident)
                         await session.flush()

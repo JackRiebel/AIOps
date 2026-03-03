@@ -1,4 +1,9 @@
-"""Main entry point for Meraki Dashboard MCP Server."""
+"""Main entry point for Cisco AIOps Hub Meraki Magic MCP Server.
+
+Uses the Meraki Magic MCP dynamic SDK discovery approach
+(https://github.com/CiscoDevNet/meraki-magic-mcp-community)
+integrated with AIOps Hub's database, security middleware, and audit logging.
+"""
 
 import argparse
 import asyncio
@@ -10,18 +15,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.config import get_settings, init_db
-from src.core.mcp_server import MerakiDashboardMCP
 from src.services.database_init import initialize_database_defaults
 
 
 def parse_arguments():
-    """Parse command-line arguments.
-
-    Returns:
-        Parsed arguments
-    """
+    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Meraki Dashboard MCP Server - Database-driven organization management"
+        description="Cisco AIOps Hub Meraki Magic MCP Server — dynamic SDK discovery with 800+ endpoints"
     )
     parser.add_argument(
         "--organization",
@@ -35,65 +35,48 @@ def parse_arguments():
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="Override logging level from environment"
     )
-
     return parser.parse_args()
 
 
 def setup_logging(log_level: str = None):
-    """Configure logging for the application.
-
-    Args:
-        log_level: Optional log level override
-    """
+    """Configure logging for the application."""
     settings = get_settings()
-
-    # Use provided log level or fall back to settings
     level = log_level or settings.log_level
 
-    # Configure root logger
     logging.basicConfig(
         level=getattr(logging, level.upper()),
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[
-            logging.StreamHandler(sys.stderr),
-        ],
+        handlers=[logging.StreamHandler(sys.stderr)],
     )
-
-    # Set specific logger levels
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("sqlalchemy").setLevel(logging.WARNING)
+    logging.getLogger("meraki").setLevel(logging.WARNING)
 
 
 async def main():
     """Main entry point."""
-    # Parse command-line arguments
     args = parse_arguments()
-
-    # Setup logging with optional override
     setup_logging(args.log_level)
     logger = logging.getLogger(__name__)
 
     try:
-        logger.info("Starting Meraki Dashboard MCP Server...")
+        logger.info("Starting Cisco AIOps Hub Meraki Magic MCP Server...")
 
         # Initialize database
         logger.info("Initializing database...")
         await init_db()
 
-        # Initialize default database values
         logger.info("Initializing database defaults...")
         await initialize_database_defaults()
 
-        # Use organization name from command-line argument
         organization_name = args.organization
         logger.info(f"Using organization: {organization_name}")
 
-        # Create and run MCP server
-        server = MerakiDashboardMCP(organization_name=organization_name)
+        # Meraki Magic MCP (dynamic SDK discovery — 800+ endpoints)
+        from src.core.meraki_magic_server import MerakiMagicServer
 
-        logger.info(f"Connecting to organization: {organization_name}")
-        logger.info("Note: Edit mode is now controlled via database (security_config table)")
-
+        server = MerakiMagicServer(organization_name=organization_name)
+        logger.info("Meraki Magic MCP ready — edit mode controlled via database (security_config table)")
         await server.run()
 
     except KeyboardInterrupt:

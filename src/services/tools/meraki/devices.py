@@ -28,6 +28,13 @@ logger = logging.getLogger(__name__)
 async def handle_devices_get(params: Dict, context: Any) -> Dict:
     """Get details of a specific device by serial number."""
     try:
+        # Validate execution context has a Meraki client
+        if not hasattr(context, 'client') or context.client is None:
+            return {
+                "success": False,
+                "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+            }
+
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -42,6 +49,13 @@ async def handle_devices_get(params: Dict, context: Any) -> Dict:
 async def handle_devices_update(params: Dict, context: Any) -> Dict:
     """Update device settings like name, address, notes, tags."""
     try:
+        # Validate execution context has a Meraki client
+        if not hasattr(context, 'client') or context.client is None:
+            return {
+                "success": False,
+                "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+            }
+
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -57,6 +71,13 @@ async def handle_devices_update(params: Dict, context: Any) -> Dict:
 async def handle_devices_blink_leds(params: Dict, context: Any) -> Dict:
     """Blink the LEDs on a device for identification."""
     try:
+        # Validate execution context has a Meraki client
+        if not hasattr(context, 'client') or context.client is None:
+            return {
+                "success": False,
+                "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+            }
+
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -72,6 +93,13 @@ async def handle_devices_blink_leds(params: Dict, context: Any) -> Dict:
 async def handle_devices_reboot(params: Dict, context: Any) -> Dict:
     """Reboot a device."""
     try:
+        # Validate execution context has a Meraki client
+        if not hasattr(context, 'client') or context.client is None:
+            return {
+                "success": False,
+                "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+            }
+
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -86,6 +114,13 @@ async def handle_devices_reboot(params: Dict, context: Any) -> Dict:
 async def handle_devices_get_clients(params: Dict, context: Any) -> Dict:
     """Get clients connected to a specific device."""
     try:
+        # Validate execution context has a Meraki client
+        if not hasattr(context, 'client') or context.client is None:
+            return {
+                "success": False,
+                "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+            }
+
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -102,6 +137,13 @@ async def handle_devices_get_clients(params: Dict, context: Any) -> Dict:
 async def handle_devices_get_lldp_cdp(params: Dict, context: Any) -> Dict:
     """Get LLDP and CDP neighbor information for a device."""
     try:
+        # Validate execution context has a Meraki client
+        if not hasattr(context, 'client') or context.client is None:
+            return {
+                "success": False,
+                "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+            }
+
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -116,6 +158,13 @@ async def handle_devices_get_lldp_cdp(params: Dict, context: Any) -> Dict:
 async def handle_devices_get_management_interface(params: Dict, context: Any) -> Dict:
     """Get management interface settings for a device."""
     try:
+        # Validate execution context has a Meraki client
+        if not hasattr(context, 'client') or context.client is None:
+            return {
+                "success": False,
+                "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+            }
+
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -130,6 +179,13 @@ async def handle_devices_get_management_interface(params: Dict, context: Any) ->
 async def handle_devices_update_management_interface(params: Dict, context: Any) -> Dict:
     """Update management interface settings."""
     try:
+        # Validate execution context has a Meraki client
+        if not hasattr(context, 'client') or context.client is None:
+            return {
+                "success": False,
+                "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+            }
+
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -145,6 +201,13 @@ async def handle_devices_update_management_interface(params: Dict, context: Any)
 async def handle_devices_create_ping(params: Dict, context: Any) -> Dict:
     """Start a ping test from a device to a target."""
     try:
+        # Validate execution context has a Meraki client
+        if not hasattr(context, 'client') or context.client is None:
+            return {
+                "success": False,
+                "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+            }
+
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -160,6 +223,13 @@ async def handle_devices_create_ping(params: Dict, context: Any) -> Dict:
 async def handle_devices_get_ping_result(params: Dict, context: Any) -> Dict:
     """Get the result of a ping test."""
     try:
+        # Validate execution context has a Meraki client
+        if not hasattr(context, 'client') or context.client is None:
+            return {
+                "success": False,
+                "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+            }
+
         serial = params.get("serial")
         ping_id = params.get("ping_id") or params.get("pingId")
         if not serial or not ping_id:
@@ -175,6 +245,13 @@ async def handle_devices_get_ping_result(params: Dict, context: Any) -> Dict:
 async def handle_devices_create_ping_device(params: Dict, context: Any) -> Dict:
     """Ping a device from the cloud."""
     try:
+        # Validate execution context has a Meraki client
+        if not hasattr(context, 'client') or context.client is None:
+            return {
+                "success": False,
+                "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+            }
+
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -190,6 +267,13 @@ async def handle_devices_create_ping_device(params: Dict, context: Any) -> Dict:
 async def handle_devices_get_ping_device_result(params: Dict, context: Any) -> Dict:
     """Get result of pinging a device."""
     try:
+        # Validate execution context has a Meraki client
+        if not hasattr(context, 'client') or context.client is None:
+            return {
+                "success": False,
+                "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+            }
+
         serial = params.get("serial")
         ping_id = params.get("ping_id") or params.get("pingId")
         if not serial or not ping_id:
@@ -205,6 +289,13 @@ async def handle_devices_get_ping_device_result(params: Dict, context: Any) -> D
 async def handle_devices_create_cable_test(params: Dict, context: Any) -> Dict:
     """Run a cable test on switch ports."""
     try:
+        # Validate execution context has a Meraki client
+        if not hasattr(context, 'client') or context.client is None:
+            return {
+                "success": False,
+                "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+            }
+
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -220,6 +311,13 @@ async def handle_devices_create_cable_test(params: Dict, context: Any) -> Dict:
 async def handle_devices_get_cable_test_result(params: Dict, context: Any) -> Dict:
     """Get cable test results."""
     try:
+        # Validate execution context has a Meraki client
+        if not hasattr(context, 'client') or context.client is None:
+            return {
+                "success": False,
+                "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+            }
+
         serial = params.get("serial")
         test_id = params.get("test_id") or params.get("testId") or params.get("id")
         if not serial or not test_id:
@@ -235,6 +333,13 @@ async def handle_devices_get_cable_test_result(params: Dict, context: Any) -> Di
 async def handle_devices_create_throughput_test(params: Dict, context: Any) -> Dict:
     """Run a throughput test on a device."""
     try:
+        # Validate execution context has a Meraki client
+        if not hasattr(context, 'client') or context.client is None:
+            return {
+                "success": False,
+                "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+            }
+
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -250,6 +355,13 @@ async def handle_devices_create_throughput_test(params: Dict, context: Any) -> D
 async def handle_devices_get_throughput_test_result(params: Dict, context: Any) -> Dict:
     """Get throughput test results."""
     try:
+        # Validate execution context has a Meraki client
+        if not hasattr(context, 'client') or context.client is None:
+            return {
+                "success": False,
+                "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+            }
+
         serial = params.get("serial")
         test_id = params.get("test_id") or params.get("testId") or params.get("throughputTestId")
         if not serial or not test_id:
@@ -265,6 +377,13 @@ async def handle_devices_get_throughput_test_result(params: Dict, context: Any) 
 async def handle_devices_create_arp_table(params: Dict, context: Any) -> Dict:
     """Get the ARP table from a device."""
     try:
+        # Validate execution context has a Meraki client
+        if not hasattr(context, 'client') or context.client is None:
+            return {
+                "success": False,
+                "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+            }
+
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -280,6 +399,13 @@ async def handle_devices_create_arp_table(params: Dict, context: Any) -> Dict:
 async def handle_devices_get_arp_table_result(params: Dict, context: Any) -> Dict:
     """Get ARP table request results."""
     try:
+        # Validate execution context has a Meraki client
+        if not hasattr(context, 'client') or context.client is None:
+            return {
+                "success": False,
+                "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+            }
+
         serial = params.get("serial")
         arp_table_id = params.get("arp_table_id") or params.get("arpTableId")
         if not serial or not arp_table_id:
@@ -295,6 +421,13 @@ async def handle_devices_get_arp_table_result(params: Dict, context: Any) -> Dic
 async def handle_devices_create_routing_table(params: Dict, context: Any) -> Dict:
     """Get the routing table from a device."""
     try:
+        # Validate execution context has a Meraki client
+        if not hasattr(context, 'client') or context.client is None:
+            return {
+                "success": False,
+                "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+            }
+
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -310,6 +443,13 @@ async def handle_devices_create_routing_table(params: Dict, context: Any) -> Dic
 async def handle_devices_get_routing_table_result(params: Dict, context: Any) -> Dict:
     """Get routing table request results."""
     try:
+        # Validate execution context has a Meraki client
+        if not hasattr(context, 'client') or context.client is None:
+            return {
+                "success": False,
+                "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+            }
+
         serial = params.get("serial")
         routing_table_id = params.get("routing_table_id") or params.get("routingTableId")
         if not serial or not routing_table_id:

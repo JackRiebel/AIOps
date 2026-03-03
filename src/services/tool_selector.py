@@ -83,22 +83,32 @@ ESSENTIAL_TOOLS = {
 ALWAYS_INCLUDE_TOOLS = [
     "canvas_add_card",        # AI can add visualization cards to canvas
     "canvas_add_dashboard",   # AI can add dashboard layouts to canvas
+    "think",                  # Zero-cost reasoning tool for multi-step analysis
 ]
 
-# Incident-specific tool set - minimal tools for analyzing incidents (~10 tools)
-# This dramatically reduces token usage from 25 tools to ~10 tools
+# Incident-specific tool set - minimal tools for analyzing incidents (~12 tools)
+# This dramatically reduces token usage from 25 tools to ~12 tools
 INCIDENT_ANALYSIS_TOOLS = [
+    # Reasoning (zero-cost structured analysis between tool calls)
+    "think",
     # Incident data
     "get_incident_details",
     "get_incident_events",
     # Network health (for context)
     "meraki_get_network_health",
     "meraki_list_organization_networks",
+    # Alerts (critical for incident analysis)
+    "meraki_get_network_alerts",
+    "meraki_networks_get_alerts",
     # Device info (for affected devices)
     "meraki_get_device",
     "meraki_list_network_devices",
     # RF analysis (for wireless incidents)
     "meraki_get_wireless_channel_utilization",
+    # ThousandEyes (external monitoring — critical for connectivity incidents)
+    "thousandeyes_list_tests",
+    "thousandeyes_list_alerts",
+    "thousandeyes_get_test_results",
     # Canvas tools (for visualization)
     "canvas_add_card",
     "canvas_add_dashboard",
@@ -133,6 +143,7 @@ CATEGORY_ESSENTIAL_TOOLS = {
         "meraki_appliance_get_site_to_site_vpn",
     ],
     "wireless": [
+        "meraki_analyze_network_wireless",  # Composite tool - handles name resolution + full analysis
         "meraki_list_ssids",
         "meraki_get_ssid",
         "meraki_list_wireless_rf_profiles",
@@ -166,6 +177,37 @@ CATEGORY_ESSENTIAL_TOOLS = {
         "meraki_get_device",
         "meraki_sensor_list_readings",
         "meraki_sensor_get_alerts",
+    ],
+    # Cross-platform troubleshooting — TE tools added for connectivity/performance queries
+    "troubleshooting": [
+        "thousandeyes_list_tests",
+        "thousandeyes_list_alerts",
+        "thousandeyes_list_agents",
+        "thousandeyes_get_test_results",
+        "thousandeyes_get_path_visualization",
+        "thousandeyes_get_http_results",
+        "splunk_run_search",
+    ],
+    "connectivity": [
+        "thousandeyes_list_tests",
+        "thousandeyes_list_alerts",
+        "thousandeyes_get_test_results",
+        "thousandeyes_get_path_visualization",
+        "splunk_run_search",
+    ],
+    # Security — cross-platform security tools from all 3 platforms
+    "security": [
+        # Meraki security
+        "meraki_appliance_get_org_security_events",
+        "meraki_appliance_get_security_events",
+        "meraki_appliance_get_security_intrusion",
+        "meraki_wireless_get_air_marshal",
+        "meraki_organizations_get_assurance_alerts",
+        "meraki_networks_get_alerts_history",
+        # ThousandEyes
+        "thousandeyes_list_alerts",
+        # Splunk
+        "splunk_run_search",
     ],
 }
 
@@ -205,11 +247,37 @@ CONFIG_QUERY_KEYWORDS = [
     "nat", "acl", "qos", "traffic shaping", "content filtering",
 ]
 
+# Troubleshooting/connectivity keywords that should trigger cross-platform tool selection.
+# When ANY of these appear, ThousandEyes tools should be included alongside the primary
+# platform because TE provides external monitoring, synthetic tests, path analysis,
+# and internet insights that are critical for diagnosing connectivity issues.
+CROSS_PLATFORM_TROUBLESHOOTING_KEYWORDS = [
+    "troubleshoot", "investigate", "diagnose", "debug",
+    "connectivity", "connection", "not working", "down",
+    "offline", "unreachable", "timeout", "slow",
+    "latency", "packet loss", "jitter", "degraded",
+    "outage", "intermittent", "dropping", "disconnecting",
+    "performance issue", "network issue", "network problem",
+    "root cause", "why is", "can't connect", "cannot connect",
+    "not responding", "failing", "broken",
+    # Broader cross-platform triggers
+    "performance", "between", "path analysis", "end-to-end",
+    "reachability", "throughput", "bandwidth", "response time",
+    "monitoring", "health check", "compare", "correlate",
+    "impact", "affecting", "across", "check the",
+    # Security triggers — should query all platforms
+    "security", "threat", "threats", "intrusion", "malware",
+    "attack", "breach", "vulnerability", "suspicious",
+    "unauthorized", "rogue", "anomaly", "anomalies",
+]
+
 # Platform detection keywords
 PLATFORM_KEYWORDS = {
     "meraki": {
         "primary": ["meraki", "dashboard", "mx", "mr", "ms", "mv", "mt", "mg", "z"],
-        "secondary": ["ssid", "vlan", "firewall", "vpn", "switch port", "wireless"],
+        "secondary": ["ssid", "vlan", "firewall", "vpn", "switch port", "wireless",
+                       "network", "device", "uplink", "client",
+                       "security", "threat", "intrusion", "ids", "malware", "air marshal", "rogue"],
     },
     "catalyst": {
         "primary": ["catalyst", "dnac", "dna center", "cisco"],
@@ -217,11 +285,13 @@ PLATFORM_KEYWORDS = {
     },
     "thousandeyes": {
         "primary": ["thousandeyes", "te", "thousand eyes"],
-        "secondary": ["synthetic", "path visualization", "endpoint agent", "cloud agent"],
+        "secondary": ["synthetic", "path visualization", "endpoint agent", "cloud agent",
+                       "path analysis", "internet insights", "bgp"],
     },
     "splunk": {
         "primary": ["splunk", "siem"],
-        "secondary": ["log", "search", "alert", "index", "kvstore"],
+        "secondary": ["log", "search", "alert", "index", "kvstore", "event log",
+                       "syslog", "correlation", "security event", "threat intelligence"],
     },
 }
 
@@ -255,6 +325,15 @@ CATEGORY_KEYWORDS = {
     # Splunk categories
     "search": ["search", "query", "spl", "event"],
     "knowledge": ["knowledge", "dashboard", "saved search", "report"],
+
+    # Cross-platform troubleshooting categories
+    "troubleshooting": ["troubleshoot", "investigate", "diagnose", "debug", "root cause", "not working", "broken", "failing"],
+    "connectivity": ["connectivity", "connection", "connect", "unreachable", "timeout", "offline", "down", "dropping", "disconnecting"],
+
+    # Security — maps to tools across Meraki, Splunk, and ThousandEyes
+    "security": ["security", "threat", "threats", "intrusion", "ids", "ips", "malware",
+                  "attack", "breach", "vulnerability", "suspicious", "unauthorized",
+                  "rogue", "anomaly", "air marshal", "blocked", "firewall block"],
 }
 
 # Action keywords that indicate operation type
@@ -427,8 +506,8 @@ class ToolSelector:
             incident_tools = self._get_incident_tools(exclude_meta_tool)
             return ToolSelectionResult(
                 tools=incident_tools,
-                platforms_detected=["meraki"],  # Incidents are typically Meraki-related
-                categories_matched=["incident", "health"],
+                platforms_detected=["meraki", "thousandeyes"],
+                categories_matched=["incident", "health", "troubleshooting"],
                 query_analysis={
                     "actions": ["analyze", "get"],
                     "original_query": query,
@@ -439,10 +518,15 @@ class ToolSelector:
 
         # Detect if this is a configuration query - needs more tools
         is_config_query = any(kw in query_lower for kw in CONFIG_QUERY_KEYWORDS)
+        is_troubleshooting = any(kw in query_lower for kw in CROSS_PLATFORM_TROUBLESHOOTING_KEYWORDS)
         if is_config_query:
             # Config queries need both bootstrap tools AND configuration tools
             max_tools = base_max_tools + 10
             logger.debug(f"[ToolSelector] Config query detected, increased max_tools to {max_tools}")
+        elif is_troubleshooting:
+            # Troubleshooting queries span multiple platforms (Meraki + TE + Splunk + Catalyst)
+            max_tools = base_max_tools + 5
+            logger.debug(f"[ToolSelector] Troubleshooting query detected, increased max_tools to {max_tools}")
         else:
             max_tools = base_max_tools
 
@@ -635,11 +719,41 @@ class ToolSelector:
                 detected = org_platforms[:2]
                 logger.debug(f"[ToolSelector] Using org context platforms: {detected}")
 
-        # Intelligent fallback - don't return ALL platforms (defeats filtering purpose)
+        # Cross-platform troubleshooting: when the query involves connectivity/performance
+        # investigation, include ThousandEyes alongside the primary platform.
+        # TE provides external monitoring, synthetic tests, path analysis, and alerts
+        # that are essential for diagnosing ANY network issue — not just when explicitly mentioned.
+        is_troubleshooting = any(
+            kw in query for kw in CROSS_PLATFORM_TROUBLESHOOTING_KEYWORDS
+        )
+        if is_troubleshooting and "thousandeyes" not in detected:
+            detected.append("thousandeyes")
+            logger.info("[ToolSelector] Troubleshooting query detected — adding ThousandEyes for cross-platform analysis")
+        if is_troubleshooting and "splunk" not in detected:
+            detected.append("splunk")
+            logger.info("[ToolSelector] Troubleshooting query — adding Splunk for log correlation")
+        if is_troubleshooting and "catalyst" not in detected:
+            # Primary check: explicit Catalyst keywords in query
+            catalyst_keywords = ["catalyst", "dnac", "dna center", "assurance", "site health"]
+            if any(kw in query for kw in catalyst_keywords):
+                detected.append("catalyst")
+                logger.info("[ToolSelector] Troubleshooting query mentions Catalyst — adding Catalyst")
+            # Secondary check: org context indicates Catalyst is configured
+            elif org_context.get("has_catalyst"):
+                detected.append("catalyst")
+                logger.info("[ToolSelector] Troubleshooting query with Catalyst org context — adding Catalyst")
+
+        # Intelligent fallback - use available platforms from org context
         if not detected:
-            # Default to meraki (most common) - prevents 85% token savings loss
-            detected = ["meraki"]
-            logger.debug("[ToolSelector] No platform detected, defaulting to meraki")
+            org_platforms = org_context.get("platforms", [])
+            if org_platforms:
+                # Use all available platforms (up to 3) — the user has them configured for a reason
+                detected = org_platforms[:3]
+                logger.debug(f"[ToolSelector] No platform detected, using configured platforms: {detected}")
+            else:
+                # Last resort: default to meraki (most common)
+                detected = ["meraki"]
+                logger.debug("[ToolSelector] No platform detected, defaulting to meraki")
 
         return detected
 

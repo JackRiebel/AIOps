@@ -142,7 +142,7 @@ class CredentialPool:
             # Load Meraki from system_config
             meraki_key = await config_service.get_config("meraki_api_key")
             if meraki_key and _is_valid_meraki_key(meraki_key):
-                logger.info(f"[CredPool] Found Meraki API key in system_config: {meraki_key[:8]}...")
+                logger.info("[CredPool] Found Meraki API key in system_config: [REDACTED]")
                 pc = PlatformCredential(
                     platform=Platform.MERAKI,
                     cluster_name="system_config",
@@ -190,34 +190,39 @@ class CredentialPool:
             splunk_user = await config_service.get_config("splunk_username")
             splunk_pass = await config_service.get_config("splunk_password")
             splunk_bearer = await config_service.get_config("splunk_bearer_token")
+            # Load per-credential verify_ssl setting (stored as string "true"/"false" in DB)
+            splunk_verify_ssl_str = await config_service.get_config("splunk_verify_ssl")
+            # Default to False for self-signed certs, common in local Splunk
+            splunk_verify_ssl = splunk_verify_ssl_str.lower() == "true" if splunk_verify_ssl_str else False
 
-            if splunk_host and (splunk_token or splunk_bearer or (splunk_user and splunk_pass)):
-                logger.info("[CredPool] Found Splunk credentials in system_config")
+            # Accept either splunk_host OR splunk_api_url as valid host identifier
+            splunk_base = splunk_api_url or splunk_host
+            if splunk_base and (splunk_token or splunk_bearer or (splunk_user and splunk_pass)):
+                logger.info(f"[CredPool] Found Splunk credentials in system_config: base_url={splunk_base}, bearer={bool(splunk_bearer)}, hec={bool(splunk_token)}, verify_ssl={splunk_verify_ssl}")
                 # Map credentials to match what unified_chat_service expects:
                 # - "token" = API auth token (bearer or Splunk token) for search API
                 # - "splunk_token" = HEC token for sending events
                 # - "splunk_username"/"splunk_password" = basic auth fallback
+                # - "verify_ssl" = SSL verification setting from UI
                 pc = PlatformCredential(
                     platform=Platform.SPLUNK,
                     cluster_name="system_config",
                     cluster_id=0,
                     credentials={
-                        "base_url": splunk_api_url or splunk_host,
-                        "splunk_base_url": splunk_api_url or splunk_host,
+                        "base_url": splunk_base,
+                        "splunk_base_url": splunk_base,
                         "token": splunk_bearer,  # API auth token for SplunkClient
                         "splunk_token": splunk_token,  # HEC token (for sending events)
                         "splunk_username": splunk_user,
                         "splunk_password": splunk_pass,
                         "username": splunk_user,
                         "password": splunk_pass,
+                        "verify_ssl": splunk_verify_ssl,  # Per-credential SSL setting from UI
                     },
-                    base_url=splunk_api_url or splunk_host,
+                    base_url=splunk_base,
                 )
                 self._by_platform[Platform.SPLUNK].append(pc)
-                if splunk_api_url:
-                    self._splunk_instance_map[splunk_api_url] = pc
-                elif splunk_host:
-                    self._splunk_instance_map[splunk_host] = pc
+                self._splunk_instance_map[splunk_base] = pc
 
             logger.info(
                 f"[CredPool] From system_config: Meraki={len([p for p in self._by_platform[Platform.MERAKI] if p.cluster_name == 'system_config'])}, "
@@ -261,7 +266,7 @@ class CredentialPool:
             api_key = creds.get("meraki_api_key") or creds.get("api_key", "")
             if api_key and _is_valid_meraki_key(api_key):
                 # Valid Meraki API key (40 chars, alphanumeric)
-                logger.info(f"[CredPool] Valid Meraki API key for {cluster.name}: {api_key[:8]}... (40 chars)")
+                logger.info(f"[CredPool] Valid Meraki API key for {cluster.name}: [REDACTED]")
                 pc = PlatformCredential(
                     platform=Platform.MERAKI,
                     cluster_name=cluster.name,

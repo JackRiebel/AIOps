@@ -8,9 +8,6 @@ export type { DashboardCardProps, CardAccent } from './DashboardCard';
 export { TopStatsBar } from './TopStatsBar';
 export type { TopStatsBarProps, StatItem } from './TopStatsBar';
 
-export { EmbeddedChatPanel } from './EmbeddedChatPanel';
-export type { EmbeddedChatPanelProps } from './EmbeddedChatPanel';
-
 export { UnifiedHealthWidget } from './UnifiedHealthWidget';
 export type { UnifiedHealthWidgetProps, IntegrationHealth } from './UnifiedHealthWidget';
 
@@ -26,6 +23,9 @@ export type { MiniTopologyWidgetProps, DeviceSummary, NetworkSummary } from './M
 export { AgentPerformanceWidget } from './AgentPerformanceWidget';
 export type { AgentPerformanceWidgetProps } from './AgentPerformanceWidget';
 
+export { ActiveAutomationsWidget } from './ActiveAutomationsWidget';
+export type { ActiveAutomationsWidgetProps, AutomationItem } from './ActiveAutomationsWidget';
+
 export { RecentActivityWidget } from './RecentActivityWidget';
 export type { RecentActivityWidgetProps, ActivityItem } from './RecentActivityWidget';
 
@@ -38,9 +38,6 @@ export { DashboardSkeleton, StatsBarSkeleton, WidgetSkeleton, ChartSkeleton } fr
 // Predictive Intelligence Widgets
 export { HealthVelocityWidget } from './HealthVelocityWidget';
 export type { HealthVelocityWidgetProps, VelocityDataPoint } from './HealthVelocityWidget';
-
-export { LiveActionsFeed } from './LiveActionsFeed';
-export type { LiveActionsFeedProps, ActionFeedItem } from './LiveActionsFeed';
 
 // Keep existing exports
 export { TopNavbar } from './TopNavbar';

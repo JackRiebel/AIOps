@@ -6,7 +6,7 @@ Provides endpoints for:
 - Listing user's saved canvases
 - Sharing canvases via link
 
-Part of Lumen AI Canvas Phase 1 implementation.
+Part of Cisco AIOps Hub Canvas Phase 1 implementation.
 """
 
 import logging

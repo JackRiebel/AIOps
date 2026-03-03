@@ -14,14 +14,18 @@ router = APIRouter()
 async def get_unified_licenses():
     """Get unified view of licenses across all organizations (Meraki, ThousandEyes, Splunk)."""
     import httpx
+    import logging
+    logger = logging.getLogger(__name__)
 
     organizations_licenses = []
     total_licenses = 0
+    processed_orgs = set()  # Track processed orgs to avoid duplicates
 
     # Get all active clusters (organizations)
     clusters = await credential_manager.list_clusters(active_only=True)
 
     for cluster in clusters:
+        processed_orgs.add(cluster.name.lower())
         try:
             # Get credentials
             credentials = await credential_manager.get_credentials(cluster.name)
@@ -68,10 +72,76 @@ async def get_unified_licenses():
                 error=str(e)
             ))
 
+    # Also check credential_pool for system_config credentials (from setup wizard)
+    try:
+        from src.services.credential_pool import get_initialized_pool
+        pool = await get_initialized_pool()
+        available = pool.get_available_platforms()
+
+        # Check for Meraki from system_config
+        if "meraki" in available:
+            meraki_cred = pool.get_for_meraki()
+            if meraki_cred and meraki_cred.cluster_name == "system_config":
+                api_key = meraki_cred.credentials.get("api_key") or meraki_cred.credentials.get("meraki_api_key")
+                if api_key:
+                    credentials = {
+                        "api_key": api_key,
+                        "base_url": "https://api.meraki.com/api/v1",
+                        "verify_ssl": True,
+                    }
+                    # Fetch Meraki orgs and licenses for each
+                    try:
+                        org_licenses = await _fetch_meraki_licenses("Meraki (API Key)", credentials)
+                        if org_licenses.organization_name.lower() not in processed_orgs:
+                            organizations_licenses.append(org_licenses)
+                            total_licenses += len(org_licenses.licenses)
+                    except Exception as e:
+                        logger.warning(f"Error fetching Meraki licenses from system_config: {e}")
+
+        # Check for ThousandEyes from system_config
+        if "thousandeyes" in available:
+            te_cred = pool.get_for_thousandeyes()
+            if te_cred and te_cred.cluster_name == "system_config":
+                api_key = te_cred.credentials.get("api_key") or te_cred.credentials.get("thousandeyes_api_key")
+                if api_key and "thousandeyes" not in processed_orgs:
+                    credentials = {
+                        "api_key": api_key,
+                        "base_url": "https://api.thousandeyes.com/v7",
+                        "verify_ssl": True,
+                    }
+                    try:
+                        org_licenses = await _fetch_thousandeyes_licenses("ThousandEyes (API Key)", credentials)
+                        organizations_licenses.append(org_licenses)
+                        total_licenses += len(org_licenses.licenses)
+                    except Exception as e:
+                        logger.warning(f"Error fetching ThousandEyes licenses from system_config: {e}")
+
+        # Check for Splunk from system_config
+        if "splunk" in available:
+            splunk_cred = pool.get_for_splunk()
+            if splunk_cred and splunk_cred.cluster_name == "system_config":
+                api_key = splunk_cred.credentials.get("api_key") or splunk_cred.credentials.get("splunk_bearer_token")
+                base_url = splunk_cred.credentials.get("base_url") or splunk_cred.credentials.get("splunk_host")
+                if api_key and base_url and "splunk" not in processed_orgs:
+                    credentials = {
+                        "api_key": api_key,
+                        "base_url": base_url,
+                        "verify_ssl": False,  # Splunk often uses self-signed certs
+                    }
+                    try:
+                        org_licenses = await _fetch_splunk_licenses("Splunk (API Key)", credentials)
+                        organizations_licenses.append(org_licenses)
+                        total_licenses += len(org_licenses.licenses)
+                    except Exception as e:
+                        logger.warning(f"Error fetching Splunk licenses from system_config: {e}")
+
+    except Exception as e:
+        logger.warning(f"Error checking credential_pool for licenses: {e}")
+
     return UnifiedLicensesResponse(
         organizations=organizations_licenses,
         total_licenses=total_licenses,
-        total_organizations=len(clusters)
+        total_organizations=len(organizations_licenses)
     )
 
 

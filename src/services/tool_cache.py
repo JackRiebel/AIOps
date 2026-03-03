@@ -202,7 +202,7 @@ class ToolResponseCache:
         # Normalize params for consistent key generation
         normalized = self._normalize_params(params)
         params_str = json.dumps(normalized, sort_keys=True)
-        params_hash = hashlib.md5(params_str.encode()).hexdigest()[:12]
+        params_hash = hashlib.sha256(params_str.encode()).hexdigest()[:12]
         return f"tool_cache:{tool_name}:{params_hash}"
 
     def _get_ttl_for_tool(self, tool_name: str) -> int:

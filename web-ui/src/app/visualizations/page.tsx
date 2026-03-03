@@ -1,292 +1,315 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import { RefreshCw } from 'lucide-react';
-import { apiClient } from '@/lib/api-client';
+import { Suspense, useCallback, useMemo } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  Network,
+  Activity,
+  LayoutGrid,
+  RefreshCw,
+  ChevronDown,
+  Loader2,
+} from 'lucide-react';
 import { ErrorAlert } from '@/components/common';
-import type { NetworkPlatformOrg } from '@/types';
-import type { VisualizationTab } from '@/types/visualization';
-import { TopStatsBar, type StatItem } from '@/components/dashboard/TopStatsBar';
-import { VisualizationsTabBar } from '@/components/visualizations/VisualizationsTabBar';
-import NetworkTopology from '@/components/visualizations/NetworkTopology';
-import PerformanceCharts from '@/components/visualizations/PerformanceCharts';
-import OrgWideTopology from '@/components/visualizations/OrgWideTopology';
+import type { VisualizationTabV2 } from '@/types/visualization';
+import { useVisualizationHub } from '@/components/visualizations/useVisualizationHub';
+import { NetworkMapView } from '@/components/visualizations/NetworkMapView';
+import { PerformanceView } from '@/components/visualizations/PerformanceView';
+import { HealthMatrixView } from '@/components/visualizations/HealthMatrixView';
 
-interface Network {
-  id: string;
-  name: string;
-  organizationId?: string;
-  productTypes?: string[];
-  timeZone?: string;
+// ============================================================================
+// Tab Configuration
+// ============================================================================
+
+const TABS: {
+  id: VisualizationTabV2;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+}[] = [
+  { id: 'network-map', label: 'Network Map', icon: Network },
+  { id: 'performance-v2', label: 'Performance', icon: Activity },
+  { id: 'health-matrix', label: 'Health Matrix', icon: LayoutGrid },
+];
+
+// ============================================================================
+// Platform Status Indicator
+// ============================================================================
+
+function PlatformIndicator({ label, configured, healthy, platform }: { label: string; configured: boolean; healthy: boolean; platform?: string }) {
+  const platformColors: Record<string, { bg: string; ring: string }> = {
+    meraki: { bg: 'bg-emerald-500', ring: 'ring-emerald-500/30' },
+    thousandeyes: { bg: 'bg-orange-500', ring: 'ring-orange-500/30' },
+    catalyst: { bg: 'bg-blue-500', ring: 'ring-blue-500/30' },
+    splunk: { bg: 'bg-lime-600', ring: 'ring-lime-600/30' },
+  };
+  const colors = platform ? platformColors[platform] : undefined;
+  const dotColor = !configured
+    ? 'bg-slate-400 dark:bg-slate-600'
+    : healthy
+      ? (colors?.bg || 'bg-emerald-500')
+      : 'bg-amber-500';
+  const ringColor = !configured ? '' : healthy && configured ? (colors?.ring || 'ring-emerald-500/30') : '';
+
+  return (
+    <div className="flex items-center gap-1.5 group/platform">
+      <div className={`relative w-2.5 h-2.5 rounded-full ${dotColor} ${configured && healthy ? `ring-2 ${ringColor}` : ''}`}>
+        {configured && healthy && (
+          <div className={`absolute inset-0 rounded-full ${dotColor} animate-ping opacity-30`} />
+        )}
+      </div>
+      <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 group-hover/platform:text-slate-700 dark:group-hover/platform:text-slate-300 transition-colors">
+        {label}
+      </span>
+    </div>
+  );
 }
 
-export default function VisualizationsPage() {
-  const [activeTab, setActiveTab] = useState<VisualizationTab>('organization');
-  const [organizations, setOrganizations] = useState<NetworkPlatformOrg[]>([]);
-  const [selectedOrg, setSelectedOrg] = useState<string>('');
-  const [networks, setNetworks] = useState<Network[]>([]);
-  const [selectedNetwork, setSelectedNetwork] = useState<string>('');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [networksLoading, setNetworksLoading] = useState(false);
+// ============================================================================
+// Loading Skeleton
+// ============================================================================
 
-  // Fetch network platform organizations (Meraki/Catalyst only) on mount
-  useEffect(() => {
-    fetchOrganizations();
-  }, []);
-
-  // Fetch networks when organization changes
-  useEffect(() => {
-    if (selectedOrg) {
-      fetchNetworks(selectedOrg);
-    } else {
-      setNetworks([]);
-      setSelectedNetwork('');
-    }
-  }, [selectedOrg]);
-
-  async function fetchOrganizations() {
-    setError(null);
-    try {
-      // Only fetch Meraki and Catalyst organizations (valid network platforms)
-      const orgs = await apiClient.getNetworkPlatformOrgs();
-      setOrganizations(orgs);
-      // Auto-select first org if available
-      if (orgs.length > 0) {
-        setSelectedOrg(orgs[0].name);
-      }
-    } catch (err) {
-      console.error('Failed to fetch network platform organizations:', err);
-      setError('Failed to load organizations. Please check your connection and try again.');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function fetchNetworks(orgName: string) {
-    setNetworksLoading(true);
-    try {
-      const nets = await apiClient.getMerakiNetworks(orgName);
-      setNetworks(Array.isArray(nets) ? nets : []);
-      // Auto-select first network if available
-      if (nets && nets.length > 0) {
-        setSelectedNetwork(nets[0].id);
-      } else {
-        setSelectedNetwork('');
-      }
-    } catch (err) {
-      console.error('Failed to fetch networks:', err);
-      setNetworks([]);
-      setSelectedNetwork('');
-    } finally {
-      setNetworksLoading(false);
-    }
-  }
-
-  const handleTabChange = useCallback((tab: VisualizationTab) => {
-    setActiveTab(tab);
-  }, []);
-
-  // Stats for the TopStatsBar based on active tab
-  const stats: StatItem[] = useMemo(() => {
-    if (activeTab === 'organization') {
-      return [
-        { id: 'orgs', label: 'Organizations', value: organizations.length, icon: 'server', tooltip: 'Total organizations available for visualization.' },
-        { id: 'networks', label: 'Networks', value: networks.length, icon: 'activity', tooltip: 'Networks within the selected organization.' },
-        { id: 'selected', label: 'Selected Org', value: selectedOrg || 'None', icon: 'activity', tooltip: 'Currently selected organization for viewing.' },
-        { id: 'status', label: 'Status', value: 'Ready', status: 'success', tooltip: 'Visualization system status.' },
-      ];
-    }
-    if (activeTab === 'topology') {
-      return [
-        { id: 'network', label: 'Network', value: networks.find(n => n.id === selectedNetwork)?.name || 'None', icon: 'server', tooltip: 'Network being visualized in topology view.' },
-        { id: 'products', label: 'Products', value: networks.find(n => n.id === selectedNetwork)?.productTypes?.length || 0, icon: 'activity', tooltip: 'Meraki product types in this network.' },
-        { id: 'org', label: 'Organization', value: selectedOrg || 'None', icon: 'activity', tooltip: 'Parent organization of the network.' },
-        { id: 'status', label: 'Status', value: selectedNetwork ? 'Connected' : 'Select Network', status: selectedNetwork ? 'success' : 'warning', tooltip: 'Topology data connection status.' },
-      ];
-    }
-    // Performance tab
-    return [
-      { id: 'network', label: 'Network', value: networks.find(n => n.id === selectedNetwork)?.name || 'None', icon: 'server', tooltip: 'Network being monitored for performance.' },
-      { id: 'timeRange', label: 'Time Range', value: '24h', icon: 'activity', tooltip: 'Time window for performance data.' },
-      { id: 'metrics', label: 'Metrics', value: '4 Active', icon: 'activity', tooltip: 'Number of performance metrics being tracked.' },
-      { id: 'status', label: 'Status', value: selectedNetwork ? 'Monitoring' : 'Select Network', status: selectedNetwork ? 'success' : 'warning', tooltip: 'Performance monitoring status.' },
-    ];
-  }, [activeTab, organizations.length, networks, selectedOrg, selectedNetwork]);
-
-  if (loading) {
-    return (
-      <div className="h-full bg-slate-50 dark:bg-slate-900">
-        <div className="px-6 py-6">
-          <div className="flex items-center justify-center h-64">
-            <div className="w-8 h-8 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+function LoadingSkeleton() {
+  return (
+    <div className="h-full bg-slate-50 dark:bg-slate-900">
+      <div className="px-6 py-6 max-w-[1800px] mx-auto">
+        {/* Header skeleton */}
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <div className="h-7 w-48 bg-slate-200 dark:bg-slate-700/50 rounded-lg animate-pulse" />
+            <div className="h-4 w-72 bg-slate-200 dark:bg-slate-700/50 rounded mt-2 animate-pulse" />
+          </div>
+          <div className="flex gap-3">
+            <div className="h-9 w-40 bg-slate-200 dark:bg-slate-700/50 rounded-lg animate-pulse" />
+            <div className="h-9 w-40 bg-slate-200 dark:bg-slate-700/50 rounded-lg animate-pulse" />
           </div>
         </div>
+        {/* Tab skeleton */}
+        <div className="h-10 w-96 bg-slate-200 dark:bg-slate-700/50 rounded-lg mb-6 animate-pulse" />
+        {/* Content skeleton */}
+        <div className="grid grid-cols-3 gap-4 mb-4">
+          {[1,2,3].map(i => (
+            <div key={i} className="h-32 bg-slate-200 dark:bg-slate-700/50 rounded-xl animate-pulse" style={{ animationDelay: `${i * 100}ms` }} />
+          ))}
+        </div>
+        <div className="h-96 bg-slate-200 dark:bg-slate-700/50 rounded-xl animate-pulse" style={{ animationDelay: '300ms' }} />
       </div>
-    );
-  }
+    </div>
+  );
+}
+
+// ============================================================================
+// Custom Select
+// ============================================================================
+
+function StyledSelect({ value, onChange, options, placeholder, disabled, id }: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+  placeholder: string;
+  disabled?: boolean;
+  id?: string;
+}) {
+  return (
+    <div className="relative">
+      <select
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className="appearance-none pl-3 pr-8 py-2 rounded-lg bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/60 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40 text-slate-800 dark:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm hover:shadow-md cursor-pointer min-w-[160px]"
+      >
+        <option value="">{placeholder}</option>
+        {options.map((opt) => (
+          <option key={opt.value} value={opt.value}>{opt.label}</option>
+        ))}
+      </select>
+      <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+    </div>
+  );
+}
+
+// ============================================================================
+// Main Page
+// ============================================================================
+
+const VALID_TABS = new Set<string>(['network-map', 'performance-v2', 'health-matrix']);
+
+export default function VisualizationsPageWrapper() {
+  return (
+    <Suspense fallback={<LoadingSkeleton />}>
+      <VisualizationsPage />
+    </Suspense>
+  );
+}
+
+function VisualizationsPage() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const hub = useVisualizationHub();
+
+  // Persist active tab in URL so browser back button restores it
+  const tabParam = searchParams.get('tab') || '';
+  const activeTab: VisualizationTabV2 = VALID_TABS.has(tabParam)
+    ? (tabParam as VisualizationTabV2)
+    : 'network-map';
+
+  const handleTabChange = useCallback((tab: VisualizationTabV2) => {
+    router.replace(`/visualizations?tab=${tab}`, { scroll: false });
+  }, [router]);
+
+  const selectedNetworkName = useMemo(() => {
+    return hub.networks.find(n => n.id === hub.selectedNetwork)?.name || '';
+  }, [hub.networks, hub.selectedNetwork]);
+
+  const orgOptions = useMemo(() => hub.organizations.map(org => ({
+    value: org.name,
+    label: `[${org.platform === 'meraki' ? 'Meraki' : 'Catalyst'}] ${org.display_name || org.name}`,
+  })), [hub.organizations]);
+
+  const networkOptions = useMemo(() => hub.networks.map(net => ({
+    value: net.id,
+    label: net.name,
+  })), [hub.networks]);
 
   return (
     <div className="h-full bg-slate-50 dark:bg-slate-900 overflow-auto">
-      <div className="px-6 py-6 max-w-[1800px] mx-auto">
+      <div className="px-6 py-5 max-w-[1800px] mx-auto">
         {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Network Visualizations</h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Interactive topology maps and performance analytics
-          </p>
+        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 mb-5">
+          <div>
+            <div className="flex items-center gap-4">
+              <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-500 bg-clip-text text-transparent">
+                Network Intelligence
+              </h1>
+              {hub.platformStatuses.length > 0 && (
+                <>
+                  <div className="h-5 w-px bg-slate-200 dark:bg-slate-700" />
+                  <div className="flex items-center gap-3">
+                    {hub.platformStatuses.map(p => (
+                      <PlatformIndicator
+                        key={p.platform}
+                        label={p.platform === 'thousandeyes' ? 'TE' : p.platform.charAt(0).toUpperCase() + p.platform.slice(1)}
+                        configured={p.configured}
+                        healthy={p.healthy}
+                        platform={p.platform}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+            <p className="text-[13px] text-slate-500 dark:text-slate-400 mt-1.5 font-light">
+              Unified topology, path analysis, and cross-platform health monitoring
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2.5">
+              <label htmlFor="viz-org-select" className="sr-only">Select organization</label>
+              <StyledSelect
+                id="viz-org-select"
+                value={hub.selectedOrg}
+                onChange={hub.setSelectedOrg}
+                options={orgOptions}
+                placeholder="Select Organization"
+              />
+
+              <label htmlFor="viz-network-select" className="sr-only">Select network</label>
+              <StyledSelect
+                id="viz-network-select"
+                value={hub.selectedNetwork}
+                onChange={hub.setSelectedNetwork}
+                options={networkOptions}
+                placeholder="Select Network"
+                disabled={!hub.selectedOrg}
+              />
+
+              <button
+                onClick={hub.refresh}
+                disabled={!hub.selectedOrg}
+                className="p-2.5 rounded-lg bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/60 text-slate-500 hover:text-cyan-500 dark:hover:text-cyan-400 transition-all shadow-sm hover:shadow-md disabled:opacity-40 disabled:cursor-not-allowed group"
+                aria-label="Refresh"
+              >
+                <RefreshCw className={`w-4 h-4 transition-transform group-hover:rotate-45 ${hub.topologyLoading ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
         </div>
 
-        {/* Error Alert */}
-        {error && (
+        {/* Error */}
+        {hub.error && (
           <ErrorAlert
             title="Connection Error"
-            message={error}
-            onRetry={fetchOrganizations}
-            onDismiss={() => setError(null)}
-            className="mb-6"
+            message={hub.error}
+            onDismiss={() => {}}
+            className="mb-5"
           />
         )}
 
-        {/* Tab Bar and Selectors */}
-        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 mb-6">
-          {/* Tab Bar */}
-          <VisualizationsTabBar activeTab={activeTab} onTabChange={handleTabChange} />
+        {/* Tab Bar */}
+        <div className="relative flex gap-0.5 p-1 bg-slate-100/80 dark:bg-slate-800/60 rounded-xl w-fit mb-5 backdrop-blur-sm border border-slate-200/50 dark:border-slate-700/30">
+          {TABS.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
 
-          {/* Selectors */}
-          <div className="flex items-center gap-3">
-            {/* Organization Selector (Meraki/Catalyst only) */}
-            <label htmlFor="viz-org-select" className="sr-only">Select organization</label>
-            <select
-              id="viz-org-select"
-              value={selectedOrg}
-              onChange={(e) => setSelectedOrg(e.target.value)}
-              aria-label="Select organization for visualization"
-              className="px-4 py-2 rounded-lg bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/50 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 text-slate-900 dark:text-white"
-            >
-              <option value="">Select Organization</option>
-              {organizations.map((org) => (
-                <option key={org.id} value={org.name}>
-                  [{org.platform === 'meraki' ? 'Meraki' : 'Catalyst'}] {org.display_name || org.name}
-                </option>
-              ))}
-            </select>
-
-            {/* Network Selector */}
-            <label htmlFor="viz-network-select" className="sr-only">Select network</label>
-            <select
-              id="viz-network-select"
-              value={selectedNetwork}
-              onChange={(e) => setSelectedNetwork(e.target.value)}
-              disabled={!selectedOrg || networksLoading}
-              aria-label="Select network for visualization"
-              className="px-4 py-2 rounded-lg bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/50 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 text-slate-900 dark:text-white disabled:opacity-50"
-            >
-              <option value="">
-                {networksLoading ? 'Loading...' : 'Select Network'}
-              </option>
-              {networks.map((network) => (
-                <option key={network.id} value={network.id}>
-                  {network.name}
-                </option>
-              ))}
-            </select>
-
-            {/* Refresh Button */}
-            <button
-              onClick={() => {
-                if (selectedOrg) fetchNetworks(selectedOrg);
-              }}
-              disabled={!selectedOrg}
-              aria-label={networksLoading ? 'Refreshing networks...' : 'Refresh networks'}
-              className="p-2 rounded-lg bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/50 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-cyan-500"
-            >
-              <RefreshCw className={`w-5 h-5 ${networksLoading ? 'animate-spin' : ''}`} aria-hidden="true" />
-            </button>
-          </div>
+            return (
+              <button
+                key={tab.id}
+                onClick={() => handleTabChange(tab.id)}
+                className={`relative px-4 py-2 text-[13px] font-medium rounded-lg transition-all duration-200 flex items-center gap-2 ${
+                  isActive
+                    ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-white/50 dark:hover:bg-slate-700/30'
+                }`}
+              >
+                <Icon className={`w-4 h-4 ${isActive ? 'text-cyan-500' : ''}`} />
+                {tab.label}
+                {isActive && (
+                  <motion.div
+                    layoutId="tab-indicator"
+                    className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-full"
+                    transition={{ type: 'spring', duration: 0.4, bounce: 0.15 }}
+                  />
+                )}
+              </button>
+            );
+          })}
         </div>
 
-        {/* Stats Bar */}
-        <TopStatsBar stats={stats} loading={networksLoading} className="mb-6" />
-
-        {/* Content */}
-        {activeTab === 'organization' ? (
-          // Organization VPN tab only needs org selected
-          !selectedOrg ? (
-            <div className="flex flex-col items-center justify-center h-96 theme-bg-secondary rounded-xl border theme-border">
-              <svg
-                className="w-16 h-16 theme-text-muted mb-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"
-                />
-              </svg>
-              <h3 className="text-lg font-semibold theme-text-primary mb-2">
-                Select an Organization
-              </h3>
-              <p className="text-sm theme-text-muted text-center max-w-md">
-                Choose an organization from the dropdown above to view the VPN hub-spoke topology
-                across all networks.
-              </p>
-            </div>
-          ) : (
-            <OrgWideTopology
-              organization={selectedOrg}
-              organizationId={selectedOrg}
-              organizationName={organizations.find((o) => o.name === selectedOrg)?.display_name || selectedOrg}
-            />
-          )
-        ) : !selectedOrg || !selectedNetwork ? (
-          // Network Topology and Performance tabs need both org and network selected
-          <div className="flex flex-col items-center justify-center h-96 theme-bg-secondary rounded-xl border theme-border">
-            <svg
-              className="w-16 h-16 theme-text-muted mb-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1.5}
-                d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"
-              />
-            </svg>
-            <h3 className="text-lg font-semibold theme-text-primary mb-2">
-              Select a Network
-            </h3>
-            <p className="text-sm theme-text-muted text-center max-w-md">
-              Choose an organization and network from the dropdowns above to view topology maps
-              and performance metrics.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-6">
-            {activeTab === 'topology' && (
-              <NetworkTopology
-                organization={selectedOrg}
-                networkId={selectedNetwork}
-                networkName={networks.find((n) => n.id === selectedNetwork)?.name || ''}
-              />
+        {/* Tab Content */}
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={activeTab}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.15, ease: 'easeOut' }}
+          >
+            {hub.loading ? (
+              <div className="flex flex-col items-center justify-center py-20 gap-3">
+                <Loader2 className="w-6 h-6 animate-spin text-cyan-500" />
+                <span className="text-sm text-slate-500">Loading platform data...</span>
+              </div>
+            ) : (
+              <>
+                {activeTab === 'network-map' && (
+                  <NetworkMapView
+                    hub={hub}
+                    networkName={selectedNetworkName}
+                  />
+                )}
+                {activeTab === 'performance-v2' && (
+                  <PerformanceView
+                    hub={hub}
+                    networkName={selectedNetworkName}
+                  />
+                )}
+                {activeTab === 'health-matrix' && (
+                  <HealthMatrixView hub={hub} />
+                )}
+              </>
             )}
-
-            {activeTab === 'performance' && (
-              <PerformanceCharts
-                organization={selectedOrg}
-                networkId={selectedNetwork}
-                networkName={networks.find((n) => n.id === selectedNetwork)?.name || ''}
-              />
-            )}
-          </div>
-        )}
+          </motion.div>
+        </AnimatePresence>
       </div>
     </div>
   );

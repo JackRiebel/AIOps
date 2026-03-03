@@ -6,7 +6,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import Navigation from './Navigation';
 import TopBar from './TopBar';
 import AISessionSummaryCard from './AISessionSummaryCard';
-import { OnboardingProvider } from './onboarding';
 
 export default function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -48,7 +47,7 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
 
   // Authenticated pages get navigation and top bar
   return (
-    <OnboardingProvider userName={user?.username}>
+    <>
       <Navigation />
       <TopBar />
       <main
@@ -63,6 +62,6 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
       </main>
       {/* Global AI Session Summary Modal - renders when completedSession is set */}
       <AISessionSummaryCard />
-    </OnboardingProvider>
+    </>
   );
 }

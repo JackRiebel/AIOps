@@ -1,4 +1,4 @@
-"""Standardized error handling for the Lumen API.
+"""Standardized error handling for the Cisco AIOps Hub API.
 
 This module provides:
 1. Custom exception classes for different error types

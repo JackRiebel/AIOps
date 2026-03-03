@@ -249,6 +249,24 @@ html.dark ::-webkit-scrollbar-thumb:hover {
 }
 
 /* ============================================
+   CANVAS GRID BACKGROUND ANIMATIONS
+   ============================================ */
+
+/* Grid pulse - gentle opacity breathing */
+@keyframes grid-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.animate-grid-pulse {
+  animation: grid-pulse 3s ease-in-out infinite;
+}
+
+/* ============================================
    AGENT FLOW VISUALIZATION ANIMATIONS
    ============================================ */
 

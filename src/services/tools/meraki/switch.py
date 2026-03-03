@@ -25,6 +25,17 @@ from src.services.meraki_api import MerakiAPIClient
 
 logger = logging.getLogger(__name__)
 
+
+def _validate_context(context: Any) -> Dict:
+    """Validate that context has a Meraki client configured."""
+    if not hasattr(context, 'client') or context.client is None:
+        return {
+            "success": False,
+            "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+        }
+    return None
+
+
 # =============================================================================
 # HANDLERS - Port Operations
 # =============================================================================
@@ -32,6 +43,8 @@ logger = logging.getLogger(__name__)
 async def handle_switch_list_ports(params: Dict, context: Any) -> Dict:
     """List the switch ports for a switch."""
     try:
+        if err := _validate_context(context): return err
+
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -46,6 +59,7 @@ async def handle_switch_list_ports(params: Dict, context: Any) -> Dict:
 async def handle_switch_get_port(params: Dict, context: Any) -> Dict:
     """Get a specific switch port configuration."""
     try:
+        if err := _validate_context(context): return err
         serial = params.get("serial")
         port_id = params.get("port_id") or params.get("portId")
         if not serial or not port_id:
@@ -61,6 +75,7 @@ async def handle_switch_get_port(params: Dict, context: Any) -> Dict:
 async def handle_switch_update_port(params: Dict, context: Any) -> Dict:
     """Update a switch port configuration."""
     try:
+        if err := _validate_context(context): return err
         serial = params.get("serial")
         port_id = params.get("port_id") or params.get("portId")
         if not serial or not port_id:
@@ -77,6 +92,7 @@ async def handle_switch_update_port(params: Dict, context: Any) -> Dict:
 async def handle_switch_cycle_ports(params: Dict, context: Any) -> Dict:
     """Cycle (power off then on) switch ports on a switch."""
     try:
+        if err := _validate_context(context): return err
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -92,6 +108,7 @@ async def handle_switch_cycle_ports(params: Dict, context: Any) -> Dict:
 async def handle_switch_get_ports_statuses(params: Dict, context: Any) -> Dict:
     """Get the status of all switch ports on a switch."""
     try:
+        if err := _validate_context(context): return err
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -107,6 +124,7 @@ async def handle_switch_get_ports_statuses(params: Dict, context: Any) -> Dict:
 async def handle_switch_get_ports_statuses_packets(params: Dict, context: Any) -> Dict:
     """Get the packet counters for all switch ports."""
     try:
+        if err := _validate_context(context): return err
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -126,6 +144,7 @@ async def handle_switch_get_ports_statuses_packets(params: Dict, context: Any) -
 async def handle_switch_list_stacks(params: Dict, context: Any) -> Dict:
     """List the switch stacks in a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -140,6 +159,7 @@ async def handle_switch_list_stacks(params: Dict, context: Any) -> Dict:
 async def handle_switch_create_stack(params: Dict, context: Any) -> Dict:
     """Create a switch stack in a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -155,6 +175,7 @@ async def handle_switch_create_stack(params: Dict, context: Any) -> Dict:
 async def handle_switch_get_stack(params: Dict, context: Any) -> Dict:
     """Get a specific switch stack."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         stack_id = params.get("stack_id") or params.get("stackId")
         if not network_id or not stack_id:
@@ -170,6 +191,7 @@ async def handle_switch_get_stack(params: Dict, context: Any) -> Dict:
 async def handle_switch_delete_stack(params: Dict, context: Any) -> Dict:
     """Delete a switch stack."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         stack_id = params.get("stack_id") or params.get("stackId")
         if not network_id or not stack_id:
@@ -185,6 +207,7 @@ async def handle_switch_delete_stack(params: Dict, context: Any) -> Dict:
 async def handle_switch_add_to_stack(params: Dict, context: Any) -> Dict:
     """Add a switch to an existing stack."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         stack_id = params.get("stack_id") or params.get("stackId")
         serial = params.get("serial")
@@ -202,6 +225,7 @@ async def handle_switch_add_to_stack(params: Dict, context: Any) -> Dict:
 async def handle_switch_remove_from_stack(params: Dict, context: Any) -> Dict:
     """Remove a switch from a stack."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         stack_id = params.get("stack_id") or params.get("stackId")
         serial = params.get("serial")
@@ -223,6 +247,7 @@ async def handle_switch_remove_from_stack(params: Dict, context: Any) -> Dict:
 async def handle_switch_list_routing_interfaces(params: Dict, context: Any) -> Dict:
     """List layer 3 routing interfaces on a switch."""
     try:
+        if err := _validate_context(context): return err
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -237,6 +262,7 @@ async def handle_switch_list_routing_interfaces(params: Dict, context: Any) -> D
 async def handle_switch_create_routing_interface(params: Dict, context: Any) -> Dict:
     """Create a layer 3 routing interface on a switch."""
     try:
+        if err := _validate_context(context): return err
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -252,6 +278,7 @@ async def handle_switch_create_routing_interface(params: Dict, context: Any) -> 
 async def handle_switch_get_routing_interface(params: Dict, context: Any) -> Dict:
     """Get a specific layer 3 routing interface."""
     try:
+        if err := _validate_context(context): return err
         serial = params.get("serial")
         interface_id = params.get("interface_id") or params.get("interfaceId")
         if not serial or not interface_id:
@@ -267,6 +294,7 @@ async def handle_switch_get_routing_interface(params: Dict, context: Any) -> Dic
 async def handle_switch_update_routing_interface(params: Dict, context: Any) -> Dict:
     """Update a layer 3 routing interface."""
     try:
+        if err := _validate_context(context): return err
         serial = params.get("serial")
         interface_id = params.get("interface_id") or params.get("interfaceId")
         if not serial or not interface_id:
@@ -283,6 +311,7 @@ async def handle_switch_update_routing_interface(params: Dict, context: Any) -> 
 async def handle_switch_delete_routing_interface(params: Dict, context: Any) -> Dict:
     """Delete a layer 3 routing interface."""
     try:
+        if err := _validate_context(context): return err
         serial = params.get("serial")
         interface_id = params.get("interface_id") or params.get("interfaceId")
         if not serial or not interface_id:
@@ -302,6 +331,7 @@ async def handle_switch_delete_routing_interface(params: Dict, context: Any) -> 
 async def handle_switch_list_static_routes(params: Dict, context: Any) -> Dict:
     """List layer 3 static routes on a switch."""
     try:
+        if err := _validate_context(context): return err
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -316,6 +346,7 @@ async def handle_switch_list_static_routes(params: Dict, context: Any) -> Dict:
 async def handle_switch_create_static_route(params: Dict, context: Any) -> Dict:
     """Create a layer 3 static route on a switch."""
     try:
+        if err := _validate_context(context): return err
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -331,6 +362,7 @@ async def handle_switch_create_static_route(params: Dict, context: Any) -> Dict:
 async def handle_switch_get_static_route(params: Dict, context: Any) -> Dict:
     """Get a specific layer 3 static route."""
     try:
+        if err := _validate_context(context): return err
         serial = params.get("serial")
         static_route_id = params.get("static_route_id") or params.get("staticRouteId")
         if not serial or not static_route_id:
@@ -346,6 +378,7 @@ async def handle_switch_get_static_route(params: Dict, context: Any) -> Dict:
 async def handle_switch_update_static_route(params: Dict, context: Any) -> Dict:
     """Update a layer 3 static route."""
     try:
+        if err := _validate_context(context): return err
         serial = params.get("serial")
         static_route_id = params.get("static_route_id") or params.get("staticRouteId")
         if not serial or not static_route_id:
@@ -362,6 +395,7 @@ async def handle_switch_update_static_route(params: Dict, context: Any) -> Dict:
 async def handle_switch_delete_static_route(params: Dict, context: Any) -> Dict:
     """Delete a layer 3 static route."""
     try:
+        if err := _validate_context(context): return err
         serial = params.get("serial")
         static_route_id = params.get("static_route_id") or params.get("staticRouteId")
         if not serial or not static_route_id:
@@ -381,6 +415,7 @@ async def handle_switch_delete_static_route(params: Dict, context: Any) -> Dict:
 async def handle_switch_get_ospf(params: Dict, context: Any) -> Dict:
     """Get the OSPF routing settings for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -395,6 +430,7 @@ async def handle_switch_get_ospf(params: Dict, context: Any) -> Dict:
 async def handle_switch_update_ospf(params: Dict, context: Any) -> Dict:
     """Update the OSPF routing settings for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -410,6 +446,7 @@ async def handle_switch_update_ospf(params: Dict, context: Any) -> Dict:
 async def handle_switch_get_multicast(params: Dict, context: Any) -> Dict:
     """Get the multicast settings for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -424,6 +461,7 @@ async def handle_switch_get_multicast(params: Dict, context: Any) -> Dict:
 async def handle_switch_update_multicast(params: Dict, context: Any) -> Dict:
     """Update the multicast settings for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -443,6 +481,7 @@ async def handle_switch_update_multicast(params: Dict, context: Any) -> Dict:
 async def handle_switch_list_access_policies(params: Dict, context: Any) -> Dict:
     """List the access policies for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -457,6 +496,7 @@ async def handle_switch_list_access_policies(params: Dict, context: Any) -> Dict
 async def handle_switch_create_access_policy(params: Dict, context: Any) -> Dict:
     """Create an access policy for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -472,6 +512,7 @@ async def handle_switch_create_access_policy(params: Dict, context: Any) -> Dict
 async def handle_switch_get_access_policy(params: Dict, context: Any) -> Dict:
     """Get a specific access policy."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         access_policy_number = params.get("access_policy_number") or params.get("accessPolicyNumber")
         if not network_id or not access_policy_number:
@@ -487,6 +528,7 @@ async def handle_switch_get_access_policy(params: Dict, context: Any) -> Dict:
 async def handle_switch_update_access_policy(params: Dict, context: Any) -> Dict:
     """Update an access policy."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         access_policy_number = params.get("access_policy_number") or params.get("accessPolicyNumber")
         if not network_id or not access_policy_number:
@@ -503,6 +545,7 @@ async def handle_switch_update_access_policy(params: Dict, context: Any) -> Dict
 async def handle_switch_delete_access_policy(params: Dict, context: Any) -> Dict:
     """Delete an access policy."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         access_policy_number = params.get("access_policy_number") or params.get("accessPolicyNumber")
         if not network_id or not access_policy_number:
@@ -522,6 +565,7 @@ async def handle_switch_delete_access_policy(params: Dict, context: Any) -> Dict
 async def handle_switch_get_acls(params: Dict, context: Any) -> Dict:
     """Get the access control lists for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -536,6 +580,7 @@ async def handle_switch_get_acls(params: Dict, context: Any) -> Dict:
 async def handle_switch_update_acls(params: Dict, context: Any) -> Dict:
     """Update the access control lists for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -555,6 +600,7 @@ async def handle_switch_update_acls(params: Dict, context: Any) -> Dict:
 async def handle_switch_list_qos_rules(params: Dict, context: Any) -> Dict:
     """List the QoS rules for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -569,6 +615,7 @@ async def handle_switch_list_qos_rules(params: Dict, context: Any) -> Dict:
 async def handle_switch_create_qos_rule(params: Dict, context: Any) -> Dict:
     """Create a QoS rule for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -584,6 +631,7 @@ async def handle_switch_create_qos_rule(params: Dict, context: Any) -> Dict:
 async def handle_switch_get_qos_rule(params: Dict, context: Any) -> Dict:
     """Get a specific QoS rule."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         qos_rule_id = params.get("qos_rule_id") or params.get("qosRuleId")
         if not network_id or not qos_rule_id:
@@ -599,6 +647,7 @@ async def handle_switch_get_qos_rule(params: Dict, context: Any) -> Dict:
 async def handle_switch_update_qos_rule(params: Dict, context: Any) -> Dict:
     """Update a QoS rule."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         qos_rule_id = params.get("qos_rule_id") or params.get("qosRuleId")
         if not network_id or not qos_rule_id:
@@ -615,6 +664,7 @@ async def handle_switch_update_qos_rule(params: Dict, context: Any) -> Dict:
 async def handle_switch_delete_qos_rule(params: Dict, context: Any) -> Dict:
     """Delete a QoS rule."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         qos_rule_id = params.get("qos_rule_id") or params.get("qosRuleId")
         if not network_id or not qos_rule_id:
@@ -630,6 +680,7 @@ async def handle_switch_delete_qos_rule(params: Dict, context: Any) -> Dict:
 async def handle_switch_get_qos_rules_order(params: Dict, context: Any) -> Dict:
     """Get the order of QoS rules for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -644,6 +695,7 @@ async def handle_switch_get_qos_rules_order(params: Dict, context: Any) -> Dict:
 async def handle_switch_update_qos_rules_order(params: Dict, context: Any) -> Dict:
     """Update the order of QoS rules for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -663,6 +715,7 @@ async def handle_switch_update_qos_rules_order(params: Dict, context: Any) -> Di
 async def handle_switch_get_dhcp_servers_seen(params: Dict, context: Any) -> Dict:
     """Get the DHCP servers seen by switches in a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -678,6 +731,7 @@ async def handle_switch_get_dhcp_servers_seen(params: Dict, context: Any) -> Dic
 async def handle_switch_get_dhcp_server_policy(params: Dict, context: Any) -> Dict:
     """Get the DHCP server policy for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -692,6 +746,7 @@ async def handle_switch_get_dhcp_server_policy(params: Dict, context: Any) -> Di
 async def handle_switch_update_dhcp_server_policy(params: Dict, context: Any) -> Dict:
     """Update the DHCP server policy for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -711,6 +766,7 @@ async def handle_switch_update_dhcp_server_policy(params: Dict, context: Any) ->
 async def handle_switch_list_link_aggregations(params: Dict, context: Any) -> Dict:
     """List the link aggregations for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -725,6 +781,7 @@ async def handle_switch_list_link_aggregations(params: Dict, context: Any) -> Di
 async def handle_switch_create_link_aggregation(params: Dict, context: Any) -> Dict:
     """Create a link aggregation group in a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -740,6 +797,7 @@ async def handle_switch_create_link_aggregation(params: Dict, context: Any) -> D
 async def handle_switch_get_link_aggregation(params: Dict, context: Any) -> Dict:
     """Get a specific link aggregation group."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         link_aggregation_id = params.get("link_aggregation_id") or params.get("linkAggregationId")
         if not network_id or not link_aggregation_id:
@@ -755,6 +813,7 @@ async def handle_switch_get_link_aggregation(params: Dict, context: Any) -> Dict
 async def handle_switch_update_link_aggregation(params: Dict, context: Any) -> Dict:
     """Update a link aggregation group."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         link_aggregation_id = params.get("link_aggregation_id") or params.get("linkAggregationId")
         if not network_id or not link_aggregation_id:
@@ -771,6 +830,7 @@ async def handle_switch_update_link_aggregation(params: Dict, context: Any) -> D
 async def handle_switch_delete_link_aggregation(params: Dict, context: Any) -> Dict:
     """Delete a link aggregation group."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         link_aggregation_id = params.get("link_aggregation_id") or params.get("linkAggregationId")
         if not network_id or not link_aggregation_id:
@@ -790,6 +850,7 @@ async def handle_switch_delete_link_aggregation(params: Dict, context: Any) -> D
 async def handle_switch_get_mtu(params: Dict, context: Any) -> Dict:
     """Get the MTU configuration for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -804,6 +865,7 @@ async def handle_switch_get_mtu(params: Dict, context: Any) -> Dict:
 async def handle_switch_update_mtu(params: Dict, context: Any) -> Dict:
     """Update the MTU configuration for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -823,6 +885,7 @@ async def handle_switch_update_mtu(params: Dict, context: Any) -> Dict:
 async def handle_switch_list_port_schedules(params: Dict, context: Any) -> Dict:
     """List the port schedules for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -837,6 +900,7 @@ async def handle_switch_list_port_schedules(params: Dict, context: Any) -> Dict:
 async def handle_switch_create_port_schedule(params: Dict, context: Any) -> Dict:
     """Create a port schedule for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -852,6 +916,7 @@ async def handle_switch_create_port_schedule(params: Dict, context: Any) -> Dict
 async def handle_switch_update_port_schedule(params: Dict, context: Any) -> Dict:
     """Update a port schedule."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         port_schedule_id = params.get("port_schedule_id") or params.get("portScheduleId")
         if not network_id or not port_schedule_id:
@@ -868,6 +933,7 @@ async def handle_switch_update_port_schedule(params: Dict, context: Any) -> Dict
 async def handle_switch_delete_port_schedule(params: Dict, context: Any) -> Dict:
     """Delete a port schedule."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         port_schedule_id = params.get("port_schedule_id") or params.get("portScheduleId")
         if not network_id or not port_schedule_id:
@@ -887,6 +953,7 @@ async def handle_switch_delete_port_schedule(params: Dict, context: Any) -> Dict
 async def handle_switch_get_settings(params: Dict, context: Any) -> Dict:
     """Get the switch settings for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -901,6 +968,7 @@ async def handle_switch_get_settings(params: Dict, context: Any) -> Dict:
 async def handle_switch_update_settings(params: Dict, context: Any) -> Dict:
     """Update the switch settings for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -920,6 +988,7 @@ async def handle_switch_update_settings(params: Dict, context: Any) -> Dict:
 async def handle_switch_get_warm_spare(params: Dict, context: Any) -> Dict:
     """Get the warm spare configuration for a switch."""
     try:
+        if err := _validate_context(context): return err
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -934,6 +1003,7 @@ async def handle_switch_get_warm_spare(params: Dict, context: Any) -> Dict:
 async def handle_switch_update_warm_spare(params: Dict, context: Any) -> Dict:
     """Update the warm spare configuration for a switch."""
     try:
+        if err := _validate_context(context): return err
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -953,6 +1023,7 @@ async def handle_switch_update_warm_spare(params: Dict, context: Any) -> Dict:
 async def handle_switch_get_dscp_cos_mappings(params: Dict, context: Any) -> Dict:
     """Get the DSCP to CoS mappings for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -967,6 +1038,7 @@ async def handle_switch_get_dscp_cos_mappings(params: Dict, context: Any) -> Dic
 async def handle_switch_update_dscp_cos_mappings(params: Dict, context: Any) -> Dict:
     """Update the DSCP to CoS mappings for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -986,6 +1058,7 @@ async def handle_switch_update_dscp_cos_mappings(params: Dict, context: Any) -> 
 async def handle_switch_get_stp(params: Dict, context: Any) -> Dict:
     """Get the STP settings for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -1000,6 +1073,7 @@ async def handle_switch_get_stp(params: Dict, context: Any) -> Dict:
 async def handle_switch_update_stp(params: Dict, context: Any) -> Dict:
     """Update the STP settings for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -1019,6 +1093,7 @@ async def handle_switch_update_stp(params: Dict, context: Any) -> Dict:
 async def handle_switch_get_storm_control(params: Dict, context: Any) -> Dict:
     """Get the storm control configuration for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -1033,6 +1108,7 @@ async def handle_switch_get_storm_control(params: Dict, context: Any) -> Dict:
 async def handle_switch_update_storm_control(params: Dict, context: Any) -> Dict:
     """Update the storm control configuration for a network."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id") or params.get("networkId")
         if not network_id:
             return {"success": False, "error": "network_id is required"}

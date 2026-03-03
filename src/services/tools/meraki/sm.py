@@ -14,6 +14,17 @@ from src.services.meraki_api import MerakiAPIClient
 
 logger = logging.getLogger(__name__)
 
+
+def _validate_context(context: Any) -> Dict:
+    """Validate that context has a Meraki client configured."""
+    if not hasattr(context, 'client') or context.client is None:
+        return {
+            "success": False,
+            "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+        }
+    return None
+
+
 # =============================================================================
 # HANDLERS
 # =============================================================================
@@ -21,6 +32,7 @@ logger = logging.getLogger(__name__)
 async def handle_sm_list_devices(params: Dict, context: Any) -> Dict:
     """Handler for List SM Devices."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sm/list/devices"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -35,6 +47,7 @@ async def handle_sm_list_devices(params: Dict, context: Any) -> Dict:
 async def handle_sm_get_device_desktop_logs(params: Dict, context: Any) -> Dict:
     """Handler for Get SM Device Desktop Logs."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sm/get/device/desktop/logs"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -49,6 +62,7 @@ async def handle_sm_get_device_desktop_logs(params: Dict, context: Any) -> Dict:
 async def handle_sm_get_device_command_logs(params: Dict, context: Any) -> Dict:
     """Handler for Get SM Device Command Logs."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sm/get/device/command/logs"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -63,6 +77,7 @@ async def handle_sm_get_device_command_logs(params: Dict, context: Any) -> Dict:
 async def handle_sm_get_device_profiles(params: Dict, context: Any) -> Dict:
     """Handler for Get SM Device Profiles."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sm/get/device/profiles"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -77,6 +92,7 @@ async def handle_sm_get_device_profiles(params: Dict, context: Any) -> Dict:
 async def handle_sm_get_device_restrictions(params: Dict, context: Any) -> Dict:
     """Handler for Get SM Device Restrictions."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sm/get/device/restrictions"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -91,6 +107,7 @@ async def handle_sm_get_device_restrictions(params: Dict, context: Any) -> Dict:
 async def handle_sm_get_device_software(params: Dict, context: Any) -> Dict:
     """Handler for Get SM Device Software."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sm/get/device/software"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -105,6 +122,7 @@ async def handle_sm_get_device_software(params: Dict, context: Any) -> Dict:
 async def handle_sm_get_device_security_centers(params: Dict, context: Any) -> Dict:
     """Handler for Get SM Device Security Centers."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sm/get/device/security/centers"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -119,6 +137,7 @@ async def handle_sm_get_device_security_centers(params: Dict, context: Any) -> D
 async def handle_sm_get_device_network_adapters(params: Dict, context: Any) -> Dict:
     """Handler for Get SM Device Network Adapters."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sm/get/device/network/adapters"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -133,6 +152,7 @@ async def handle_sm_get_device_network_adapters(params: Dict, context: Any) -> D
 async def handle_sm_get_device_wlan_lists(params: Dict, context: Any) -> Dict:
     """Handler for Get SM Device WLAN Lists."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sm/get/device/wlan/lists"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -147,6 +167,7 @@ async def handle_sm_get_device_wlan_lists(params: Dict, context: Any) -> Dict:
 async def handle_sm_get_device_connectivity(params: Dict, context: Any) -> Dict:
     """Handler for Get SM Device Connectivity."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sm/get/device/connectivity"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -161,6 +182,7 @@ async def handle_sm_get_device_connectivity(params: Dict, context: Any) -> Dict:
 async def handle_sm_get_device_performance_history(params: Dict, context: Any) -> Dict:
     """Handler for Get SM Device Performance History."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sm/get/device/performance/history"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -175,6 +197,7 @@ async def handle_sm_get_device_performance_history(params: Dict, context: Any) -
 async def handle_sm_lock_devices(params: Dict, context: Any) -> Dict:
     """Handler for Lock SM Devices."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sm/lock/devices"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -189,6 +212,7 @@ async def handle_sm_lock_devices(params: Dict, context: Any) -> Dict:
 async def handle_sm_wipe_devices(params: Dict, context: Any) -> Dict:
     """Handler for Wipe SM Devices."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sm/wipe/devices"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -203,6 +227,7 @@ async def handle_sm_wipe_devices(params: Dict, context: Any) -> Dict:
 async def handle_sm_move_devices(params: Dict, context: Any) -> Dict:
     """Handler for Move SM Devices."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sm/move/devices"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -217,6 +242,7 @@ async def handle_sm_move_devices(params: Dict, context: Any) -> Dict:
 async def handle_sm_unenroll_device(params: Dict, context: Any) -> Dict:
     """Handler for Unenroll SM Device."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sm/unenroll/device"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -231,6 +257,7 @@ async def handle_sm_unenroll_device(params: Dict, context: Any) -> Dict:
 async def handle_sm_modify_device_tags(params: Dict, context: Any) -> Dict:
     """Handler for Modify SM Device Tags."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sm/modify/device/tags"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -245,6 +272,7 @@ async def handle_sm_modify_device_tags(params: Dict, context: Any) -> Dict:
 async def handle_sm_checkin_devices(params: Dict, context: Any) -> Dict:
     """Handler for Check In SM Devices."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sm/checkin/devices"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -259,6 +287,7 @@ async def handle_sm_checkin_devices(params: Dict, context: Any) -> Dict:
 async def handle_sm_refresh_device_details(params: Dict, context: Any) -> Dict:
     """Handler for Refresh SM Device Details."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sm/refresh/device/details"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -273,6 +302,7 @@ async def handle_sm_refresh_device_details(params: Dict, context: Any) -> Dict:
 async def handle_sm_list_users(params: Dict, context: Any) -> Dict:
     """Handler for List SM Users."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sm/list/users"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -287,6 +317,7 @@ async def handle_sm_list_users(params: Dict, context: Any) -> Dict:
 async def handle_sm_get_user_device_profiles(params: Dict, context: Any) -> Dict:
     """Handler for Get SM User Device Profiles."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sm/get/user/device/profiles"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -301,6 +332,7 @@ async def handle_sm_get_user_device_profiles(params: Dict, context: Any) -> Dict
 async def handle_sm_get_user_softwares(params: Dict, context: Any) -> Dict:
     """Handler for Get SM User Softwares."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sm/get/user/softwares"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -315,6 +347,7 @@ async def handle_sm_get_user_softwares(params: Dict, context: Any) -> Dict:
 async def handle_sm_list_profiles(params: Dict, context: Any) -> Dict:
     """Handler for List SM Profiles."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sm/list/profiles"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -329,6 +362,7 @@ async def handle_sm_list_profiles(params: Dict, context: Any) -> Dict:
 async def handle_sm_list_target_groups(params: Dict, context: Any) -> Dict:
     """Handler for List SM Target Groups."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sm/list/target/groups"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -343,6 +377,7 @@ async def handle_sm_list_target_groups(params: Dict, context: Any) -> Dict:
 async def handle_sm_create_target_group(params: Dict, context: Any) -> Dict:
     """Handler for Create SM Target Group."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sm/create/target/group"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -357,6 +392,7 @@ async def handle_sm_create_target_group(params: Dict, context: Any) -> Dict:
 async def handle_sm_get_target_group(params: Dict, context: Any) -> Dict:
     """Handler for Get SM Target Group."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sm/get/target/group"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -371,6 +407,7 @@ async def handle_sm_get_target_group(params: Dict, context: Any) -> Dict:
 async def handle_sm_update_target_group(params: Dict, context: Any) -> Dict:
     """Handler for Update SM Target Group."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sm/update/target/group"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -385,6 +422,7 @@ async def handle_sm_update_target_group(params: Dict, context: Any) -> Dict:
 async def handle_sm_delete_target_group(params: Dict, context: Any) -> Dict:
     """Handler for Delete SM Target Group."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sm/delete/target/group"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -399,6 +437,7 @@ async def handle_sm_delete_target_group(params: Dict, context: Any) -> Dict:
 async def handle_sm_get_bypass_activation_lock_attempts(params: Dict, context: Any) -> Dict:
     """Handler for Get Bypass Activation Lock Attempts."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sm/get/bypass/activation/lock/attempts"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -413,6 +452,7 @@ async def handle_sm_get_bypass_activation_lock_attempts(params: Dict, context: A
 async def handle_sm_create_bypass_activation_lock_attempt(params: Dict, context: Any) -> Dict:
     """Handler for Create Bypass Activation Lock Attempt."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/sm/create/bypass/activation/lock/attempt"
         path = path.replace("{network_id}", params.get("network_id", ""))

@@ -246,71 +246,49 @@ async def get_credentials(organization: str) -> Dict[str, Any]:
 
 async def get_current_user_from_session(
     request: Request,
-    db: AsyncSession = Depends(get_db_session),
 ) -> "User":
-    """Get current authenticated user from session cookie.
+    """Get current authenticated user from session.
+
+    Uses the lightweight user object already validated and stored by
+    SessionAuthMiddleware, avoiding opening an extra DB session that
+    would be held for the entire request duration.
 
     Args:
         request: FastAPI request
-        db: Database session
 
     Returns:
-        Current user
+        Current user (lightweight _AuthenticatedUser from middleware)
 
     Raises:
         HTTPException 401: If not authenticated
     """
-    from src.services.auth_service import AuthService
-    from src.models.user import User
+    # The middleware has already validated the session and stored the user
+    if hasattr(request.state, "user") and request.state.user:
+        return request.state.user
 
-    # Get session token from cookie
-    session_token = request.cookies.get(AuthService.SESSION_COOKIE_NAME)
-
-    if not session_token:
-        raise HTTPException(
-            status_code=401,
-            detail="Not authenticated - no session cookie",
-            headers={"WWW-Authenticate": "Cookie"},
-        )
-
-    # Get user from session
-    user = await AuthService.get_user_from_session(db, session_token)
-
-    if not user:
-        raise HTTPException(
-            status_code=401,
-            detail="Not authenticated - invalid or expired session",
-            headers={"WWW-Authenticate": "Cookie"},
-        )
-
-    return user
+    raise HTTPException(
+        status_code=401,
+        detail="Not authenticated - no session",
+        headers={"WWW-Authenticate": "Cookie"},
+    )
 
 
 async def get_current_user_optional(
     request: Request,
-    db: AsyncSession = Depends(get_db_session),
 ) -> Optional["User"]:
     """Get current user from session if authenticated, or None if not.
 
-    This is a non-throwing version of get_current_user_from_session
-    for endpoints that can work with or without authentication.
+    Uses the lightweight user object from SessionAuthMiddleware.
 
     Args:
         request: FastAPI request
-        db: Database session
 
     Returns:
         Current user if authenticated, None otherwise
     """
-    from src.services.auth_service import AuthService
-    from src.models.user import User
-
-    session_token = request.cookies.get(AuthService.SESSION_COOKIE_NAME)
-    if not session_token:
-        return None
-
-    user = await AuthService.get_user_from_session(db, session_token)
-    return user
+    if hasattr(request.state, "user") and request.state.user:
+        return request.state.user
+    return None
 
 
 async def get_current_active_user(
@@ -395,37 +373,21 @@ async def require_viewer(
 
 async def get_optional_user(
     request: Request,
-    db: AsyncSession = Depends(get_db_session),
 ) -> Optional["User"]:
     """Get current user if authenticated, None otherwise.
 
-    Unlike require_* dependencies, this does not raise an exception
-    if the user is not authenticated. Useful for endpoints that
-    behave differently for authenticated vs anonymous users.
+    Uses the lightweight user object from SessionAuthMiddleware.
 
     Args:
         request: FastAPI request
-        db: Database session
 
     Returns:
         Current user if authenticated, None otherwise
     """
-    from src.services.auth_service import AuthService
-    from src.models.user import User
-
-    # Get session token from cookie
-    session_token = request.cookies.get(AuthService.SESSION_COOKIE_NAME)
-
-    if not session_token:
-        return None
-
-    # Get user from session
-    user = await AuthService.get_user_from_session(db, session_token)
-
-    if not user or not user.is_active:
-        return None
-
-    return user
+    user = getattr(request.state, "user", None)
+    if user and getattr(user, "is_active", True):
+        return user
+    return None
 
 
 # ===================================================================

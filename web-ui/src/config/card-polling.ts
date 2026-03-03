@@ -367,6 +367,60 @@ export const CARD_POLLING_CONFIG: Record<string, CardPollingConfig> = {
     pollingInterval: 30000,
     contextMessage: 'Select a network to view client timeline',
   },
+
+  // =========================================================================
+  // Device-Specific Cards
+  // =========================================================================
+  'device-detail': {
+    endpoint: '/api/cards/device-detail/{networkId}/data',
+    requires: 'networkId',
+    pollingInterval: 30000,
+    contextMessage: 'Select a network to view device details',
+  },
+  'device-comparison': {
+    endpoint: '/api/cards/device-comparison/{networkId}/data',
+    requires: 'networkId',
+    pollingInterval: 60000,
+    contextMessage: 'Select a network to compare devices',
+  },
+  'interface-status': {
+    endpoint: '/api/cards/interface-status/{networkId}/data',
+    requires: 'networkId',
+    pollingInterval: 15000,
+    contextMessage: 'Select a network to view interface status',
+  },
+  'switch-ports': {
+    endpoint: '/api/cards/switch-ports/{networkId}/data',
+    requires: 'networkId',
+    pollingInterval: 30000,
+    contextMessage: 'Select a network to view switch ports',
+  },
+
+  // =========================================================================
+  // WAN/SD-WAN Cards
+  // =========================================================================
+  'sd-wan-health': {
+    endpoint: '/api/cards/sd-wan-health/{networkId}/data',
+    requires: 'networkId',
+    pollingInterval: 30000,
+    contextMessage: 'Select a network to view SD-WAN health',
+  },
+  'uplink-status': {
+    endpoint: '/api/cards/uplink-status/{networkId}/data',
+    requires: 'networkId',
+    pollingInterval: 15000,
+    contextMessage: 'Select a network to view uplink status',
+  },
+
+  // =========================================================================
+  // Trend Cards
+  // =========================================================================
+  'health-trend': {
+    endpoint: '/api/cards/health-trend/{networkId}/data',
+    requires: 'networkId',
+    pollingInterval: 60000,
+    contextMessage: 'Select a network to view health trends',
+  },
 };
 
 /**

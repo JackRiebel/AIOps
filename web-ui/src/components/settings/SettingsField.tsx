@@ -8,7 +8,7 @@ export interface FieldConfig {
   description?: string;
   placeholder?: string;
   defaultValue?: string;  // Pre-filled value when no config exists
-  type?: 'text' | 'password' | 'url' | 'number' | 'select' | 'boolean';
+  type?: 'text' | 'password' | 'url' | 'number' | 'select' | 'multiselect' | 'boolean';
   options?: string[];
   required?: boolean;
   helpUrl?: string;
@@ -33,6 +33,8 @@ export function SettingsField({
 }: SettingsFieldProps) {
   const [showPassword, setShowPassword] = useState(false);
   const isPassword = config.type === 'password';
+  // Password fields with a stored DB/env value but empty display value
+  const hasStoredSecret = isPassword && !value && (source === 'database' || source === 'env');
 
   const handleChange = (newValue: string) => {
     onChange(config.key, newValue);
@@ -98,6 +100,75 @@ export function SettingsField({
       );
     }
 
+    // Multi-select checkboxes
+    if (config.type === 'multiselect' && config.options) {
+      const selected = value ? value.split(',').map(s => s.trim()).filter(Boolean) : [];
+      const isAll = selected.length === 0 || selected.includes('all');
+
+      const toggleOption = (opt: string) => {
+        if (opt === 'all') {
+          handleChange('all');
+          return;
+        }
+        let next: string[];
+        if (isAll) {
+          // Switching from "all" to a specific selection
+          next = [opt];
+        } else if (selected.includes(opt)) {
+          next = selected.filter(s => s !== opt);
+          if (next.length === 0) next = ['all'];
+        } else {
+          next = [...selected, opt];
+          // If all non-"all" options are selected, revert to "all"
+          const nonAllOptions = config.options!.filter(o => o !== 'all');
+          if (nonAllOptions.every(o => next.includes(o))) next = ['all'];
+        }
+        handleChange(next.join(','));
+      };
+
+      return (
+        <div className="flex flex-wrap gap-2">
+          {config.options.map((opt) => {
+            const checked = opt === 'all' ? isAll : (!isAll && selected.includes(opt));
+            return (
+              <label
+                key={opt}
+                className={`
+                  inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-sm cursor-pointer transition-colors
+                  ${checked
+                    ? 'bg-cyan-50 dark:bg-cyan-500/10 border-cyan-300 dark:border-cyan-500/30 text-cyan-700 dark:text-cyan-300'
+                    : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600'
+                  }
+                  ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
+                `}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggleOption(opt)}
+                  disabled={disabled}
+                  className="sr-only"
+                />
+                <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0
+                  ${checked
+                    ? 'bg-cyan-500 border-cyan-500'
+                    : 'border-slate-300 dark:border-slate-600'
+                  }`}
+                >
+                  {checked && (
+                    <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                </span>
+                {opt}
+              </label>
+            );
+          })}
+        </div>
+      );
+    }
+
     // Number input
     if (config.type === 'number') {
       return (
@@ -120,7 +191,7 @@ export function SettingsField({
             type={showPassword ? 'text' : 'password'}
             value={value}
             onChange={(e) => handleChange(e.target.value)}
-            placeholder={config.placeholder || 'Enter value...'}
+            placeholder={hasStoredSecret ? '••••••••  (stored — type to replace)' : (config.placeholder || 'Enter value...')}
             disabled={disabled}
             className={`${baseClasses} pr-10`}
           />

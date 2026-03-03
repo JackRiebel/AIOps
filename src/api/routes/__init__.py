@@ -6,6 +6,7 @@ from src.api.routes import (
     ai_analysis,
     ai_feedback,
     ai_sessions,
+    artifacts,
     audit,
     auth,
     canvases,
@@ -26,6 +27,7 @@ from src.api.routes import (
     security,
     settings,
     splunk,
+    streaming,
     thousandeyes,
 )
 
@@ -35,6 +37,7 @@ __all__ = [
     "ai_analysis",
     "ai_feedback",
     "ai_sessions",
+    "artifacts",
     "audit",
     "auth",
     "canvases",
@@ -55,5 +58,6 @@ __all__ = [
     "security",
     "settings",
     "splunk",
+    "streaming",
     "thousandeyes",
 ]

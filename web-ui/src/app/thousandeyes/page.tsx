@@ -1,274 +1,196 @@
 'use client';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
-import { RefreshCw, AlertTriangle } from 'lucide-react';
-import { TopStatsBar, type StatItem } from '@/components/dashboard/TopStatsBar';
+import { useState, useCallback, Suspense } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
+import { AlertTriangle } from 'lucide-react';
+import { AnimatePresence } from 'framer-motion';
+import { useAISession } from '@/contexts/AISessionContext';
+import { useTECommandCenter } from '@/components/thousandeyes/useTECommandCenter';
+import { TECommandHeader } from '@/components/thousandeyes/TECommandHeader';
+import { TENavigationBar } from '@/components/thousandeyes/TENavigationBar';
+import { TEAIIntelligencePanel } from '@/components/thousandeyes/TEAIIntelligencePanel';
+import { TEPlatformSidebar } from '@/components/thousandeyes/TEPlatformSidebar';
+import { TETestHealthGrid } from '@/components/thousandeyes/TETestHealthGrid';
+import { TEAgentStatusGrid } from '@/components/thousandeyes/TEAgentStatusGrid';
+import { TEDetailPanel } from '@/components/thousandeyes/TEDetailPanel';
+import { AIPathJourneyView } from '@/components/visualizations/AIPathJourneyView';
+import { PathIntelligenceView } from '@/components/visualizations/PathIntelligenceView';
 import {
-  ThousandEyesTabBar,
   TestsTable,
   AlertsTable,
   AgentsTable,
+  EventsPanel,
+  OutagesPanel,
   CreateTestModal,
-  type Test,
-  type TestResult,
-  type Alert,
-  type Agent,
-  type TabType,
+  InternetInsightsPanel,
+  TEAICostImpactCard,
+  type TEDashboardView,
+  type TimelineItem,
 } from '@/components/thousandeyes';
+import { MCPSection } from '@/components/ai-journey/MCPSection';
 
 // ============================================================================
-// ThousandEyes Page Component
+// Sub-nav pill types
 // ============================================================================
 
-export default function ThousandEyesPage() {
+type InvestigateSubView = 'tests-alerts' | 'agents' | 'path-analysis' | 'internet';
+type PlatformSubView = 'ai-journey' | 'mcp-servers';
+
+// ============================================================================
+// Loading Skeleton (for Suspense)
+// ============================================================================
+
+function LoadingSkeleton() {
+  return (
+    <div className="h-full bg-slate-50 dark:bg-slate-900">
+      <div className="px-6 py-5 max-w-[1600px] mx-auto space-y-3">
+        <div className="h-14 bg-slate-200 dark:bg-slate-700/50 rounded-xl animate-pulse" />
+        <div className="h-10 w-96 bg-slate-200 dark:bg-slate-700/50 rounded-lg animate-pulse" />
+        <div className="h-96 bg-slate-200 dark:bg-slate-700/50 rounded-xl animate-pulse" />
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Sub-Nav Pills
+// ============================================================================
+
+function SubNavPills<T extends string>({
+  items,
+  value,
+  onChange,
+}: {
+  items: { id: T; label: string }[];
+  value: T;
+  onChange: (id: T) => void;
+}) {
+  return (
+    <div className="bg-slate-100 dark:bg-slate-800/40 rounded-lg p-1 inline-flex gap-1">
+      {items.map(pill => (
+        <button
+          key={pill.id}
+          onClick={() => onChange(pill.id)}
+          className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${
+            value === pill.id
+              ? 'bg-white dark:bg-slate-700 shadow-sm text-slate-900 dark:text-white'
+              : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+          }`}
+        >
+          {pill.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ============================================================================
+// Valid tab IDs for URL persistence
+// ============================================================================
+
+const VALID_TABS = new Set<string>(['overview', 'investigate', 'platform']);
+
+// ============================================================================
+// Wrapper — Suspense for useSearchParams
+// ============================================================================
+
+export default function ThousandEyesPageWrapper() {
+  return (
+    <Suspense fallback={<LoadingSkeleton />}>
+      <ThousandEyesPage />
+    </Suspense>
+  );
+}
+
+// ============================================================================
+// ThousandEyes — Network Intelligence Center (AI-First Redesign)
+// ============================================================================
+
+const INVESTIGATE_PILLS: { id: InvestigateSubView; label: string }[] = [
+  { id: 'tests-alerts', label: 'Tests & Alerts' },
+  { id: 'path-analysis', label: 'Path Analysis' },
+  { id: 'internet', label: 'Internet' },
+  { id: 'agents', label: 'Agents' },
+];
+
+const PLATFORM_PILLS: { id: PlatformSubView; label: string }[] = [
+  { id: 'ai-journey', label: 'AI Journey' },
+  { id: 'mcp-servers', label: 'MCP Servers' },
+];
+
+function ThousandEyesPage() {
+  const searchParams = useSearchParams();
   const router = useRouter();
+  const { logAIQuery, isActive: isAISessionActive } = useAISession();
+  const state = useTECommandCenter();
 
-  // Data state
-  const [tests, setTests] = useState<Test[]>([]);
-  const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [testResults, setTestResults] = useState<Record<number, TestResult[]>>({});
-  const [loadingResults, setLoadingResults] = useState<Record<number, boolean>>({});
+  // Persist active tab in URL
+  const tabParam = searchParams.get('tab') || '';
+  const view: TEDashboardView = VALID_TABS.has(tabParam)
+    ? (tabParam as TEDashboardView)
+    : 'overview';
 
-  // UI state
-  const [activeTab, setActiveTab] = useState<TabType>('tests');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [isConfigured, setIsConfigured] = useState(true);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [aiProcessing, setAiProcessing] = useState(false);
+  const [selectedTestId, setSelectedTestId] = useState<number | null>(null);
+  const [selectedTimelineItem, setSelectedTimelineItem] = useState<TimelineItem | null>(null);
+  const [aiQuery, setAiQuery] = useState<string | null>(null);
+  const [investigateSubView, setInvestigateSubView] = useState<InvestigateSubView>('tests-alerts');
+  const [platformSubView, setPlatformSubView] = useState<PlatformSubView>('ai-journey');
 
   // ============================================================================
-  // Data Fetching (uses system_config, no organization selection needed)
+  // Handlers
   // ============================================================================
 
-  const fetchTests = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const response = await fetch('/api/thousandeyes/tests?organization=default', {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-      });
-      if (response.status === 503) {
-        setIsConfigured(false);
-        setError('ThousandEyes is not configured. Add your OAuth token in System Config.');
-        return;
-      }
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = await response.json();
-      setTests(data.tests || []);
-      setIsConfigured(true);
-    } catch (err) {
-      console.error('Failed to fetch tests:', err);
-      setError('Failed to load tests');
-    } finally {
-      setLoading(false);
-    }
+  const handleTestClick = useCallback((testId: number) => {
+    setSelectedTimelineItem(null);
+    setSelectedTestId(prev => prev === testId ? null : testId);
   }, []);
 
-  const fetchAlerts = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const response = await fetch('/api/thousandeyes/alerts?organization=default&active_only=true', {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-      });
-      if (response.status === 503) {
-        setIsConfigured(false);
-        setError('ThousandEyes is not configured. Add your OAuth token in System Config.');
-        return;
-      }
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = await response.json();
-      setAlerts(data.alerts || []);
-      setIsConfigured(true);
-    } catch (err) {
-      console.error('Failed to fetch alerts:', err);
-      setError('Failed to load alerts');
-    } finally {
-      setLoading(false);
-    }
+  const handleTimelineItemClick = useCallback((item: TimelineItem) => {
+    setSelectedTestId(null);
+    setSelectedTimelineItem(prev => prev?.id === item.id ? null : item);
   }, []);
 
-  const fetchAgents = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const response = await fetch('/api/thousandeyes/agents?organization=default', {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-      });
-      if (response.status === 503) {
-        setIsConfigured(false);
-        setError('ThousandEyes is not configured. Add your OAuth token in System Config.');
-        return;
-      }
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = await response.json();
-      setAgents(data.agents || []);
-      setIsConfigured(true);
-    } catch (err) {
-      console.error('Failed to fetch agents:', err);
-      setError('Failed to load agents');
-    } finally {
-      setLoading(false);
-    }
+  const handleCloseDetail = useCallback(() => {
+    setSelectedTestId(null);
+    setSelectedTimelineItem(null);
   }, []);
 
-  const fetchTestResults = useCallback(async (testId: number, testType: string) => {
-    if (testResults[testId]) return; // Already cached
-    try {
-      setLoadingResults(prev => ({ ...prev, [testId]: true }));
-      const response = await fetch(
-        `/api/thousandeyes/tests/${testId}/results?organization=default&test_type=${encodeURIComponent(testType)}&window=12h`,
-        {
-          method: 'GET',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-        }
-      );
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = await response.json();
-      const results = data.results?.results || [];
-      interface ApiTestResult {
-        date?: string;
-        roundId?: number;
-        responseTime?: number;
-        avgLatency?: number;
-        totalTime?: number;
-        availability?: number;
-        loss?: number;
-        latency?: number;
-        jitter?: number;
-        throughput?: number;
-      }
-      const chartData: TestResult[] = results.map((r: ApiTestResult) => ({
-        timestamp: new Date(r.date || r.roundId || Date.now()).toLocaleTimeString(),
-        responseTime: r.responseTime || r.avgLatency || r.totalTime,
-        availability: r.availability,
-        loss: r.loss,
-        latency: r.avgLatency || r.latency,
-        jitter: r.jitter,
-        throughput: r.throughput,
-      }));
-      setTestResults(prev => ({ ...prev, [testId]: chartData }));
-    } catch (err) {
-      console.error('Failed to fetch test results:', err);
-    } finally {
-      setLoadingResults(prev => ({ ...prev, [testId]: false }));
-    }
-  }, [testResults]);
+  const handleCommandSubmit = useCallback((query: string) => {
+    setAiQuery(query);
+  }, []);
 
-  // ============================================================================
-  // Test Creation
-  // ============================================================================
-
-  const createTestFromAI = useCallback(async (prompt: string) => {
-    if (!prompt.trim()) {
-      setError('Please describe what you want to test');
-      return;
-    }
-    try {
-      setAiProcessing(true);
-      setError(null);
-      const response = await fetch('/api/thousandeyes/tests/ai?organization=default', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ prompt }),
-      });
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || `HTTP ${response.status}`);
-      }
-      await fetchTests();
-    } catch (err) {
-      console.error('Failed to create test:', err);
-      setError(err instanceof Error ? err.message : 'Failed to create test');
-      throw err;
-    } finally {
-      setAiProcessing(false);
-    }
-  }, [fetchTests]);
-
-  const createTestManual = useCallback(async (config: { testName: string; url: string; testType: string; interval: number }) => {
-    if (!config.testName || !config.url) {
-      setError('Please fill in all required fields');
-      return;
-    }
-    try {
-      setLoading(true);
-      setError(null);
-      const response = await fetch('/api/thousandeyes/tests?organization=default', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(config),
-      });
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || `HTTP ${response.status}`);
-      }
-      await fetchTests();
-    } catch (err) {
-      console.error('Failed to create test:', err);
-      setError(err instanceof Error ? err.message : 'Failed to create test');
-      throw err;
-    } finally {
-      setLoading(false);
-    }
-  }, [fetchTests]);
-
-  // ============================================================================
-  // AI Integration
-  // ============================================================================
+  const handleExternalQueryConsumed = useCallback(() => {
+    setAiQuery(null);
+  }, []);
 
   const handleAskAI = useCallback((context: string) => {
-    sessionStorage.setItem('ai_initial_message', context);
-    router.push('/network');
+    setAiQuery(context);
+  }, []);
+
+  const handleViewChange = useCallback((newView: TEDashboardView) => {
+    router.replace(`/thousandeyes?tab=${newView}`, { scroll: false });
+    if (newView !== 'overview') {
+      setSelectedTestId(null);
+      setSelectedTimelineItem(null);
+    }
   }, [router]);
 
-  // ============================================================================
-  // Refresh Handler
-  // ============================================================================
+  const handleIssueClick = useCallback((_item: TimelineItem) => {
+    router.replace('/thousandeyes?tab=investigate', { scroll: false });
+  }, [router]);
 
-  const handleRefresh = useCallback(() => {
-    if (activeTab === 'tests') fetchTests();
-    else if (activeTab === 'alerts') fetchAlerts();
-    else if (activeTab === 'agents') fetchAgents();
-  }, [activeTab, fetchTests, fetchAlerts, fetchAgents]);
+  const handleNavigate = useCallback((target: string) => {
+    if (target === 'operations' || target === 'monitoring') {
+      router.replace('/thousandeyes?tab=investigate', { scroll: false });
+    } else if (target === 'infrastructure') {
+      router.replace('/thousandeyes?tab=investigate', { scroll: false });
+      setInvestigateSubView('agents');
+    }
+  }, [router]);
 
-  // ============================================================================
-  // Effects
-  // ============================================================================
-
-  useEffect(() => {
-    // Fetch data on mount and tab change
-    if (activeTab === 'tests') fetchTests();
-    else if (activeTab === 'alerts') fetchAlerts();
-    else if (activeTab === 'agents') fetchAgents();
-  }, [activeTab, fetchTests, fetchAlerts, fetchAgents]);
-
-  // ============================================================================
-  // Computed Stats
-  // ============================================================================
-
-  const activeAlertCount = useMemo(() => alerts.filter(a => a.active === 1).length, [alerts]);
-  const enabledAgentsCount = useMemo(() => agents.filter(a => a.enabled === 1).length, [agents]);
-  const disabledAgentsCount = useMemo(() => agents.filter(a => a.enabled === 0).length, [agents]);
-
-  const stats: StatItem[] = useMemo(() => [
-    { id: 'tests', label: 'Tests', value: tests.length, icon: 'activity', tooltip: 'Active ThousandEyes tests monitoring network performance.' },
-    { id: 'alerts', label: 'Active Alerts', value: activeAlertCount, icon: 'alert', status: activeAlertCount > 0 ? 'critical' : 'normal', tooltip: 'Current alerts triggered by test thresholds.' },
-    { id: 'online', label: 'Agents Online', value: enabledAgentsCount, icon: 'server', status: 'success', tooltip: 'Enterprise agents actively running tests.' },
-    { id: 'offline', label: 'Agents Offline', value: disabledAgentsCount, icon: 'server', status: disabledAgentsCount > 0 ? 'warning' : 'normal', tooltip: 'Agents not currently running tests.' },
-  ], [tests.length, activeAlertCount, enabledAgentsCount, disabledAgentsCount]);
+  const selectedTest = selectedTestId
+    ? state.tests.find(t => t.testId === selectedTestId) || null
+    : null;
 
   // ============================================================================
   // Render
@@ -276,101 +198,193 @@ export default function ThousandEyesPage() {
 
   return (
     <div className="h-full bg-slate-50 dark:bg-slate-900 overflow-auto">
-      <div className="px-6 py-8 max-w-[1600px] mx-auto">
-        {/* Header */}
-        <div className="flex items-start justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-white">ThousandEyes Monitoring</h1>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Network performance monitoring and intelligence</p>
-          </div>
+      <div className="px-6 py-5 max-w-[1600px] mx-auto space-y-3">
+        {/* Command Header */}
+        <TECommandHeader
+          healthScore={state.healthScore}
+          lastSyncTime={state.lastSyncTime}
+          loading={state.loading}
+          onRefresh={state.refresh}
+          onCommandSubmit={handleCommandSubmit}
+        />
 
-          <div className="flex items-center gap-3">
-            {/* Refresh Button */}
-            <button
-              onClick={handleRefresh}
-              disabled={loading}
-              aria-label={loading ? 'Refreshing data...' : 'Refresh data'}
-              className="p-2.5 bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/50 rounded-xl text-slate-600 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-400 hover:border-cyan-300 dark:hover:border-cyan-500/50 transition disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
-            >
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" />
-            </button>
-          </div>
-        </div>
+        {/* Navigation — 3 tabs */}
+        <TENavigationBar
+          currentView={view}
+          onViewChange={handleViewChange}
+          onCreateTest={() => state.setShowCreateModal(true)}
+        />
 
         {/* Configuration Warning */}
-        {!isConfigured && (
-          <div role="alert" className="mb-6 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 rounded-xl p-4">
+        {!state.isConfigured && (
+          <div role="alert" className="bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 rounded-lg p-3.5">
             <div className="flex items-start gap-3">
-              <div className="p-2 bg-amber-100 dark:bg-amber-500/20 rounded-lg">
-                <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+              <div className="p-1.5 bg-amber-100 dark:bg-amber-500/20 rounded-md">
+                <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
               </div>
               <div>
                 <h3 className="text-sm font-medium text-amber-800 dark:text-amber-200">Configuration Required</h3>
-                <p className="mt-1 text-sm text-amber-700 dark:text-amber-300">
-                  ThousandEyes is not configured. Please add your THOUSANDEYES_OAUTH_TOKEN to your environment configuration.
+                <p className="mt-0.5 text-sm text-amber-700 dark:text-amber-300">
+                  Add your THOUSANDEYES_OAUTH_TOKEN to your environment configuration to enable monitoring.
                 </p>
               </div>
             </div>
           </div>
         )}
 
-        {/* Top Stats Bar */}
-        <TopStatsBar stats={stats} loading={loading && !tests.length && !alerts.length && !agents.length} className="mb-6" />
-
-        {/* Tab Bar */}
-        <ThousandEyesTabBar
-          activeTab={activeTab}
-          onTabChange={setActiveTab}
-          alertCount={activeAlertCount}
-          className="mb-6"
-        />
-
         {/* Error Display */}
-        {error && (
-          <div role="alert" className="mb-6 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 rounded-xl p-4">
-            <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
+        {state.error && (
+          <div role="alert" className="bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 rounded-lg p-3.5">
+            <p className="text-sm text-red-700 dark:text-red-400">{state.error}</p>
           </div>
         )}
 
-        {/* Tab Content */}
-        {activeTab === 'tests' && (
-          <TestsTable
-            tests={tests}
-            testResults={testResults}
-            loadingResults={loadingResults}
-            loading={loading}
-            selectedOrg="default"
-            isConfigured={isConfigured}
-            onCreateTest={() => setShowCreateModal(true)}
-            onToggleResults={fetchTestResults}
-            onAskAI={handleAskAI}
+        {/* ============================================================ */}
+        {/* Overview Tab — AI-Driven Network Health */}
+        {/* Always mounted to preserve AI analysis state across tab switches */}
+        {/* ============================================================ */}
+        <div className={view === 'overview' ? 'space-y-3' : 'hidden'}>
+          {/* Hero: AI Panel + Platform Sidebar */}
+          <div className="grid grid-cols-12 gap-4">
+            <div className="col-span-12 lg:col-span-8">
+              <TEAIIntelligencePanel
+                testCount={state.tests.length}
+                activeAlerts={state.activeAlertCount}
+                agentsOnline={state.enabledAgentsCount}
+                agentsTotal={state.agents.length}
+                eventCount={state.events.length}
+                outageCount={state.activeOutageCount}
+                healthScore={state.healthScore}
+                crossPlatformInsights={state.crossPlatformInsights}
+                testHealthData={state.testHealthMap}
+                externalQuery={aiQuery}
+                onExternalQueryConsumed={handleExternalQueryConsumed}
+                dataReady={state.initialLoadComplete}
+                splunkCorrelation={state.splunkCorrelation}
+                logAIQuery={logAIQuery}
+                isAISessionActive={isAISessionActive}
+              />
+            </div>
+            <div className="col-span-12 lg:col-span-4 space-y-3">
+              <TEPlatformSidebar
+                platformHealth={state.platformHealth}
+                issueTimeline={state.issueTimeline}
+                splunkCorrelation={state.splunkCorrelation}
+                onNavigate={handleNavigate}
+                onIssueClick={handleIssueClick}
+              />
+              <TEAICostImpactCard loading={state.loading} />
+            </div>
+          </div>
+
+          {/* Test Health Grid */}
+          <TETestHealthGrid
+            tests={state.testHealthMap}
+            loading={state.loadingTests && state.tests.length === 0}
+            onTestClick={handleTestClick}
+            selectedTestId={selectedTestId}
           />
+
+          {/* Detail Panel (animated expand) */}
+          <AnimatePresence>
+            {(selectedTest || selectedTimelineItem) && (
+              <TEDetailPanel
+                selectedTest={selectedTest}
+                selectedTimelineItem={selectedTimelineItem}
+                testResults={state.testResults}
+                loadingResults={state.loadingResults}
+                tests={state.tests}
+                onClose={handleCloseDetail}
+                onFetchTestResults={state.fetchTestResults}
+                onAskAI={handleAskAI}
+              />
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* ============================================================ */}
+        {/* Investigate Tab — Tests, Alerts, Agents, Path, Internet */}
+        {/* ============================================================ */}
+        {view === 'investigate' && (
+          <div className="space-y-3">
+            <SubNavPills
+              items={INVESTIGATE_PILLS}
+              value={investigateSubView}
+              onChange={setInvestigateSubView}
+            />
+
+            {investigateSubView === 'tests-alerts' && (
+              <div className="space-y-3">
+                <TestsTable
+                  tests={state.tests}
+                  testResults={state.testResults}
+                  loadingResults={state.loadingResults}
+                  loading={state.loadingTests}
+                  selectedOrg="default"
+                  isConfigured={state.isConfigured}
+                  onCreateTest={() => state.setShowCreateModal(true)}
+                  onToggleResults={state.fetchTestResults}
+                  onAskAI={handleAskAI}
+                />
+                <AlertsTable alerts={state.alerts} loading={state.loadingAlerts} />
+                <EventsPanel events={state.events} loading={state.loadingEvents} onAskAI={handleAskAI} />
+                <OutagesPanel outages={state.outages} loading={state.loadingOutages} onAskAI={handleAskAI} />
+              </div>
+            )}
+
+            {investigateSubView === 'agents' && (
+              <div className="space-y-3">
+                <TEAgentStatusGrid
+                  agentsByRegion={state.agentsByRegion}
+                  platformHealth={state.platformHealth}
+                  loading={state.loadingAgents && state.agents.length === 0}
+                  onAgentGroupClick={() => {}}
+                />
+                <AgentsTable agents={state.agents} loading={state.loadingAgents} onAskAI={handleAskAI} />
+              </div>
+            )}
+
+            {investigateSubView === 'path-analysis' && (
+              <PathIntelligenceView
+                tests={state.tests}
+                testResults={state.testResults}
+                fetchTestResults={state.fetchTestResults}
+                isConfigured={state.isConfigured}
+              />
+            )}
+
+            {investigateSubView === 'internet' && (
+              <InternetInsightsPanel onAskAI={handleAskAI} />
+            )}
+          </div>
         )}
 
-        {activeTab === 'alerts' && (
-          <AlertsTable
-            alerts={alerts}
-            loading={loading}
-          />
-        )}
+        {/* ============================================================ */}
+        {/* Platform Tab — AI Journey + MCP Servers */}
+        {/* ============================================================ */}
+        {view === 'platform' && (
+          <div className="space-y-3">
+            <SubNavPills
+              items={PLATFORM_PILLS}
+              value={platformSubView}
+              onChange={setPlatformSubView}
+            />
 
-        {activeTab === 'agents' && (
-          <AgentsTable
-            agents={agents}
-            loading={loading}
-          />
+            {platformSubView === 'ai-journey' && <AIPathJourneyView />}
+            {platformSubView === 'mcp-servers' && <MCPSection />}
+          </div>
         )}
       </div>
 
       {/* Create Test Modal */}
       <CreateTestModal
-        isOpen={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
-        onCreateAI={createTestFromAI}
-        onCreateManual={createTestManual}
-        loading={loading}
-        aiProcessing={aiProcessing}
-        error={error}
+        isOpen={state.showCreateModal}
+        onClose={() => state.setShowCreateModal(false)}
+        onCreateAI={state.createTestFromAI}
+        onCreateManual={state.createTestManual}
+        loading={state.loadingTests}
+        aiProcessing={state.aiProcessing}
+        error={state.error}
       />
     </div>
   );

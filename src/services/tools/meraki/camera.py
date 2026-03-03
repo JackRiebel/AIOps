@@ -14,6 +14,17 @@ from src.services.meraki_api import MerakiAPIClient
 
 logger = logging.getLogger(__name__)
 
+
+def _validate_context(context: Any) -> Dict:
+    """Validate that context has a Meraki client configured."""
+    if not hasattr(context, 'client') or context.client is None:
+        return {
+            "success": False,
+            "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+        }
+    return None
+
+
 # =============================================================================
 # HANDLERS
 # =============================================================================
@@ -21,6 +32,7 @@ logger = logging.getLogger(__name__)
 async def handle_camera_get_quality_retention(params: Dict, context: Any) -> Dict:
     """Handler for Get Camera Quality and Retention."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/camera/get/quality/retention"
         path = path.replace("{serial}", params.get("serial", ""))
@@ -35,6 +47,7 @@ async def handle_camera_get_quality_retention(params: Dict, context: Any) -> Dic
 async def handle_camera_update_quality_retention(params: Dict, context: Any) -> Dict:
     """Handler for Update Camera Quality and Retention."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/camera/update/quality/retention"
         path = path.replace("{serial}", params.get("serial", ""))
@@ -49,6 +62,7 @@ async def handle_camera_update_quality_retention(params: Dict, context: Any) -> 
 async def handle_camera_get_video_settings(params: Dict, context: Any) -> Dict:
     """Handler for Get Camera Video Settings."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/camera/get/video/settings"
         path = path.replace("{serial}", params.get("serial", ""))
@@ -63,6 +77,7 @@ async def handle_camera_get_video_settings(params: Dict, context: Any) -> Dict:
 async def handle_camera_update_video_settings(params: Dict, context: Any) -> Dict:
     """Handler for Update Camera Video Settings."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/camera/update/video/settings"
         path = path.replace("{serial}", params.get("serial", ""))
@@ -77,6 +92,7 @@ async def handle_camera_update_video_settings(params: Dict, context: Any) -> Dic
 async def handle_camera_get_sense(params: Dict, context: Any) -> Dict:
     """Handler for Get Camera Sense Settings."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/camera/get/sense"
         path = path.replace("{serial}", params.get("serial", ""))
@@ -91,6 +107,7 @@ async def handle_camera_get_sense(params: Dict, context: Any) -> Dict:
 async def handle_camera_update_sense(params: Dict, context: Any) -> Dict:
     """Handler for Update Camera Sense Settings."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/camera/update/sense"
         path = path.replace("{serial}", params.get("serial", ""))
@@ -105,6 +122,7 @@ async def handle_camera_update_sense(params: Dict, context: Any) -> Dict:
 async def handle_camera_list_wireless_profiles(params: Dict, context: Any) -> Dict:
     """Handler for List Camera Wireless Profiles."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/camera/list/wireless/profiles"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -119,6 +137,7 @@ async def handle_camera_list_wireless_profiles(params: Dict, context: Any) -> Di
 async def handle_camera_create_wireless_profile(params: Dict, context: Any) -> Dict:
     """Handler for Create Camera Wireless Profile."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/camera/create/wireless/profile"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -133,6 +152,7 @@ async def handle_camera_create_wireless_profile(params: Dict, context: Any) -> D
 async def handle_camera_get_wireless_profile(params: Dict, context: Any) -> Dict:
     """Handler for Get Camera Wireless Profile."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/camera/get/wireless/profile"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -147,6 +167,7 @@ async def handle_camera_get_wireless_profile(params: Dict, context: Any) -> Dict
 async def handle_camera_update_wireless_profile(params: Dict, context: Any) -> Dict:
     """Handler for Update Camera Wireless Profile."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/camera/update/wireless/profile"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -161,6 +182,7 @@ async def handle_camera_update_wireless_profile(params: Dict, context: Any) -> D
 async def handle_camera_delete_wireless_profile(params: Dict, context: Any) -> Dict:
     """Handler for Delete Camera Wireless Profile."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/camera/delete/wireless/profile"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -175,6 +197,7 @@ async def handle_camera_delete_wireless_profile(params: Dict, context: Any) -> D
 async def handle_camera_get_device_wireless_profiles(params: Dict, context: Any) -> Dict:
     """Handler for Get Device Wireless Profiles."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/camera/get/device/wireless/profiles"
         path = path.replace("{serial}", params.get("serial", ""))
@@ -189,6 +212,7 @@ async def handle_camera_get_device_wireless_profiles(params: Dict, context: Any)
 async def handle_camera_update_device_wireless_profiles(params: Dict, context: Any) -> Dict:
     """Handler for Update Device Wireless Profiles."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/camera/update/device/wireless/profiles"
         path = path.replace("{serial}", params.get("serial", ""))
@@ -203,6 +227,7 @@ async def handle_camera_update_device_wireless_profiles(params: Dict, context: A
 async def handle_camera_generate_snapshot(params: Dict, context: Any) -> Dict:
     """Handler for Generate Camera Snapshot."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/camera/generate/snapshot"
         path = path.replace("{serial}", params.get("serial", ""))
@@ -217,6 +242,7 @@ async def handle_camera_generate_snapshot(params: Dict, context: Any) -> Dict:
 async def handle_camera_get_video_link(params: Dict, context: Any) -> Dict:
     """Handler for Get Camera Video Link."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/camera/get/video/link"
         path = path.replace("{serial}", params.get("serial", ""))
@@ -231,6 +257,7 @@ async def handle_camera_get_video_link(params: Dict, context: Any) -> Dict:
 async def handle_camera_get_analytics_zones(params: Dict, context: Any) -> Dict:
     """Handler for Get Camera Analytics Zones."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/camera/get/analytics/zones"
         path = path.replace("{serial}", params.get("serial", ""))
@@ -245,6 +272,7 @@ async def handle_camera_get_analytics_zones(params: Dict, context: Any) -> Dict:
 async def handle_camera_get_analytics_zone_history(params: Dict, context: Any) -> Dict:
     """Handler for Get Analytics Zone History."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/camera/get/analytics/zone/history"
         path = path.replace("{serial}", params.get("serial", ""))
@@ -259,6 +287,7 @@ async def handle_camera_get_analytics_zone_history(params: Dict, context: Any) -
 async def handle_camera_get_analytics_recent(params: Dict, context: Any) -> Dict:
     """Handler for Get Camera Analytics Recent."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/camera/get/analytics/recent"
         path = path.replace("{serial}", params.get("serial", ""))
@@ -273,6 +302,7 @@ async def handle_camera_get_analytics_recent(params: Dict, context: Any) -> Dict
 async def handle_camera_get_analytics_live(params: Dict, context: Any) -> Dict:
     """Handler for Get Camera Analytics Live."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/camera/get/analytics/live"
         path = path.replace("{serial}", params.get("serial", ""))
@@ -287,6 +317,7 @@ async def handle_camera_get_analytics_live(params: Dict, context: Any) -> Dict:
 async def handle_camera_get_analytics_overview(params: Dict, context: Any) -> Dict:
     """Handler for Get Camera Analytics Overview."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/camera/get/analytics/overview"
         path = path.replace("{serial}", params.get("serial", ""))
@@ -301,6 +332,7 @@ async def handle_camera_get_analytics_overview(params: Dict, context: Any) -> Di
 async def handle_camera_list_custom_analytics(params: Dict, context: Any) -> Dict:
     """Handler for List Custom Analytics Artifacts."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/camera/list/custom/analytics"
         path = path.replace("{serial}", params.get("serial", ""))
@@ -315,6 +347,7 @@ async def handle_camera_list_custom_analytics(params: Dict, context: Any) -> Dic
 async def handle_camera_create_custom_analytics(params: Dict, context: Any) -> Dict:
     """Handler for Create Custom Analytics Artifact."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/camera/create/custom/analytics"
         path = path.replace("{serial}", params.get("serial", ""))
@@ -329,6 +362,7 @@ async def handle_camera_create_custom_analytics(params: Dict, context: Any) -> D
 async def handle_camera_get_custom_analytics(params: Dict, context: Any) -> Dict:
     """Handler for Get Custom Analytics Artifact."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/camera/get/custom/analytics"
         path = path.replace("{serial}", params.get("serial", ""))
@@ -343,6 +377,7 @@ async def handle_camera_get_custom_analytics(params: Dict, context: Any) -> Dict
 async def handle_camera_update_custom_analytics(params: Dict, context: Any) -> Dict:
     """Handler for Update Custom Analytics Artifact."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/camera/update/custom/analytics"
         path = path.replace("{serial}", params.get("serial", ""))
@@ -357,6 +392,7 @@ async def handle_camera_update_custom_analytics(params: Dict, context: Any) -> D
 async def handle_camera_delete_custom_analytics(params: Dict, context: Any) -> Dict:
     """Handler for Delete Custom Analytics Artifact."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/camera/delete/custom/analytics"
         path = path.replace("{serial}", params.get("serial", ""))
@@ -371,6 +407,7 @@ async def handle_camera_delete_custom_analytics(params: Dict, context: Any) -> D
 async def handle_camera_list_boundaries(params: Dict, context: Any) -> Dict:
     """Handler for List Camera Boundaries."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/camera/list/boundaries"
         path = path.replace("{network_id}", params.get("network_id", ""))
@@ -385,6 +422,7 @@ async def handle_camera_list_boundaries(params: Dict, context: Any) -> Dict:
 async def handle_camera_get_boundaries_by_device(params: Dict, context: Any) -> Dict:
     """Handler for Get Camera Boundaries by Device."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/camera/get/boundaries/by/device"
         path = path.replace("{serial}", params.get("serial", ""))

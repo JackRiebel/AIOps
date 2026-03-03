@@ -749,11 +749,18 @@ class CLIWorkflowExecutor:
 
         elif platform == "splunk":
             from src.services.tools.splunk import SplunkExecutionContext
+            from src.config.settings import get_settings
+            settings = get_settings()
+            # Prefer per-credential verify_ssl (from UI), fall back to global settings
+            verify_ssl = getattr(credential, 'verify_ssl', None)
+            if verify_ssl is None:
+                verify_ssl = credential.credentials.get("verify_ssl", settings.splunk_verify_ssl) if hasattr(credential, 'credentials') else settings.splunk_verify_ssl
             return SplunkExecutionContext(
                 base_url=credential.base_url,
                 username=credential.username,
                 password=credential.password,
                 token=credential.token,
+                verify_ssl=verify_ssl,
             )
 
         elif platform == "thousandeyes":

@@ -1,6 +1,7 @@
 """Authentication and user management API routes."""
 
 import logging
+import os
 import re
 import time
 from collections import defaultdict
@@ -37,6 +38,11 @@ class RateLimiter:
     since in-memory rate limiting can be bypassed in multi-instance deployments.
     """
 
+    # Maximum number of tracked keys before forced eviction (prevents unbounded memory growth)
+    MAX_IN_MEMORY_KEYS = 10_000
+    # Run cleanup at most once per this interval (seconds)
+    CLEANUP_INTERVAL = 60
+
     def __init__(self, max_attempts: int = 5, window_seconds: int = 300, prefix: str = "ratelimit"):
         self.max_attempts = max_attempts
         self.window_seconds = window_seconds
@@ -45,6 +51,7 @@ class RateLimiter:
         self._redis_checked = False
         # Fallback in-memory storage (NOT recommended for production)
         self.attempts: dict[str, list[float]] = defaultdict(list)
+        self._last_cleanup: float = 0.0
 
     def _get_redis(self):
         """Lazy-load Redis client."""
@@ -73,6 +80,29 @@ class RateLimiter:
 
         return self._redis_client
 
+    def _cleanup_stale_keys(self) -> None:
+        """Periodically evict expired keys from in-memory storage."""
+        now = time.time()
+        if now - self._last_cleanup < self.CLEANUP_INTERVAL:
+            return
+        self._last_cleanup = now
+
+        stale_keys = [
+            k for k, timestamps in self.attempts.items()
+            if not timestamps or (now - max(timestamps)) >= self.window_seconds
+        ]
+        for k in stale_keys:
+            del self.attempts[k]
+
+        # Hard cap: if still too large, evict oldest keys
+        if len(self.attempts) > self.MAX_IN_MEMORY_KEYS:
+            sorted_keys = sorted(
+                self.attempts.keys(),
+                key=lambda k: max(self.attempts[k]) if self.attempts[k] else 0,
+            )
+            for k in sorted_keys[: len(self.attempts) - self.MAX_IN_MEMORY_KEYS]:
+                del self.attempts[k]
+
     def is_rate_limited(self, key: str) -> bool:
         """Check if a key (IP or username) is rate limited."""
         redis_client = self._get_redis()
@@ -86,6 +116,7 @@ class RateLimiter:
                 logger.error(f"[RateLimiter] Redis error, falling back to in-memory: {e}")
 
         # Fallback to in-memory
+        self._cleanup_stale_keys()
         now = time.time()
         self.attempts[key] = [
             t for t in self.attempts[key]
@@ -237,7 +268,7 @@ class RegisterRequest(BaseModel):
 # AUTHENTICATION ENDPOINTS
 # ===================================================================
 
-@router.post("/api/auth/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/api/auth/register", status_code=status.HTTP_201_CREATED)
 async def register(
     register_request: RegisterRequest,
     db: AsyncSession = Depends(get_db_session),
@@ -245,13 +276,14 @@ async def register(
     """Public user registration endpoint.
 
     Creates a new user with the 'viewer' role (limited access).
+    Returns a one-time recovery key that must be saved securely.
     For admin or operator access, contact an administrator.
 
     Args:
         register_request: Registration details
 
     Returns:
-        Created user information
+        Created user information and one-time recovery key
 
     Raises:
         HTTPException 400: If username or email already exists, or password too weak
@@ -262,7 +294,7 @@ async def register(
         raise HTTPException(status_code=400, detail=error_msg)
 
     try:
-        user = await AuthService.create_user(
+        user, recovery_key = await AuthService.create_user(
             db,
             username=register_request.username,
             email=register_request.email,
@@ -274,17 +306,21 @@ async def register(
 
         logger.info(f"New user registered: {user.username}")
 
-        return UserResponse(
-            id=user.id,
-            username=user.username,
-            email=user.email,
-            role=user.role,
-            is_active=user.is_active,
-            full_name=user.full_name,
-            created_at=user.created_at.isoformat() if user.created_at else "",
-            updated_at=user.updated_at.isoformat() if user.updated_at else "",
-            last_login=user.last_login.isoformat() if user.last_login else None,
-        )
+        return {
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "role": user.role,
+                "is_active": user.is_active,
+                "full_name": user.full_name,
+                "created_at": user.created_at.isoformat() if user.created_at else "",
+                "updated_at": user.updated_at.isoformat() if user.updated_at else "",
+                "last_login": user.last_login.isoformat() if user.last_login else None,
+            },
+            "recovery_key": recovery_key,
+            "warning": "IMPORTANT: Save this recovery key in a safe place. It will NOT be shown again. You will need it to recover your account if you forget your password.",
+        }
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -372,7 +408,7 @@ async def login(
                 }
 
             # Create MFA challenge
-            challenge_id = DuoMFAService.create_challenge(user.id, username)
+            challenge_id = await DuoMFAService.create_challenge(db, user.id, username)
 
             return {
                 "mfa_required": True,
@@ -383,19 +419,33 @@ async def login(
             }
 
         # No MFA required - Create session
-        session = await AuthService.create_session(db, user, request)
+        try:
+            session = await AuthService.create_session(db, user, request)
+        except Exception as e:
+            logger.error(f"Failed to create session for user '{username}': {str(e)}", exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to create session"
+            )
 
         # Set secure HTTP-only cookie
-        # Note: secure=True requires HTTPS in production
+        # FORCE_SECURE_COOKIES=true is needed behind reverse proxies (e.g. Cloudflare Tunnel)
+        # where the backend receives HTTP but the browser is on HTTPS
+        force_secure = os.environ.get("FORCE_SECURE_COOKIES", "").lower() in ("true", "1", "yes")
+        secure = force_secure or request.url.scheme == "https"
         response.set_cookie(
             key=AuthService.SESSION_COOKIE_NAME,
             value=session.session_token,
-            httponly=True,  # Prevents JavaScript access (XSS protection)
-            secure=request.url.scheme == "https",  # Auto-detect HTTPS
-            samesite="lax",  # CSRF protection
+            httponly=True,
+            secure=secure,
+            samesite="lax",
             max_age=AuthService.SESSION_DURATION_HOURS * 3600,
-            path="/",  # Ensure cookie is sent with all requests
+            path="/",
         )
+
+        # Clear rate limits on successful login
+        ip_rate_limiter.clear(client_ip)
+        username_rate_limiter.clear(username)
 
         logger.info(f"Successful login for user: {username} from IP: {client_ip}")
 
@@ -413,7 +463,7 @@ async def login(
         # Re-raise HTTP exceptions (401, 429)
         raise
     except Exception as e:
-        logger.error(f"Login failed with exception: {str(e)}", exc_info=True)
+        logger.error(f"Login failed with exception for user '{username}': {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="Login failed due to an internal error"
@@ -443,15 +493,106 @@ async def logout(
         # Delete session from database
         await AuthService.delete_session(db, session_token)
 
-    # Clear cookie
+    # Clear cookie — match secure flag to login so the browser removes the same cookie.
+    force_secure = os.environ.get("FORCE_SECURE_COOKIES", "").lower() in ("true", "1", "yes")
+    secure = force_secure or request.url.scheme == "https"
     response.delete_cookie(
         key=AuthService.SESSION_COOKIE_NAME,
         httponly=True,
-        secure=False,
+        secure=secure,
         samesite="lax",
+        path="/",
     )
 
     return {"message": "Logout successful"}
+
+
+# ===================================================================
+# ACCOUNT RECOVERY ENDPOINTS
+# ===================================================================
+
+# Rate limiter for password reset attempts (5 per hour per email)
+reset_attempt_limiter = RateLimiter(max_attempts=5, window_seconds=3600, prefix="reset_attempt")
+
+
+class ResetPasswordRequest(BaseModel):
+    """Request model for password reset using recovery key."""
+    email: EmailStr
+    recovery_key: str
+    new_password: str
+
+    @field_validator("recovery_key")
+    @classmethod
+    def validate_recovery_key(cls, v: str) -> str:
+        """Validate recovery key format (32 hex characters)."""
+        if not v or len(v) != 32:
+            raise ValueError("Invalid recovery key format")
+        try:
+            int(v, 16)  # Validate it's hex
+        except ValueError:
+            raise ValueError("Invalid recovery key format")
+        return v.lower()
+
+
+@router.post("/api/auth/reset-password")
+async def reset_password(
+    request_data: ResetPasswordRequest,
+    http_request: Request,
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Reset password using recovery key.
+
+    Uses the one-time recovery key provided at registration.
+    Invalidates all existing sessions for security.
+
+    Args:
+        request_data: Contains email, recovery_key, and new password
+        http_request: HTTP request for rate limiting
+        db: Database session
+
+    Returns:
+        Success message
+
+    Raises:
+        HTTPException 400: If recovery key is invalid or password is too weak
+        HTTPException 429: If too many failed attempts
+    """
+    email = request_data.email.lower()
+    client_ip = http_request.client.host if http_request.client else "unknown"
+    rate_key = f"{client_ip}:{email}"
+
+    # Check rate limit
+    if reset_attempt_limiter.is_rate_limited(rate_key):
+        remaining = reset_attempt_limiter.get_remaining_time(rate_key)
+        logger.warning(f"Password reset rate limit exceeded for: {email}")
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many failed attempts. Please try again in {remaining} seconds.",
+        )
+
+    # Record attempt before validation
+    reset_attempt_limiter.record_attempt(rate_key)
+
+    # Validate password strength
+    is_valid, error_msg = validate_password_strength(request_data.new_password)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=error_msg)
+
+    # Attempt to reset password
+    success, message = await AuthService.reset_password_with_recovery_key(
+        db,
+        email,
+        request_data.recovery_key,
+        request_data.new_password,
+    )
+
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+
+    # Clear rate limit on success
+    reset_attempt_limiter.clear(rate_key)
+
+    return {"message": "Password reset successful. Please log in with your new password."}
 
 
 @router.get("/api/auth/me", response_model=UserResponse)
@@ -518,7 +659,7 @@ async def list_users(
     ]
 
 
-@router.post("/api/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/api/users", status_code=status.HTTP_201_CREATED)
 async def create_user(
     user_request: CreateUserRequest,
     current_user: User = Depends(require_admin),
@@ -526,13 +667,16 @@ async def create_user(
 ):
     """Create a new user (admin only).
 
+    Returns the user info and a one-time recovery key that must be
+    shared securely with the user.
+
     Args:
         user_request: User creation request
         current_user: Current admin user
         db: Database session
 
     Returns:
-        Created user information
+        Created user information and recovery key
 
     Raises:
         HTTPException 400: If username or email already exists, or password too weak
@@ -543,7 +687,7 @@ async def create_user(
         raise HTTPException(status_code=400, detail=error_msg)
 
     try:
-        user = await AuthService.create_user(
+        user, recovery_key = await AuthService.create_user(
             db,
             username=user_request.username,
             email=user_request.email,
@@ -553,17 +697,21 @@ async def create_user(
             created_by=current_user.id,
         )
 
-        return UserResponse(
-            id=user.id,
-            username=user.username,
-            email=user.email,
-            role=user.role,
-            is_active=user.is_active,
-            full_name=user.full_name,
-            created_at=user.created_at.isoformat() if user.created_at else "",
-            updated_at=user.updated_at.isoformat() if user.updated_at else "",
-            last_login=user.last_login.isoformat() if user.last_login else None,
-        )
+        return {
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "role": user.role,
+                "is_active": user.is_active,
+                "full_name": user.full_name,
+                "created_at": user.created_at.isoformat() if user.created_at else "",
+                "updated_at": user.updated_at.isoformat() if user.updated_at else "",
+                "last_login": user.last_login.isoformat() if user.last_login else None,
+            },
+            "recovery_key": recovery_key,
+            "warning": "IMPORTANT: Share this recovery key securely with the user. It will NOT be shown again.",
+        }
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

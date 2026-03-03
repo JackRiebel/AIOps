@@ -1,0 +1,13 @@
+#!/bin/bash
+# AI Ops Center.app launcher — opens Terminal running Start AI Ops Center.command
+# The .command script handles all setup, deps, and server lifecycle.
+
+APP_DIR="$(cd "$(dirname "$0")/../../.." && pwd)"
+COMMAND="$APP_DIR/Start AI Ops Center.command"
+
+if [ ! -f "$COMMAND" ]; then
+    osascript -e 'display dialog "Could not find Start AI Ops Center.command.\nMake sure the app is inside the AI Ops Center project folder." with title "AI Ops Center" buttons {"OK"} default button "OK" with icon stop'
+    exit 1
+fi
+
+open -a Terminal "$COMMAND"

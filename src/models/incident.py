@@ -17,6 +17,7 @@ class EventSource(str, enum.Enum):
     THOUSANDEYES = "thousandeyes"
     SPLUNK = "splunk"
     CATALYST = "catalyst"
+    WORKFLOW = "workflow"  # Events from workflow automation
 
 
 class EventSeverity(str, enum.Enum):
@@ -130,6 +131,17 @@ class Incident(Base):
     network_name = Column(String(500), nullable=True)
     device_config = Column(JSON, nullable=True)  # Stores relevant device config for context
 
+    # Enrichment context (from correlation service)
+    meraki_context = Column(JSON, nullable=True)  # Matched devices, security events, uplink health
+    thousandeyes_context = Column(JSON, nullable=True)  # Alerts, test results, agent health
+    performance_metrics = Column(JSON, nullable=True)  # Loss/latency history, client stats
+    enrichment_sources = Column(JSON, nullable=True)  # List of sources that contributed data
+    splunk_events_raw = Column(JSON, nullable=True)  # Raw Splunk events that triggered this incident
+
+    # AI analysis tracking
+    ai_analysis_cost = Column(Float, nullable=True)  # Cost in USD for AI analysis that created this incident
+    ai_tokens_used = Column(Integer, nullable=True)  # Token count for incident creation AI call
+
     # Relationships
     events = relationship("Event", back_populates="incident", cascade="all, delete-orphan")
 
@@ -159,4 +171,11 @@ class Incident(Base):
             "network_id": self.network_id,
             "network_name": self.network_name,
             "device_config": self.device_config,
+            "meraki_context": self.meraki_context,
+            "thousandeyes_context": self.thousandeyes_context,
+            "performance_metrics": self.performance_metrics,
+            "enrichment_sources": self.enrichment_sources,
+            "splunk_events_raw": self.splunk_events_raw,
+            "ai_analysis_cost": self.ai_analysis_cost,
+            "ai_tokens_used": self.ai_tokens_used,
         }

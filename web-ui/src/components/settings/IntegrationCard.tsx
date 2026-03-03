@@ -52,10 +52,13 @@ export function IntegrationCard({
     if (testResult?.success === false) return 'error';
     if (testResult?.success === true) return 'connected';
 
-    // Check if any required fields have values
+    // Check if any required fields have values (or stored secrets)
     const hasAnyValue = config.fields.some((f) => {
       const val = editedValues[f.key] ?? values[f.key];
-      return val && val.trim() !== '';
+      if (val && val.trim() !== '') return true;
+      // Password fields may be empty in display but have a stored value
+      if (f.type === 'password' && (sources[f.key] === 'database' || sources[f.key] === 'env')) return true;
+      return false;
     });
 
     return hasAnyValue ? 'connected' : 'not-configured';
@@ -93,7 +96,11 @@ export function IntegrationCard({
     const newErrors: Record<string, string> = {};
     config.fields.forEach((field) => {
       if (field.required && !getValue(field.key)) {
-        newErrors[field.key] = 'This field is required';
+        // Skip validation for password fields that already have a stored value
+        const hasStoredValue = field.type === 'password' && (sources[field.key] === 'database' || sources[field.key] === 'env');
+        if (!hasStoredValue) {
+          newErrors[field.key] = 'This field is required';
+        }
       }
     });
 

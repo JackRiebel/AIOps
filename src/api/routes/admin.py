@@ -140,7 +140,7 @@ async def update_config(
         # Reset credential pool when platform credentials change
         if key in ("meraki_api_key", "thousandeyes_oauth_token", "catalyst_center_host",
                    "catalyst_center_username", "catalyst_center_password",
-                   "splunk_host", "splunk_hec_token", "splunk_api_url"):
+                   "splunk_host", "splunk_hec_token", "splunk_api_url", "splunk_bearer_token"):
             from src.services.credential_pool import reset_credential_pool
             reset_credential_pool()
             logger.info(f"Reset credential pool to pick up new {key}")
@@ -205,7 +205,7 @@ async def bulk_update_config(
         # Reset credential pool when platform credentials change
         platform_keys = {"meraki_api_key", "thousandeyes_oauth_token", "catalyst_center_host",
                         "catalyst_center_username", "catalyst_center_password",
-                        "splunk_host", "splunk_hec_token", "splunk_api_url"}
+                        "splunk_host", "splunk_hec_token", "splunk_api_url", "splunk_bearer_token"}
         if platform_keys & set(updated):
             from src.services.credential_pool import reset_credential_pool
             reset_credential_pool()
@@ -286,7 +286,7 @@ async def test_meraki_connection(
         }
 
     try:
-        async with httpx.AsyncClient(verify=False) as client:
+        async with httpx.AsyncClient(verify=get_settings().meraki_verify_ssl) as client:
             response = await client.get(
                 "https://api.meraki.com/api/v1/organizations",
                 headers={"X-Cisco-Meraki-API-Key": api_key},
@@ -337,7 +337,15 @@ async def test_anthropic_connection(
         }
 
     try:
-        async with httpx.AsyncClient() as client:
+        # Respect verify_ssl setting from database or env
+        from src.services.config_service import get_config_or_env
+        db_verify = get_config_or_env("anthropic_verify_ssl", "ANTHROPIC_VERIFY_SSL")
+        if db_verify is not None:
+            verify_ssl = db_verify.lower() not in ("false", "0", "no", "disabled")
+        else:
+            verify_ssl = get_settings().anthropic_verify_ssl
+
+        async with httpx.AsyncClient(verify=verify_ssl) as client:
             response = await client.post(
                 "https://api.anthropic.com/v1/messages",
                 headers={
@@ -500,7 +508,7 @@ async def test_cisco_circuit_connection(
         auth_string = f"{client_id}:{client_secret}"
         encoded_auth = base64.b64encode(auth_string.encode()).decode()
 
-        async with httpx.AsyncClient(verify=False) as client:
+        async with httpx.AsyncClient(verify=get_settings().cisco_circuit_verify_ssl) as client:
             response = await client.post(
                 "https://id.cisco.com/oauth2/default/v1/token",
                 headers={
@@ -568,10 +576,10 @@ async def test_splunk_connection(
         hec_url = f"{splunk_host.rstrip('/')}/services/collector/event"
         # Simple event format - let Splunk use token's default sourcetype/index
         test_event = {
-            "event": {"message": "Lumen connection test", "status": "ok"}
+            "event": {"message": "Cisco AIOps Hub connection test", "status": "ok"}
         }
 
-        async with httpx.AsyncClient(verify=False, timeout=10.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(verify=get_settings().splunk_verify_ssl, timeout=10.0, follow_redirects=True) as client:
             response = await client.post(
                 hec_url,
                 headers={
@@ -666,7 +674,14 @@ async def test_splunk_api_connection(
     try:
         # Test by getting server info
         info_url = f"{api_url.rstrip('/')}/services/server/info"
-        async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
+        # Read verify_ssl from database config (not settings.py which reads .env)
+        verify_ssl_config = await config_service.get_config("splunk_verify_ssl")
+        if verify_ssl_config is not None:
+            verify_ssl = str(verify_ssl_config).lower() in ('true', '1', 'yes')
+        else:
+            is_localhost = 'localhost' in api_url or '127.0.0.1' in api_url
+            verify_ssl = not is_localhost
+        async with httpx.AsyncClient(verify=verify_ssl, timeout=10.0) as client:
             if bearer_token:
                 # Splunk auth tokens use "Splunk {token}" format (not "Bearer")
                 response = await client.get(
@@ -741,7 +756,7 @@ async def test_thousandeyes_connection(
 
     try:
         # Test with account groups endpoint
-        async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
+        async with httpx.AsyncClient(verify=get_settings().thousandeyes_verify_ssl, timeout=10.0) as client:
             response = await client.get(
                 "https://api.thousandeyes.com/v7/account-groups",
                 headers={"Authorization": f"Bearer {oauth_token}"}
@@ -800,7 +815,7 @@ async def test_catalyst_connection(
         encoded_auth = base64.b64encode(auth_string.encode()).decode()
 
         # Get auth token
-        async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
+        async with httpx.AsyncClient(verify=get_settings().catalyst_verify_ssl, timeout=10.0) as client:
             response = await client.post(
                 f"{host.rstrip('/')}/dna/system/api/v1/auth/token",
                 headers={"Authorization": f"Basic {encoded_auth}"}
@@ -848,11 +863,11 @@ async def test_slack_connection(
         }
 
     try:
-        async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
+        async with httpx.AsyncClient(verify=get_settings().verify_ssl, timeout=10.0) as client:
             response = await client.post(
                 webhook_url,
                 json={
-                    "text": ":white_check_mark: *Lumen Connection Test*\nThis is a test message from your Lumen configuration."
+                    "text": ":white_check_mark: *Cisco AIOps Hub Connection Test*\nThis is a test message from your Cisco AIOps Hub configuration."
                 }
             )
 
@@ -898,19 +913,19 @@ async def test_teams_connection(
         }
 
     try:
-        async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
+        async with httpx.AsyncClient(verify=get_settings().verify_ssl, timeout=10.0) as client:
             response = await client.post(
                 webhook_url,
                 json={
                     "@type": "MessageCard",
                     "@context": "http://schema.org/extensions",
                     "themeColor": "0076D7",
-                    "summary": "Lumen Test",
+                    "summary": "Cisco AIOps Hub Test",
                     "sections": [{
                         "activityTitle": "Connection Test",
                         "facts": [{
                             "name": "Status",
-                            "value": "Test message from Lumen"
+                            "value": "Test message from Cisco AIOps Hub"
                         }],
                         "markdown": True
                     }]

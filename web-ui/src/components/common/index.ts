@@ -1,6 +1,3 @@
-export { VirtualizedList, useInfiniteScroll } from './VirtualizedList';
-export type { VirtualizedListProps } from './VirtualizedList';
-
 export { StatusIndicator } from './StatusIndicator';
 export type { StatusType } from './StatusIndicator';
 

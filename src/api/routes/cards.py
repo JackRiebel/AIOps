@@ -10,7 +10,6 @@ expected by the frontend card components.
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 import logging
-import random
 
 from fastapi import APIRouter, HTTPException, Query, Depends
 import meraki.aio
@@ -368,7 +367,7 @@ async def get_device_status_data(
                             "poePower": poe_power,
                             "vlan": config.get("vlan"),
                             "type": config.get("type", "access"),
-                            "utilization": min(100, int((traffic.get("total", 0) / 1000) if traffic.get("total") else random.randint(0, 80))),
+                            "utilization": min(100, int(traffic.get("total", 0) / 1000)) if traffic.get("total") else 0,
                             "usageKb": usage,
                             "trafficKbps": traffic,
                             "neighbor": neighbor,
@@ -387,27 +386,7 @@ async def get_device_status_data(
 
                 except Exception as e:
                     logger.warning(f"[cards] Could not get ports for switch {switch['serial']}: {e}")
-                    # Generate fallback data for this switch ONLY if demo_mode is enabled
-                    if demo_mode:
-                        for i in range(1, 25):
-                            all_ports.append({
-                                "portId": str(i),
-                                "name": f"Port {i}",
-                                "enabled": True,
-                                "status": random.choice(["connected", "disconnected"]),
-                                "speed": "1 Gbps",
-                                "duplex": "full",
-                                "errors": 0,
-                                "poeEnabled": i <= 12,
-                                "poeStatus": "delivering" if random.random() > 0.5 else "searching",
-                                "poePower": random.randint(5, 25) if i <= 12 else 0,
-                                "vlan": 1,
-                                "type": "access",
-                                "utilization": random.randint(0, 80),
-                                "macCount": random.randint(0, 5),
-                                "switchSerial": switch["serial"],
-                                "switchName": switch["name"],
-                            })
+                    # No fallback data - only show real data
 
             return build_response({
                 "devices": device_list,
@@ -686,6 +665,44 @@ async def get_vlan_data(
 
 
 # ============================================================================
+# Static Routes Endpoint
+# Used by: network_routing_table card
+# ============================================================================
+
+@router.get("/static-routes/{network_id}/data", dependencies=[Depends(require_viewer)])
+async def get_static_routes_data(
+    network_id: str,
+    org_id: Optional[str] = Query(None),
+):
+    """Get static routes for routing table card."""
+    try:
+        async with get_meraki_dashboard(org_id or "default") as dashboard:
+            routes = []
+            try:
+                route_data = await dashboard.appliance.getNetworkApplianceStaticRoutes(network_id)
+                for route in route_data:
+                    routes.append({
+                        "id": route.get("id"),
+                        "name": route.get("name"),
+                        "subnet": route.get("subnet"),
+                        "gateway": route.get("gatewayIp"),
+                        "enabled": route.get("enabled", True),
+                        "ipVersion": route.get("ipVersion", "ipv4"),
+                    })
+            except Exception as e:
+                logger.warning(f"[cards] Could not fetch static routes: {e}")
+
+            return build_response({
+                "routes": routes,
+                "total": len(routes),
+                "networkId": network_id,
+            }, cache_ttl=60)
+    except Exception as e:
+        logger.exception(f"[cards] Error in static-routes: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
 # Bandwidth/Traffic Flow Endpoint
 # Used by: bandwidth-utilization, traffic-composition, top-talkers,
 #          application-usage, qos-statistics cards
@@ -709,51 +726,11 @@ async def get_bandwidth_data(
             logger.debug(f"Cache hit for bandwidth data: {device_serial}")
             return build_response(cached_data, cache_ttl=60)
 
-        # No cached data - return loading indicator if demo_mode disabled
-        if not demo_mode:
-            return build_response({
-                "status": "loading",
-                "message": "Fetching live data... Data will be available shortly.",
-                "deviceSerial": device_serial,
-            })
-
-        # Generate realistic demo bandwidth data as fallback
-        now = datetime.utcnow()
-        history = []
-        for i in range(24):
-            ts = now - timedelta(hours=23-i)
-            history.append({
-                "timestamp": ts.isoformat() + "Z",
-                "sent": random.randint(1000000, 50000000),  # 1-50 MB/s
-                "recv": random.randint(1000000, 100000000),  # 1-100 MB/s
-            })
-
+        # No cached data - return loading indicator
         return build_response({
-            "sent": random.randint(5000000, 20000000),
-            "recv": random.randint(10000000, 50000000),
-            "history": history,
-            "interfaces": [
-                {
-                    "interface": "wan1",
-                    "name": "WAN 1",
-                    "currentBandwidth": {
-                        "sent": random.randint(1000000, 10000000),
-                        "recv": random.randint(5000000, 30000000),
-                    },
-                    "capacity": 1000000000,  # 1 Gbps
-                },
-                {
-                    "interface": "wan2",
-                    "name": "WAN 2",
-                    "currentBandwidth": {
-                        "sent": random.randint(500000, 5000000),
-                        "recv": random.randint(1000000, 10000000),
-                    },
-                    "capacity": 100000000,  # 100 Mbps
-                },
-            ],
+            "status": "loading",
+            "message": "Fetching live data... Data will be available shortly.",
             "deviceSerial": device_serial,
-            "_demo": True,  # Flag to indicate demo data
         })
     except Exception as e:
         logger.exception(f"[cards] Error in bandwidth: {e}")
@@ -898,17 +875,8 @@ async def get_traffic_flow_data(
                         bandwidth_history.append(combined_entry)
 
             except Exception as e:
-                logger.warning(f"[cards] Could not get uplinks history: {e}")
-                # Generate fallback bandwidth history ONLY if demo_mode is enabled
-                if demo_mode:
-                    now = datetime.utcnow()
-                    for i in range(24):
-                        ts = now - timedelta(hours=23-i)
-                        bandwidth_history.append({
-                            "timestamp": ts.isoformat() + "Z",
-                            "sent": random.randint(1000000, 50000000),
-                            "recv": random.randint(1000000, 100000000),
-                        })
+                logger.warning(f"[cards] Could not get uplinks history (network may not have MX appliance): {e}")
+                # Will try to get bandwidth from client data below
 
             # Get top talkers from real client data
             clients = []
@@ -944,6 +912,25 @@ async def get_traffic_flow_data(
                     })
             except Exception as e:
                 logger.warning(f"[cards] Could not get clients: {e}")
+
+            # If we didn't get bandwidth history from uplinks API (no MX appliance),
+            # generate it from client usage data
+            if not bandwidth_history and clients:
+                # Calculate total bandwidth from clients
+                total_sent = sum(c.get("sent", 0) for c in clients)
+                total_recv = sum(c.get("recv", 0) for c in clients)
+
+                if total_sent > 0 or total_recv > 0:
+                    # Generate time series showing current bandwidth distributed evenly over time
+                    now = datetime.utcnow()
+                    for i in range(12):  # Last hour, 5-min intervals
+                        ts = now - timedelta(minutes=(11-i)*5)
+                        bandwidth_history.append({
+                            "timestamp": ts.isoformat() + "Z",
+                            "sent": int(total_sent / 12),
+                            "recv": int(total_recv / 12),
+                        })
+                    logger.info(f"[cards] Generated bandwidth history from {len(clients)} clients: sent={total_sent}, recv={total_recv}")
 
             # Get REAL traffic data from getNetworkTraffic API
             # This returns actual application, destination, protocol traffic data
@@ -1006,8 +993,8 @@ async def get_traffic_flow_data(
                             "name": app_name,
                             "bytes": bytes_val,
                             "bytesPerSec": bytes_val // 3600,  # Approximate rate
-                            "sessions": random.randint(10, 500),  # Not available in API
-                            "clients": random.randint(5, 100),  # Not available in API
+                            "sessions": None,  # Not available in API
+                            "clients": None,  # Not available in API
                         })
 
                     # Build traffic composition from real data
@@ -1029,87 +1016,16 @@ async def get_traffic_flow_data(
             except Exception as e:
                 logger.warning(f"[cards] Could not get network traffic: {e}")
 
-            # Fallback application data if not available AND demo_mode is enabled
-            if not applications and demo_mode:
-                applications = [
-                    {"application": "Microsoft 365", "name": "Microsoft 365", "category": "Productivity", "bytes": random.randint(200000000, 500000000), "bytesPerSec": 150000, "sessions": 450, "clients": 85},
-                    {"application": "YouTube", "name": "YouTube", "category": "Video", "bytes": random.randint(150000000, 400000000), "bytesPerSec": 120000, "sessions": 180, "clients": 65},
-                    {"application": "Zoom", "name": "Zoom", "category": "Communication", "bytes": random.randint(100000000, 250000000), "bytesPerSec": 80000, "sessions": 120, "clients": 45},
-                    {"application": "Slack", "name": "Slack", "category": "Communication", "bytes": random.randint(50000000, 150000000), "bytesPerSec": 40000, "sessions": 320, "clients": 95},
-                    {"application": "AWS", "name": "AWS", "category": "Cloud", "bytes": random.randint(80000000, 200000000), "bytesPerSec": 60000, "sessions": 85, "clients": 25},
-                ]
+            # No fallback data - only show real data
 
             # QoS statistics - Meraki doesn't expose QoS queue stats via API
-            # Only generate demo data when demo_mode is enabled
+            # No synthetic data - only real data
             qos_classes_enhanced = []
-            if demo_mode:
-                qos_classes_enhanced = [
-                    {
-                        "class": "Voice",
-                        "priority": 0,
-                        "packets": random.randint(10000, 100000),
-                        "drops": random.randint(0, 10),
-                        "bufferUsage": random.randint(5, 25),
-                        "bufferLimit": 100,
-                        "dropRate": round(random.uniform(0, 0.1), 3),
-                        "trend": [random.randint(0, 5) for _ in range(12)],
-                    },
-                    {
-                        "class": "Video",
-                        "priority": 1,
-                        "packets": random.randint(50000, 500000),
-                        "drops": random.randint(0, 50),
-                        "bufferUsage": random.randint(20, 60),
-                        "bufferLimit": 100,
-                        "dropRate": round(random.uniform(0, 0.5), 3),
-                        "trend": [random.randint(0, 20) for _ in range(12)],
-                    },
-                    {
-                        "class": "Interactive",
-                        "priority": 2,
-                        "packets": random.randint(30000, 300000),
-                        "drops": random.randint(0, 30),
-                        "bufferUsage": random.randint(15, 45),
-                        "bufferLimit": 100,
-                        "dropRate": round(random.uniform(0, 0.3), 3),
-                        "trend": [random.randint(0, 15) for _ in range(12)],
-                    },
-                    {
-                        "class": "Bulk Data",
-                        "priority": 4,
-                        "packets": random.randint(80000, 600000),
-                        "drops": random.randint(20, 150),
-                        "bufferUsage": random.randint(35, 70),
-                        "bufferLimit": 100,
-                        "dropRate": round(random.uniform(0.2, 1), 3),
-                        "trend": [random.randint(10, 40) for _ in range(12)],
-                    },
-                    {
-                        "class": "Best Effort",
-                        "priority": 6,
-                        "packets": random.randint(100000, 1000000),
-                        "drops": random.randint(50, 300),
-                        "bufferUsage": random.randint(50, 90),
-                        "bufferLimit": 100,
-                        "dropRate": round(random.uniform(0.5, 2), 3),
-                        "trend": [random.randint(20, 60) for _ in range(12)],
-                    },
-                ]
 
-            # Only use demo data if no real data AND demo_mode is enabled
             # Traffic composition: convert to categories format for frontend
             traffic_categories = []
             if traffic_composition and traffic_composition.get("byCategory"):
                 traffic_categories = traffic_composition["byCategory"]
-            elif demo_mode:
-                # Generate demo categories only if demo_mode is on
-                traffic_categories = [
-                    {"name": "Web Browsing", "category": "Web", "bytes": random.randint(2000000000, 3000000000), "percentage": 40},
-                    {"name": "Video Streaming", "category": "Video", "bytes": random.randint(1500000000, 2500000000), "percentage": 30},
-                    {"name": "Cloud Services", "category": "Cloud", "bytes": random.randint(800000000, 1200000000), "percentage": 15},
-                    {"name": "VoIP", "category": "Voice", "bytes": random.randint(200000000, 400000000), "percentage": 8},
-                    {"name": "Other", "category": "Other", "bytes": random.randint(100000000, 300000000), "percentage": 7},
-                ]
 
             # QoS: convert to queues format for frontend
             qos_queues = []
@@ -1123,26 +1039,16 @@ async def get_traffic_flow_data(
                         "packetsIn": qc.get("packets", 0),
                         "packetsOut": int(qc.get("packets", 0) * 0.8),
                         "dropped": qc.get("drops", 0),
-                        "bufferUsage": qc.get("bufferUsage", 50),
-                        "latency": random.randint(5, 50) if qc.get("priority", 0) <= 2 else random.randint(20, 100),
-                        "jitter": random.randint(2, 15) if qc.get("priority", 0) <= 2 else random.randint(10, 40),
+                        "bufferUsage": qc.get("bufferUsage", 0),
+                        "latency": qc.get("latency", 0),
+                        "jitter": qc.get("jitter", 0),
                     })
-            elif demo_mode:
-                # Generate demo queues only if demo_mode is on
-                qos_queues = [
-                    {"name": "Voice", "priority": 0, "bytesIn": 45000000, "bytesOut": 42000000, "packetsIn": 150000, "packetsOut": 140000, "dropped": 12, "latency": 5, "jitter": 2, "bufferUsage": 15},
-                    {"name": "Video", "priority": 1, "bytesIn": 180000000, "bytesOut": 165000000, "packetsIn": 450000, "packetsOut": 420000, "dropped": 45, "latency": 12, "jitter": 5, "bufferUsage": 35},
-                    {"name": "Interactive", "priority": 2, "bytesIn": 85000000, "bytesOut": 78000000, "packetsIn": 280000, "packetsOut": 260000, "dropped": 28, "latency": 18, "jitter": 8, "bufferUsage": 28},
-                    {"name": "Bulk Data", "priority": 4, "bytesIn": 320000000, "bytesOut": 290000000, "packetsIn": 850000, "packetsOut": 780000, "dropped": 1250, "latency": 45, "jitter": 15, "bufferUsage": 72},
-                    {"name": "Best Effort", "priority": 6, "bytesIn": 420000000, "bytesOut": 380000000, "packetsIn": 1200000, "packetsOut": 1100000, "dropped": 8500, "latency": 85, "jitter": 35, "bufferUsage": 88},
-                ]
-
             return build_response({
                 # BandwidthCard data
                 "interfaces": interfaces,
                 "history": bandwidth_history,
-                "sent": total_sent // 300 if total_sent else (random.randint(5000000, 20000000) if demo_mode else 0),
-                "recv": total_recv // 300 if total_recv else (random.randint(10000000, 50000000) if demo_mode else 0),
+                "sent": total_sent // 300 if total_sent else 0,
+                "recv": total_recv // 300 if total_recv else 0,
                 "topConsumers": top_consumers,
                 "capacity": 1000000000,  # 1 Gbps default
                 "slaThreshold": 800000000,  # 800 Mbps
@@ -1279,46 +1185,8 @@ async def get_performance_data(
             logger.info(f"[cards] Returning performance data: latency.current={real_data.get('latency', {}).get('current')}, packetLoss.current={real_data.get('packetLoss', {}).get('current')}")
             return build_response(real_data)
 
-        # Return empty if demo_mode disabled and no real data
-        if not demo_mode:
-            return build_response({})
-
-        # Generate demo data as fallback
-        latency_history = []
-        for i in range(24):
-            ts = now - timedelta(hours=23-i)
-            latency_history.append({
-                "timestamp": ts.isoformat() + "Z",
-                "latency": random.randint(5, 50),
-                "jitter": random.randint(1, 10),
-            })
-
-        loss_history = []
-        for i in range(24):
-            ts = now - timedelta(hours=23-i)
-            loss_history.append({
-                "timestamp": ts.isoformat() + "Z",
-                "lossPercent": round(random.uniform(0, 2), 2),
-            })
-
-        return build_response({
-            "latency": {
-                "current": random.randint(10, 30),
-                "average": random.randint(15, 25),
-                "max": random.randint(40, 80),
-                "min": random.randint(5, 15),
-                "history": latency_history,
-            },
-            "jitter": {
-                "current": random.randint(2, 8),
-                "average": random.randint(3, 6),
-            },
-            "packetLoss": {
-                "current": round(random.uniform(0, 1), 2),
-                "average": round(random.uniform(0, 0.5), 2),
-                "history": loss_history,
-            },
-        })
+        # Return empty if no real data
+        return build_response({})
     except Exception as e:
         logger.exception(f"[cards] Error in performance: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1399,7 +1267,7 @@ async def get_alerts_data(
                                 "networkId": network_id,
                                 "networkName": event.get("networkId"),
                                 "acknowledged": False,
-                                "correlationId": f"corr-{category}-{now.strftime('%Y%m%d')}" if random.random() > 0.7 else None,
+                                "correlationId": f"corr-{category}-{now.strftime('%Y%m%d')}",
                             })
 
                         logger.info(f"[cards] Fetched {len(alerts)} network events from Meraki")
@@ -1410,30 +1278,7 @@ async def get_alerts_data(
         except Exception as e:
             logger.warning(f"[cards] Could not connect to Meraki for alerts: {e}")
 
-        # Generate fallback alerts if no real data AND demo_mode is enabled
-        if not alerts and demo_mode:
-            sample_alerts = [
-                {"title": "High latency detected on WAN link", "category": "connectivity", "severity": "warning", "source": "Network Monitor"},
-                {"title": "AP-Office-2 went offline", "category": "wireless", "severity": "critical", "source": "Meraki"},
-                {"title": "New client connected", "category": "other", "severity": "info", "source": "Meraki"},
-                {"title": "Traffic spike detected", "category": "connectivity", "severity": "info", "source": "Meraki"},
-                {"title": "Switch port error rate increased", "category": "switching", "severity": "warning", "source": "Meraki"},
-                {"title": "VPN tunnel established", "category": "security", "severity": "info", "source": "Meraki"},
-                {"title": "DHCP lease pool 80% utilized", "category": "connectivity", "severity": "warning", "source": "Network Monitor"},
-                {"title": "Firmware update available", "category": "other", "severity": "info", "source": "Meraki"},
-            ]
-            for i, alert in enumerate(sample_alerts):
-                alerts.append({
-                    "id": f"alert-{i}",
-                    "title": alert["title"],
-                    "description": alert["title"],
-                    "category": alert["category"],
-                    "source": alert["source"],
-                    "timestamp": (now - timedelta(minutes=i*15 + random.randint(0, 10))).isoformat() + "Z",
-                    "severity": alert["severity"],
-                    "acknowledged": i > 4,  # Some are acknowledged
-                    "correlationId": f"corr-{alert['category']}" if random.random() > 0.6 else None,
-                })
+        # No fallback data - only show real alerts
 
         # Build alert correlation clusters for AlertCorrelationCard
         correlation_map: Dict[str, List] = {}
@@ -1466,7 +1311,7 @@ async def get_alerts_data(
                     "name": cluster_names.get(category, "Alert Cluster"),
                     "description": f"Correlated {category} events",
                     "rootCause": f"Multiple {category} events detected",
-                    "confidence": random.randint(70, 95),
+                    "confidence": 80,  # Fixed confidence for correlated alerts
                     "alerts": corr_alerts,
                     "affectedDevices": len(set(a.get("deviceSerial") for a in corr_alerts if a.get("deviceSerial"))),
                     "affectedNetworks": 1,
@@ -1476,43 +1321,38 @@ async def get_alerts_data(
                     "status": "active" if cluster_severity == "critical" else "investigating",
                 })
 
-        # Build MTTR metrics for MTTRCard
-        # Use real incident data if available, otherwise generate reasonable values
+        # Build MTTR metrics for MTTRCard from real alert data
         incident_count = len([a for a in alerts if a["severity"] in ["critical", "warning"]])
-        resolved_count = int(incident_count * random.uniform(0.7, 0.95))
+        critical_count = len([a for a in alerts if a["severity"] == "critical"])
+        warning_count = len([a for a in alerts if a["severity"] == "warning"])
+        info_count = len([a for a in alerts if a["severity"] == "info"])
 
         mttr_current = {
             "period": "Last 7 days",
-            "mttr": random.randint(90, 180),  # 1.5-3 hours
+            "mttr": 0,  # Would need actual resolution data to calculate
             "mttrTarget": 120,  # 2 hour target
             "incidentCount": incident_count,
-            "resolvedCount": resolved_count,
-            "avgResponseTime": random.randint(5, 20),  # 5-20 minutes
+            "resolvedCount": 0,  # Would need actual resolution data
+            "avgResponseTime": 0,  # Would need actual response data
         }
 
         mttr_previous = {
             "period": "Previous 7 days",
-            "mttr": random.randint(100, 200),
+            "mttr": 0,
             "mttrTarget": 120,
-            "incidentCount": incident_count + random.randint(-5, 5),
-            "resolvedCount": resolved_count + random.randint(-3, 3),
-            "avgResponseTime": random.randint(8, 25),
+            "incidentCount": 0,
+            "resolvedCount": 0,
+            "avgResponseTime": 0,
         }
 
-        # Generate trend data
+        # Trend data - empty without historical incident tracking
         mttr_trend = []
-        for i in range(7):
-            mttr_trend.append({
-                "date": (now - timedelta(days=6-i)).strftime("%Y-%m-%d"),
-                "mttr": random.randint(80, 200),
-                "count": random.randint(1, 8),
-            })
 
         mttr_by_priority = {
-            "critical": {"mttr": random.randint(30, 60), "count": max(1, len([a for a in alerts if a["severity"] == "critical"]))},
-            "high": {"mttr": random.randint(60, 120), "count": max(1, len([a for a in alerts if a["severity"] == "warning"]))},
-            "medium": {"mttr": random.randint(120, 240), "count": random.randint(2, 8)},
-            "low": {"mttr": random.randint(240, 480), "count": random.randint(1, 5)},
+            "critical": {"mttr": 0, "count": critical_count},
+            "high": {"mttr": 0, "count": warning_count},
+            "medium": {"mttr": 0, "count": 0},
+            "low": {"mttr": 0, "count": info_count},
         }
 
         return build_response({
@@ -1688,8 +1528,8 @@ async def get_security_events_data(
                                 "srcCidr": rule.get("srcCidr", "Any"),
                                 "destCidr": rule.get("destCidr", "Any"),
                                 "destPort": rule.get("destPort", "Any"),
-                                "hitCount": random.randint(100, 10000),  # Not available via API
-                                "lastHit": (now - timedelta(minutes=random.randint(1, 60))).isoformat() + "Z",
+                                "hitCount": None,  # Not available via Meraki API
+                                "lastHit": None,
                             })
                         logger.info(f"[cards] Fetched {len(firewall_rules)} L3 firewall rules")
                     except Exception as e:
@@ -1712,8 +1552,8 @@ async def get_security_events_data(
                                 "destPort": "Any",
                                 "application": rule.get("value"),
                                 "applicationType": rule.get("type"),
-                                "hitCount": random.randint(50, 5000),
-                                "lastHit": (now - timedelta(minutes=random.randint(1, 120))).isoformat() + "Z",
+                                "hitCount": None,  # Not available via Meraki API
+                                "lastHit": None,
                             })
                         logger.info(f"[cards] Fetched {len(l7_rules.get('rules', []))} L7 firewall rules")
                     except Exception as e:
@@ -1792,8 +1632,8 @@ async def get_security_events_data(
                 "countryCode": geo.get("countryCode", "XX"),
                 "lat": geo.get("lat"),
                 "lng": geo.get("lng") or geo.get("lon"),
-                "bytesBlocked": random.randint(1000, 500000),
-                "packetsBlocked": random.randint(10, 5000),
+                "bytesBlocked": None,  # Not available via Meraki API
+                "packetsBlocked": None,
             })
 
         # =================================================================
@@ -1833,119 +1673,10 @@ async def get_security_events_data(
                 "threatActor": None,
             })
 
-        # =================================================================
-        # Generate demo data if no real data and demo mode is enabled
-        # =================================================================
-        if not events and demo_mode:
-            event_types = [
-                ("IDS Alert", "intrusion", "detected"),
-                ("Blocked Connection", "firewall", "blocked"),
-                ("Malware Blocked", "malware", "blocked"),
-                ("Port Scan Detected", "scan", "detected"),
-            ]
-            demo_sources = [
-                {"city": "Beijing", "country": "China", "countryCode": "CN", "lat": 39.90, "lng": 116.41, "ipPrefix": "223.5"},
-                {"city": "Moscow", "country": "Russia", "countryCode": "RU", "lat": 55.76, "lng": 37.62, "ipPrefix": "95.173"},
-                {"city": "São Paulo", "country": "Brazil", "countryCode": "BR", "lat": -23.55, "lng": -46.63, "ipPrefix": "177.52"},
-            ]
+        # No demo data - only real security data
 
-            for i in range(15):
-                event_type = random.choice(event_types)
-                source = random.choice(demo_sources)
-                src_ip = f"{source['ipPrefix']}.{random.randint(1,255)}.{random.randint(1,255)}"
-                events.append({
-                    "id": f"demo-{i}",
-                    "type": event_type[0],
-                    "eventType": event_type[0],
-                    "category": event_type[1],
-                    "action": event_type[2],
-                    "timestamp": (now - timedelta(minutes=i*5)).isoformat() + "Z",
-                    "sourceIp": src_ip,
-                    "destIp": f"10.0.{random.randint(1,10)}.{random.randint(1,254)}",
-                    "severity": random.choice(["low", "medium", "high", "critical"]),
-                    "description": f"{event_type[0]} detected",
-                })
-                # Add to blocked connections
-                if event_type[2] == "blocked":
-                    blocked_connections.append({
-                        "id": f"block-demo-{i}",
-                        "sourceIp": src_ip,
-                        "destinationIp": f"10.0.{random.randint(1,10)}.{random.randint(1,254)}",
-                        "port": random.choice([22, 443, 80, 3389]),
-                        "protocol": "TCP",
-                        "reason": event_type[0],
-                        "category": event_type[1],
-                        "severity": random.choice(["medium", "high", "critical"]),
-                        "timestamp": (now - timedelta(minutes=i*5)).isoformat() + "Z",
-                        "city": source["city"],
-                        "country": source["country"],
-                        "countryCode": source["countryCode"],
-                        "lat": source["lat"],
-                        "lng": source["lng"],
-                        "bytesBlocked": random.randint(1000, 500000),
-                        "packetsBlocked": random.randint(10, 5000),
-                    })
-
-            # Generate threat locations for demo
-            for source in demo_sources:
-                threats.append({
-                    "country": source["country"],
-                    "countryCode": source["countryCode"],
-                    "city": source["city"],
-                    "lat": source["lat"],
-                    "lng": source["lng"],
-                    "count": random.randint(10, 50),
-                    "severity": random.choice(["high", "critical"]),
-                    "ips": [f"{source['ipPrefix']}.{random.randint(1,255)}.{random.randint(1,255)}" for _ in range(3)],
-                })
-
-            # Generate demo IDS alerts
-            for i in range(5):
-                source = random.choice(demo_sources)
-                ids_alerts.append({
-                    "id": f"ids-demo-{i}",
-                    "signature": random.choice(["SQL Injection", "Port Scan", "Brute Force SSH"]),
-                    "signatureId": f"SID-DEMO-{i}",
-                    "category": "intrusion",
-                    "severity": random.choice(["medium", "high", "critical"]),
-                    "mitreTactic": "Initial Access",
-                    "mitreTechnique": "T1190",
-                    "mitreDescription": "Exploit Public-Facing Application",
-                    "killChainStage": "exploitation",
-                    "sourceIp": f"{source['ipPrefix']}.{random.randint(1,255)}.{random.randint(1,255)}",
-                    "destinationIp": f"10.0.1.{random.randint(1,254)}",
-                    "destPort": random.choice([22, 443, 80]),
-                    "protocol": "TCP",
-                    "action": random.choice(["blocked", "detected"]),
-                    "timestamp": (now - timedelta(minutes=i*10)).isoformat() + "Z",
-                    "city": source["city"],
-                    "country": source["country"],
-                    "countryCode": source["countryCode"],
-                    "lat": source["lat"],
-                    "lng": source["lng"],
-                    "isActive": i < 2,
-                    "eventCount": random.randint(1, 100),
-                    "firstSeen": (now - timedelta(hours=random.randint(1, 24))).isoformat() + "Z",
-                    "threatActor": None,
-                })
-
-        if not firewall_rules and demo_mode:
-            firewall_rules = [
-                {"ruleId": "l3-1", "ruleName": "Block SSH from WAN", "ruleType": "L3", "policy": "deny", "hitCount": random.randint(100, 500), "lastHit": (now - timedelta(minutes=5)).isoformat() + "Z", "protocol": "tcp", "srcCidr": "Any", "destCidr": "Any", "destPort": "22"},
-                {"ruleId": "l3-2", "ruleName": "Allow HTTPS", "ruleType": "L3", "policy": "allow", "hitCount": random.randint(5000, 20000), "lastHit": (now - timedelta(seconds=30)).isoformat() + "Z", "protocol": "tcp", "srcCidr": "Any", "destCidr": "Any", "destPort": "443"},
-                {"ruleId": "l7-1", "ruleName": "L7: Block BitTorrent", "ruleType": "L7", "policy": "deny", "hitCount": random.randint(50, 500), "lastHit": (now - timedelta(hours=1)).isoformat() + "Z", "protocol": "any", "srcCidr": "Any", "destCidr": "Any", "destPort": "Any", "application": "BitTorrent"},
-                {"ruleId": "l7-2", "ruleName": "L7: Block Gaming", "ruleType": "L7", "policy": "deny", "hitCount": random.randint(100, 1000), "lastHit": (now - timedelta(minutes=30)).isoformat() + "Z", "protocol": "any", "srcCidr": "Any", "destCidr": "Any", "destPort": "Any", "application": "Online Gaming"},
-            ]
-
-        # Target network location (user's network) - only in demo mode
-        target_network = {
-            "city": "San Francisco",
-            "country": "United States",
-            "countryCode": "US",
-            "lat": 37.77,
-            "lng": -122.42,
-            "networkName": "Corporate HQ",
-        } if demo_mode or threats else None
+        # Target network location - only set if we have real threat data
+        target_network = None
 
         # Add disclaimer flag for geo data
         geo_disclaimer = "Locations approximated from IP addresses" if ip_geo_data else None
@@ -2016,6 +1747,21 @@ async def get_wireless_overview_data(
             devices = await dashboard.networks.getNetworkDevices(network_id)
             aps = [d for d in devices if d.get("model", "").startswith("MR")]
 
+            # Get organization ID for device statuses lookup
+            # Note: getNetworkDevices does NOT return status - need separate API call
+            device_statuses = {}
+            try:
+                orgs = await dashboard.organizations.getOrganizations()
+                if orgs:
+                    meraki_org_id = orgs[0]["id"]
+                    statuses = await dashboard.organizations.getOrganizationDevicesStatuses(
+                        meraki_org_id, networkIds=[network_id]
+                    )
+                    device_statuses = {s.get("serial"): s.get("status", "unknown") for s in statuses}
+                    logger.debug(f"[cards] Fetched {len(device_statuses)} device statuses for wireless-overview")
+            except Exception as e:
+                logger.warning(f"[cards] Could not fetch device statuses for wireless-overview: {e}")
+
             # Get channel utilization history (requires at least one AP)
             channel_util_data = {}
             if aps:
@@ -2033,60 +1779,86 @@ async def get_wireless_overview_data(
                 except Exception as e:
                     logger.debug(f"[cards] Could not get channel utilization for {first_ap_serial}: {e}")
 
-            # Build accessPoints array with real data where possible
+            # Get client counts per AP (aggregate across all SSIDs)
+            ap_client_counts: Dict[str, int] = {}
+            try:
+                orgs_for_clients = await dashboard.organizations.getOrganizations()
+                if orgs_for_clients:
+                    meraki_org_id_clients = orgs_for_clients[0]["id"]
+                    org_clients = await dashboard.organizations.getOrganizationClientsOverview(
+                        meraki_org_id_clients, timespan=300
+                    )
+                    # Fallback: count from network clients
+                    try:
+                        net_clients = await dashboard.networks.getNetworkClients(
+                            network_id, timespan=300, perPage=1000
+                        )
+                        for client in net_clients:
+                            device_serial = client.get("recentDeviceSerial")
+                            if device_serial:
+                                ap_client_counts[device_serial] = ap_client_counts.get(device_serial, 0) + 1
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.debug(f"[cards] Could not fetch client counts: {e}")
+
+            # Build accessPoints array — extract BOTH radio bands per AP
             access_points = []
             for ap in aps:
                 serial = ap.get("serial")
 
-                # Try to get real wireless status for this AP
-                ap_radio_info = {"band": "5 GHz", "channel": 36, "power": 15}
+                # Get real wireless status for this AP
+                radio_2g = None  # {channel, power, utilization}
+                radio_5g = None
                 try:
                     ap_status = await dashboard.wireless.getDeviceWirelessStatus(serial)
-                    # Extract radio info from status
-                    for radio_key in ["basicServiceSets", "radios"]:
-                        if radio_key in ap_status:
-                            for radio in ap_status[radio_key]:
-                                if radio.get("band") and radio.get("channel"):
-                                    ap_radio_info["band"] = radio.get("band", "5 GHz")
-                                    ap_radio_info["channel"] = radio.get("channel", 36)
-                                    ap_radio_info["power"] = radio.get("power", 15)
-                                    break
+                    # basicServiceSets has entries per SSID per band — deduplicate by band
+                    bss_list = ap_status.get("basicServiceSets", [])
+                    for bss in bss_list:
+                        band_str = bss.get("band", "")
+                        if not bss.get("channel"):
+                            continue
+
+                        raw_ch = bss.get("channel", 0)
+                        try:
+                            ch = int(raw_ch) if raw_ch not in [None, "auto", ""] else 0
+                        except (ValueError, TypeError):
+                            ch = 0
+
+                        raw_pwr = bss.get("power", 0)
+                        try:
+                            pwr = int(raw_pwr) if raw_pwr not in [None, "auto", ""] else 0
+                        except (ValueError, TypeError):
+                            pwr = 0
+
+                        if "2.4" in band_str and not radio_2g:
+                            radio_2g = {"channel": ch, "power": pwr, "channelWidth": bss.get("channelWidth", 20)}
+                        elif ("5" in band_str and "2.4" not in band_str) and not radio_5g:
+                            radio_5g = {"channel": ch, "power": pwr, "channelWidth": bss.get("channelWidth", 40)}
                 except Exception:
                     pass
 
-                # Normalize band format (remove spaces for frontend compatibility)
-                raw_band = ap_radio_info.get("band", "5 GHz")
-                normalized_band = raw_band.replace(" ", "")  # "5 GHz" -> "5GHz"
+                # Default to 5GHz as primary band for channel heatmap compatibility
+                primary_radio = radio_5g or radio_2g or {"channel": 0, "power": 15, "channelWidth": 20}
+                primary_band = "5GHz" if radio_5g else ("2.4GHz" if radio_2g else "5GHz")
 
-                # Safely convert power to int (API may return string or "auto")
-                raw_power = ap_radio_info.get("power", 15)
-                try:
-                    power_int = int(raw_power) if raw_power not in [None, "auto", ""] else 15
-                except (ValueError, TypeError):
-                    power_int = 15
-
-                # Safely convert channel to int
-                raw_channel = ap_radio_info.get("channel", 36)
-                try:
-                    channel_int = int(raw_channel) if raw_channel not in [None, "auto", ""] else 36
-                except (ValueError, TypeError):
-                    channel_int = random.choice([36, 40, 44, 48, 149, 153])
+                client_count = ap_client_counts.get(serial, 0)
 
                 access_points.append({
-                    # Both name and apName for compatibility
                     "name": ap.get("name") or serial,
-                    "apName": ap.get("name") or serial,  # ChannelHeatmapCard expects apName
+                    "apName": ap.get("name") or serial,
                     "serial": serial,
                     "model": ap.get("model"),
-                    "status": ap.get("status", "unknown"),
-                    "band": normalized_band,  # "5GHz" not "5 GHz"
-                    "channel": channel_int,
-                    "channelWidth": random.choice([20, 40, 80]),  # Integer for consistency
-                    "utilization": int(channel_util_data.get("avgTotal", random.randint(10, 80))),
-                    "clients": random.randint(0, 30),  # Would need separate API call
-                    "power": power_int,
-                    "noise": random.randint(-90, -70),  # Not directly available
-                    "interference": random.randint(5, 40),  # RFAnalysisCard checks this
+                    "status": device_statuses.get(serial, "unknown"),
+                    "band": primary_band,
+                    "channel": primary_radio["channel"],
+                    "channelWidth": primary_radio.get("channelWidth", 20),
+                    "utilization": 0,  # Meraki API doesn't expose per-AP utilization directly
+                    "clients": client_count,
+                    "power": primary_radio["power"],
+                    # Per-band radio info for the frontend card
+                    "radio_2g": radio_2g,
+                    "radio_5g": radio_5g,
                     "lanIp": ap.get("lanIp"),
                 })
 
@@ -2101,7 +1873,7 @@ async def get_wireless_overview_data(
                             "name": ssid.get("name"),
                             "enabled": ssid.get("enabled"),
                             "authMode": ssid.get("authMode"),
-                            "clients": random.randint(0, 50),
+                            "clients": None,  # Would need separate API call
                         })
             except Exception:
                 pass
@@ -2121,114 +1893,95 @@ async def get_wireless_overview_data(
             if len(crowded_channels) > 3:
                 recommendations.append("Multiple APs on common channels - consider DFS channels")
 
-            # Channel heatmap data
-            channels_2g = [{"channel": c, "utilization": random.randint(10, 90)} for c in [1, 6, 11]]
-            channels_5g = [{"channel": c, "utilization": random.randint(5, 60)} for c in [36, 40, 44, 48, 149, 153, 157, 161]]
+            # Channel heatmap data - derive from actual AP data when available
+            # Group APs by channel and band to get real utilization data
+            channels_2g_map = {}  # channel -> list of utilization values
+            channels_5g_map = {}
 
-            # Roaming events (field names match RoamingEventsCard expectations)
+            for ap in access_points:
+                channel = ap.get("channel", 0)
+                utilization = ap.get("utilization", 0)
+                band = ap.get("band", "5GHz")
+
+                if "2.4" in band or channel in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]:
+                    if channel not in channels_2g_map:
+                        channels_2g_map[channel] = []
+                    channels_2g_map[channel].append(utilization)
+                else:
+                    if channel not in channels_5g_map:
+                        channels_5g_map[channel] = []
+                    channels_5g_map[channel].append(utilization)
+
+            # Build channel arrays with average utilization per channel
+            if channels_2g_map:
+                channels_2g = [
+                    {"channel": ch, "utilization": sum(utils) // len(utils)}
+                    for ch, utils in sorted(channels_2g_map.items())
+                ]
+            else:
+                # No channel data available
+                channels_2g = []
+
+            if channels_5g_map:
+                channels_5g = [
+                    {"channel": ch, "utilization": sum(utils) // len(utils)}
+                    for ch, utils in sorted(channels_5g_map.items())
+                ]
+            else:
+                # No 5GHz channel data available
+                channels_5g = []
+
+            # Roaming events - would need real client event data from Meraki
             roaming_events = []
-            roam_types = ["802.11r", "802.11k", "802.11v", "standard", "forced"]
-            for i in range(5):
-                client_num = random.randint(1, 100)
-                roaming_events.append({
-                    "timestamp": (datetime.utcnow() - timedelta(minutes=i*10)).isoformat() + "Z",
-                    "clientMac": f"00:11:22:33:44:{client_num:02x}",  # Frontend expects clientMac
-                    "clientName": f"Client-{client_num}",
-                    "fromAP": random.choice([ap["name"] for ap in access_points]) if access_points else "AP-1",
-                    "toAP": random.choice([ap["name"] for ap in access_points]) if access_points else "AP-2",
-                    "duration": random.randint(50, 500),  # ms
-                    "roamType": random.choice(roam_types),
-                    "success": random.random() > 0.1,  # 90% success rate
-                })
 
-            # Enhanced interference data for InterferenceCard (OVERHAULED)
-            interference_sources = [
-                {"type": "microwave", "channel": 6, "severity": "high", "location": "Kitchen Area", "band": "2.4GHz"},
-                {"type": "bluetooth", "channel": 1, "severity": "low", "location": "Office 201", "band": "2.4GHz"},
-                {"type": "cordless", "channel": 11, "severity": "medium", "location": "Reception", "band": "2.4GHz"},
-            ] if random.random() > 0.3 else []
+            # Interference data - not available via Meraki API
+            interference_sources = []
 
-            # Interference by channel - band keys without spaces for consistency
+            # Interference by channel - build from real data only
+            # Create channel-indexed lookup for utilization
+            channels_2g_lookup = {ch["channel"]: ch.get("utilization", 0) for ch in channels_2g}
+            channels_5g_lookup = {ch["channel"]: ch.get("utilization", 0) for ch in channels_5g}
+
             interference_by_channel = {
                 "2.4GHz": [
-                    {"channel": 1, "interference": random.randint(5, 30), "sources": ["bluetooth"] if random.random() > 0.5 else [], "utilization": channels_2g[0]["utilization"]},
-                    {"channel": 6, "interference": random.randint(20, 60), "sources": ["microwave"] if random.random() > 0.4 else [], "utilization": channels_2g[1]["utilization"]},
-                    {"channel": 11, "interference": random.randint(10, 40), "sources": ["cordless"] if random.random() > 0.6 else [], "utilization": channels_2g[2]["utilization"]},
-                ],
+                    {"channel": ch["channel"], "interference": 0, "sources": [], "utilization": ch.get("utilization", 0)}
+                    for ch in channels_2g
+                ] if channels_2g else [],
                 "5GHz": [
-                    {"channel": 36, "interference": random.randint(2, 15), "sources": [], "utilization": channels_5g[0]["utilization"]},
-                    {"channel": 40, "interference": random.randint(2, 12), "sources": [], "utilization": channels_5g[1]["utilization"]},
-                    {"channel": 44, "interference": random.randint(5, 20), "sources": ["radar"] if random.random() > 0.8 else [], "utilization": channels_5g[2]["utilization"]},
-                    {"channel": 48, "interference": random.randint(2, 10), "sources": [], "utilization": channels_5g[3]["utilization"]},
-                    {"channel": 149, "interference": random.randint(2, 8), "sources": [], "utilization": channels_5g[4]["utilization"]},
-                    {"channel": 153, "interference": random.randint(2, 8), "sources": [], "utilization": channels_5g[5]["utilization"]},
-                    {"channel": 157, "interference": random.randint(2, 10), "sources": [], "utilization": channels_5g[6]["utilization"]},
-                    {"channel": 161, "interference": random.randint(2, 10), "sources": [], "utilization": channels_5g[7]["utilization"]},
-                ],
-                "6GHz": [],  # Add 6GHz for completeness
+                    {"channel": ch["channel"], "interference": 0, "sources": [], "utilization": ch.get("utilization", 0)}
+                    for ch in channels_5g
+                ] if channels_5g else [],
+                "6GHz": [],
             }
 
-            # Enhanced SSID data for SSIDBreakdownCard (OVERHAULED)
-            # Field names match SSIDBreakdownCard expectations
+            # Enhanced SSID data for SSIDBreakdownCard
             ssids_enhanced = []
             for ssid in ssids:
-                client_count = ssid.get("clients", random.randint(5, 50))
+                client_count = ssid.get("clients") or 0
                 encryption = ("WPA3" if ssid.get("authMode") in ["8021x-radius", "8021x-meraki"] else
                               "WPA2" if ssid.get("authMode") in ["psk", "wpa2-personal"] else
                               "WPA" if ssid.get("authMode") == "wpa-personal" else
                               "Open")
-                band_2_4 = random.randint(int(client_count * 0.2), int(client_count * 0.4))
-                band_5 = client_count - band_2_4
 
                 ssids_enhanced.append({
-                    # Original fields
                     "number": ssid.get("number"),
                     "name": ssid.get("name"),
                     "enabled": ssid.get("enabled"),
                     "authMode": ssid.get("authMode"),
-                    # SSIDBreakdownCard expects these field names:
-                    "ssid": ssid.get("name"),  # Card expects 'ssid' not 'name'
-                    "clientCount": client_count,  # Card expects 'clientCount' not 'clients'
-                    "encryption": encryption,  # Card expects 'encryption' not 'security'
-                    "bandwidthUsage": random.randint(10000000, 500000000),  # Card expects 'bandwidthUsage'
-                    # Band distribution for visualization
+                    "ssid": ssid.get("name"),
+                    "clientCount": client_count,
+                    "encryption": encryption,
+                    "bandwidthUsage": None,  # Would need separate API call
                     "band": "dual",
-                    "band2_4Clients": band_2_4,
-                    "band5Clients": band_5,
-                    "band6Clients": 0,
-                    "trend": [random.randint(max(0, client_count - 10), client_count + 10) for _ in range(12)],
+                    "band2_4Clients": None,  # Not available without client data
+                    "band5Clients": None,
+                    "band6Clients": None,
+                    "trend": [],  # Would need historical data
                     "visible": True,
                 })
 
-            # Client signal strength data for SignalStrengthCard
-            # Field names match SignalStrengthCard expectations
+            # Client signal strength - would need real client data from Meraki
             clients_signal = []
-            bands = ["2.4GHz", "5GHz", "6GHz"]
-            for i in range(random.randint(8, 20)):
-                ap = random.choice(access_points) if access_points else {"name": f"AP-{i}", "serial": f"serial-{i}"}
-                ssid = random.choice(ssids) if ssids else {"name": "Corporate", "number": 0}
-                clients_signal.append({
-                    "clientId": f"client-{i}",
-                    "mac": f"00:11:22:33:{random.randint(10,99):02d}:{random.randint(10,99):02d}",
-                    "rssi": random.randint(-80, -40),  # dBm signal strength
-                    "ssid": ssid.get("name", "Corporate"),
-                    "apName": ap.get("name", f"AP-{i}"),
-                    "apId": ap.get("serial", f"serial-{i}"),
-                    "band": random.choice(bands),
-                    "description": f"Client-{i}",
-                })
-
-            # If demo_mode is disabled, clear purely synthetic data
-            # Keep roaming_events and clients_signal if we have real APs (they're semi-realistic)
-            if not demo_mode:
-                interference_sources = []
-                interference_by_channel = {"2.4GHz": [], "5GHz": [], "6GHz": []}
-                channels_2g = []
-                channels_5g = []
-                # Only clear if no real APs exist
-                if not access_points:
-                    roaming_events = []
-                    clients_signal = []
 
             return build_response({
                 "accessPoints": access_points,
@@ -2253,6 +2006,42 @@ async def get_wireless_overview_data(
             })
     except Exception as e:
         logger.exception(f"[cards] Error in wireless-overview: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Wireless Connection Stats Endpoint
+# Used by: wireless-stats card
+# ============================================================================
+
+@router.get("/wireless-connection-stats/{network_id}/data", dependencies=[Depends(require_viewer)])
+async def get_wireless_connection_stats_data(
+    network_id: str,
+    org_id: Optional[str] = Query(None),
+    timespan: int = Query(86400, description="Timespan in seconds (default 24 hours)"),
+):
+    """Get wireless connection statistics for the Wireless Stats card.
+
+    Returns connection success/failure counts from Meraki API.
+    """
+    try:
+        async with get_meraki_dashboard(org_id or "default") as dashboard:
+            # Get network-level connection stats
+            stats = await dashboard.wireless.getNetworkWirelessConnectionStats(
+                network_id, timespan=timespan
+            )
+
+            # Stats format: { assoc: int, auth: int, dhcp: int, dns: int, success: int }
+            return {
+                "success": stats.get("success", 0),
+                "assoc": stats.get("assoc", 0),
+                "auth": stats.get("auth", 0),
+                "dhcp": stats.get("dhcp", 0),
+                "dns": stats.get("dns", 0),
+                "networkId": network_id,
+            }
+    except Exception as e:
+        logger.exception(f"[cards] Error in wireless-connection-stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -2408,35 +2197,8 @@ async def get_clients_data(
                 {"label": "Poor Signal", "value": poor, "status": "critical" if poor > 5 else "warning" if poor > 0 else "healthy"},
             ]
 
-            # ================================================================
-            # Enhanced client events for ClientTimelineCard
-            # ================================================================
-            event_type_choices = ["connect", "disconnect", "roam", "auth", "dhcp", "error"]
+            # Client events - would need real event data from Meraki Network Events API
             client_events = []
-            now = datetime.utcnow()
-            for i, c in enumerate(clients[:20]):
-                for j in range(random.randint(2, 4)):
-                    event_type = random.choice(event_type_choices)
-                    client_events.append({
-                        "id": f"event-{i}-{j}",
-                        "timestamp": (now - timedelta(minutes=random.randint(5, 180))).isoformat() + "Z",
-                        "eventType": event_type,
-                        "clientMac": c.get("mac"),
-                        "clientName": c.get("description") or c.get("mac"),
-                        "ssid": c.get("ssid"),
-                        "ap": f"AP-{random.randint(1, 10)}",
-                        "details": {
-                            "connect": f"Connected to {c.get('ssid', 'Corporate')}",
-                            "disconnect": f"Disconnected from {c.get('ssid', 'Corporate')}",
-                            "roam": f"Roamed from AP-{random.randint(1,5)} to AP-{random.randint(6,10)}",
-                            "auth": "802.1X authentication successful" if random.random() > 0.2 else "Authentication failed",
-                            "dhcp": f"Obtained IP {c.get('ip', '10.0.1.' + str(random.randint(10, 254)))}",
-                            "error": random.choice(["DHCP timeout", "Authentication timeout", "Association rejected"]),
-                        }.get(event_type, "Event occurred"),
-                        "severity": "error" if event_type == "error" else "warning" if event_type == "disconnect" else "info",
-                    })
-
-            client_events.sort(key=lambda x: x["timestamp"], reverse=True)
 
             # ================================================================
             # Return complete response for ClientDistributionCard
@@ -2663,10 +2425,10 @@ async def get_compliance_data(
                 "firmware": {"score": firmware_score, "status": "compliant" if firmware_score >= 80 else "warning"},
             },
             "sla": {
-                "uptime": round(random.uniform(99.5, 99.99), 2),
+                "uptime": None,  # Would need historical uptime data
                 "target": 99.9,
-                "status": "met",
-                "incidents": random.randint(0, 3),
+                "status": "unknown",
+                "incidents": None,  # Would need incident tracking
             },
             "networkId": network_id,
         }, cache_ttl=60)
@@ -2817,27 +2579,16 @@ async def get_resource_health_data(
                     if cpu is None:
                         if status == "offline":
                             cpu = 0
-                        elif status == "alerting":
-                            cpu = random.randint(70, 95)
-                        elif model.startswith("MX"):
-                            cpu = random.randint(30, 60)
-                        elif model.startswith("MS"):
-                            # MS switches: CPU only visible in dashboard UI, no API available
-                            cpu = random.randint(15, 40)
                         else:
-                            cpu = random.randint(10, 35)
+                            # CPU data not available for this device/status
+                            cpu = None
 
                     if memory is None:
                         if status == "offline":
                             memory = 0
-                        elif status == "alerting":
-                            memory = random.randint(75, 95)
-                        elif model.startswith("MX"):
-                            memory = random.randint(40, 70)
-                        elif model.startswith("MS"):
-                            memory = random.randint(30, 55)
                         else:
-                            memory = random.randint(25, 50)
+                            # Memory data not available
+                            memory = None
 
                     devices_data.append({
                         "serial": serial,
@@ -2845,21 +2596,14 @@ async def get_resource_health_data(
                         "model": model,
                         "cpu": cpu,
                         "memory": memory,
-                        "temperature": random.randint(35, 55) if status != "offline" else 0,
-                        "disk": random.randint(10, 40) if model.startswith("MX") else None,
+                        "temperature": None,  # Not available via Meraki API
+                        "disk": None,  # Not available via Meraki API
                         "status": status,
                     })
         except Exception as e:
             logger.warning(f"[cards] Could not fetch devices for resource-health: {e}")
 
-        # Generate demo data if no real devices and demo mode enabled
-        if not devices_data and demo_mode:
-            devices_data = [
-                {"serial": "Q2XX-XXXX-1234", "name": "core-switch-01", "model": "MS350-48", "cpu": 45, "memory": 62, "temperature": 42, "disk": 23, "status": "online"},
-                {"serial": "Q2XX-XXXX-5678", "name": "edge-fw-01", "model": "MX250", "cpu": 78, "memory": 85, "temperature": 55, "disk": 45, "status": "alerting"},
-                {"serial": "Q2XX-XXXX-9012", "name": "access-switch-fl2", "model": "MS120-24P", "cpu": 28, "memory": 41, "temperature": 38, "disk": 15, "status": "online"},
-                {"serial": "Q2XX-XXXX-3456", "name": "wap-conf-rm-a", "model": "MR46", "cpu": 15, "memory": 35, "temperature": 32, "status": "online"},
-            ]
+        # No demo data - only real data
 
         return build_response({
             "devices": devices_data,
@@ -3200,8 +2944,8 @@ async def get_site_health_data(
                         "id": org["id"],
                         "name": org["name"],
                         "networkCount": len(networks),
-                        "status": "healthy",
-                        "healthScore": random.randint(80, 100),
+                        "status": "healthy" if len(networks) > 0 else "unknown",
+                        "healthScore": None,  # Health score requires device status API - not available in summary
                     })
                 except Exception:
                     sites.append({
@@ -3261,7 +3005,7 @@ async def get_cost_tracking_data(
                 "inputTokens24h": int(row.input_tokens or 0),
                 "outputTokens24h": int(row.output_tokens or 0),
                 "requestCount24h": int(row.request_count or 0),
-                "costTrend": random.choice(["up", "down", "stable"]),
+                "costTrend": None,  # Trend calculation requires historical comparison - not computed here
             }, cache_ttl=60)
     except Exception as e:
         return build_response({
@@ -3455,15 +3199,14 @@ def _transform_to_log_volume(insights: list, time_range: str) -> dict:
                 "source": i.source_system,
             })
 
-    # Generate synthetic timeseries (24 hours)
+    # Generate evenly distributed timeseries (24 hours)
     timeseries = []
+    base_count = total_events // 24 if total_events > 0 else 0
     for i in range(24):
         ts = now - timedelta(hours=23-i)
-        # Distribute events across hours
-        hour_count = total_events // 24 + random.randint(-10, 10)
         timeseries.append({
             "timestamp": ts.isoformat(),
-            "count": max(0, hour_count),
+            "count": base_count,
             "isAnomaly": False,
         })
 

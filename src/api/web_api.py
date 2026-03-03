@@ -18,9 +18,10 @@ from src.api.utils.errors import register_error_handlers
 from src.api.routes import (
     a2a, admin, canvases, cards, dashboard, health, organizations, security, audit, licenses, docs,
     network, chat, incidents, meraki, thousandeyes, splunk, costs, auth, ai_analysis,
-    ai_feedback, ai_sessions, oauth, setup, knowledge, knowledge_feedback, knowledge_analytics,
+    ai_feedback, ai_sessions, ai_traces, oauth, setup, knowledge, knowledge_feedback, knowledge_analytics,
     agents, agent_chat, websocket, webhooks, metrics, rbac, workflows, actions,
-    rag_metrics, activity, wireless, topology
+    rag_metrics, activity, wireless, topology, streaming, artifacts, network_changes,
+    pending_actions, cross_platform, ai_endpoint_monitor, mcp_monitor, te_metrics
 )
 from src.api.routes import settings as settings_routes
 
@@ -43,23 +44,28 @@ logging.getLogger("sqlalchemy").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="Lumen",
-    description="AI-Powered Network Management",
+    title="Cisco AIOps Hub",
+    description="Intelligent Network Operations",
     version="1.0.0",
 )
 
 # CORS Configuration - Restricted to necessary headers for security
-# Note: Add production origins when deploying (e.g., https://your-domain.com)
+# Additional origins can be added via CORS_ORIGINS env var (comma-separated)
+cors_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:7001",
+    "http://127.0.0.1:7001",
+    "https://localhost:3000",
+    "https://127.0.0.1:3000",
+]
+extra_origins = os.environ.get("CORS_ORIGINS", "")
+if extra_origins:
+    cors_origins.extend([o.strip() for o in extra_origins.split(",") if o.strip()])
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:7001",
-        "http://127.0.0.1:7001",
-        "https://localhost:3000",
-        "https://127.0.0.1:3000",
-    ],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=[
@@ -119,6 +125,9 @@ async def startup_event():
     scheduler = get_scheduler()
     scheduler.start()
 
+    # Load async settings (correlation interval from database)
+    await scheduler.start_async()
+
     # Initialize A2A Task Manager
     try:
         from src.a2a.task_manager import init_task_manager
@@ -150,6 +159,14 @@ async def startup_event():
         logger.info("Live card poller started for fallback polling")
     except Exception as e:
         logger.warning(f"Failed to start live card poller: {e}")
+
+    # Start workflow scheduler for scheduled/polling workflows
+    try:
+        from src.services.workflow_scheduler import start_workflow_scheduler
+        await start_workflow_scheduler()
+        logger.info("Workflow scheduler started for automated workflows")
+    except Exception as e:
+        logger.warning(f"Failed to start workflow scheduler: {e}")
 
     # Initialize Web Search Service for CRAG (Corrective RAG)
     web_search_service = None
@@ -229,7 +246,7 @@ async def startup_event():
     except Exception as e:
         logger.warning(f"Failed to initialize Agentic RAG pipeline: {e}")
 
-    logger.info("Lumen started with full CORS")
+    logger.info("Cisco AIOps Hub started with full CORS")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -249,6 +266,14 @@ async def shutdown_event():
         await stop_live_card_poller()
     except Exception as e:
         logger.warning(f"Error stopping live card poller: {e}")
+
+    # Stop workflow scheduler
+    try:
+        from src.services.workflow_scheduler import stop_workflow_scheduler
+        await stop_workflow_scheduler()
+        logger.info("Workflow scheduler stopped")
+    except Exception as e:
+        logger.warning(f"Error stopping workflow scheduler: {e}")
 
     # Stop WebSocket hub
     try:
@@ -290,11 +315,13 @@ app.include_router(workflows.router, tags=["Workflows"])
 app.include_router(meraki.router, tags=["Meraki"])
 app.include_router(thousandeyes.router, tags=["ThousandEyes"])
 app.include_router(splunk.router, tags=["Splunk"])
+app.include_router(cross_platform.router, tags=["Cross-Platform"])
 app.include_router(costs.router, tags=["Costs"])
 app.include_router(settings_routes.router, tags=["Settings"])
 app.include_router(ai_analysis.router, tags=["AI Analysis"])
 app.include_router(ai_feedback.router, tags=["AI Feedback"])
 app.include_router(ai_sessions.router, tags=["AI Sessions"])
+app.include_router(ai_traces.router, tags=["AI Traces"])
 app.include_router(setup.router, tags=["Setup"])
 app.include_router(knowledge.router, tags=["Knowledge Base"])
 app.include_router(knowledge_feedback.router, tags=["Knowledge Feedback"])
@@ -309,10 +336,17 @@ app.include_router(rag_metrics.router, tags=["RAG Metrics"])
 app.include_router(activity.router, tags=["Activity Feed"])
 app.include_router(wireless.router, tags=["Wireless Deep Dive"])
 app.include_router(topology.router, tags=["Topology & Infrastructure"])
+app.include_router(streaming.router, tags=["Streaming Chat"])
+app.include_router(artifacts.router, tags=["Canvas Artifacts"])
+app.include_router(network_changes.router, tags=["Network Changes"])
+app.include_router(pending_actions.router, tags=["Pending Actions"])
+app.include_router(ai_endpoint_monitor.router, tags=["AI Assurance"])
+app.include_router(mcp_monitor.router, tags=["MCP Monitor"])
+app.include_router(te_metrics.router, tags=["ThousandEyes Metrics"])
 
 # Register standardized error handlers
 register_error_handlers(app)
 
 @app.get("/")
 async def root():
-    return {"message": "Lumen is running!", "status": "victory"}
+    return {"message": "Cisco AIOps Hub is running!", "status": "victory"}

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { AreaChart, Area, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { apiClient } from '@/lib/api-client';
 import type { SystemHealth, Organization } from '@/types';
@@ -16,13 +16,13 @@ import {
   DashboardSkeleton,
   DataFreshnessIndicator,
   HealthVelocityWidget,
-  LiveActionsFeed,
+  ActiveAutomationsWidget,
   type StatItem,
   type IntegrationHealth,
   type Incident,
   type DeviceSummary,
   type VelocityDataPoint,
-  type ActionFeedItem,
+  type AutomationItem,
 } from '@/components/dashboard';
 import { TrendingUp } from 'lucide-react';
 import { ErrorAlert } from '@/components/common';
@@ -137,13 +137,29 @@ export default function DashboardPage() {
     currentHourCount: number;
     averageCount: number;
   }>({ hourlyData: [], currentHourCount: 0, averageCount: 0 });
-  const [activityFeed, setActivityFeed] = useState<ActionFeedItem[]>([]);
+
+  // Automations state
+  const [automations, setAutomations] = useState<{
+    items: AutomationItem[];
+    totalActive: number;
+    totalPaused: number;
+    recentExecutions: number;
+  }>({ items: [], totalActive: 0, totalPaused: 0, recentExecutions: 0 });
+
+  // Ref to hold the current AbortController so we can cancel in-flight requests
+  const abortRef = useRef<AbortController | null>(null);
 
   const fetchData = useCallback(async () => {
+    // Abort any previous in-flight request to prevent stacking
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const { signal } = controller;
+
     setError(null);
     try {
       // BFF: Single aggregated request replaces 10 parallel calls
-      const response = await fetch('/api/dashboard/summary', { credentials: 'include' });
+      const response = await fetch('/api/dashboard/summary', { credentials: 'include', signal });
       if (!response.ok) {
         throw new Error(`Dashboard fetch failed: ${response.status}`);
       }
@@ -176,23 +192,6 @@ export default function DashboardPage() {
         });
       }
 
-      // Process activity feed
-      if (data.activity_feed?.items) {
-        const feedItems: ActionFeedItem[] = data.activity_feed.items.map((item: Record<string, unknown>) => ({
-          id: String(item.id),
-          type: item.type as ActionFeedItem['type'],
-          title: String(item.title || ''),
-          description: item.description ? String(item.description) : undefined,
-          status: (item.status as ActionFeedItem['status']) || 'pending',
-          timestamp: new Date(String(item.timestamp)),
-          workflowId: item.workflow_id ? String(item.workflow_id) : undefined,
-          workflowName: item.workflow_name ? String(item.workflow_name) : undefined,
-          triggeredBy: item.triggered_by ? String(item.triggered_by) : undefined,
-          duration: typeof item.duration === 'number' ? item.duration : undefined,
-        }));
-        setActivityFeed(feedItems);
-      }
-
       // Parse integration config status from system_config only
       const configs = data.integrations_config?.configs || null;
 
@@ -213,7 +212,7 @@ export default function DashboardPage() {
 
       // Try cache first (fast path)
       try {
-        const cacheRes = await fetch('/api/network/cache', { credentials: 'include' });
+        const cacheRes = await fetch('/api/network/cache', { credentials: 'include', signal });
         if (cacheRes.ok) {
           const cacheData = await cacheRes.json();
           const networks = cacheData?.networks || [];
@@ -330,8 +329,61 @@ export default function DashboardPage() {
         });
       }
 
+      // Fetch workflows for AI Automations widget
+      try {
+        const workflowsRes = await fetch('/api/workflows?limit=10', { credentials: 'include', signal });
+        if (workflowsRes.ok) {
+          const workflows = await workflowsRes.json();
+          const activeWorkflows = workflows.filter((w: { status: string }) => w.status === 'active');
+          const pausedWorkflows = workflows.filter((w: { status: string }) => w.status === 'paused');
+
+          // Map to AutomationItem format
+          const automationItems: AutomationItem[] = workflows.map((w: {
+            id: number;
+            name: string;
+            status: string;
+            trigger_type?: string;
+            triggerType?: string;
+            last_run?: string;
+            lastRun?: string;
+            execution_count?: number;
+            executionCount?: number;
+          }) => ({
+            id: w.id,
+            name: w.name,
+            status: w.status as 'active' | 'paused' | 'draft',
+            triggerType: (w.trigger_type || w.triggerType || 'manual') as 'splunk_query' | 'schedule' | 'manual' | 'webhook',
+            lastRun: w.last_run || w.lastRun,
+            executionCount: w.execution_count || w.executionCount || 0,
+          }));
+
+          // Try to get recent execution count
+          let recentExecs = 0;
+          try {
+            const execsRes = await fetch('/api/workflows/executions?hours=24&limit=100', { credentials: 'include', signal });
+            if (execsRes.ok) {
+              const execs = await execsRes.json();
+              recentExecs = Array.isArray(execs) ? execs.length : 0;
+            }
+          } catch {
+            // Ignore execution fetch errors
+          }
+
+          setAutomations({
+            items: automationItems,
+            totalActive: activeWorkflows.length,
+            totalPaused: pausedWorkflows.length,
+            recentExecutions: recentExecs,
+          });
+        }
+      } catch {
+        // Ignore workflow fetch errors - widget will show empty state
+      }
+
       setLastUpdated(new Date());
-    } catch {
+    } catch (err) {
+      // Silently ignore aborted requests (from navigation or re-fetch)
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       setError('Failed to load dashboard data. Please check your connection and try again.');
     } finally {
       setLoading(false);
@@ -341,7 +393,11 @@ export default function DashboardPage() {
   useEffect(() => {
     fetchData();
     const interval = setInterval(fetchData, 60000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      // Cancel any in-flight request on unmount
+      abortRef.current?.abort();
+    };
   }, [fetchData]);
 
   // Derived metrics - use 24h data for stats bar to match the Active Incidents widget
@@ -433,7 +489,7 @@ export default function DashboardPage() {
         href: '/admin/settings',
       },
     ];
-  }, [integrations]);
+  }, [integrations, organizations]);
 
   const widgetIncidents: Incident[] = useMemo(() =>
     incidents.map(i => {
@@ -643,7 +699,7 @@ export default function DashboardPage() {
               <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Quick Actions</h3>
               <div className="flex flex-wrap gap-2">
                 {[
-                  { href: '/network', label: 'Agent Chat', icon: 'M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z' },
+                  { href: '/chat-v2', label: 'Agent Chat', icon: 'M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z' },
                   { href: '/incidents', label: 'Incidents', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
                   { href: '/networks', label: 'Networks', icon: 'M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01' },
                   { href: '/admin/settings', label: 'Settings', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z' },
@@ -663,17 +719,20 @@ export default function DashboardPage() {
             </div>
           </DashboardCard>
 
-          {/* Live Actions Feed - Real-time Workflow Activity */}
-          <LiveActionsFeed
-            initialItems={activityFeed}
-            loading={loading}
-          />
-
           {/* Incident Velocity - Predictive Intelligence */}
           <HealthVelocityWidget
             hourlyData={velocityData.hourlyData}
             currentHourCount={velocityData.currentHourCount}
             averageCount={velocityData.averageCount}
+            loading={loading}
+          />
+
+          {/* AI Automations */}
+          <ActiveAutomationsWidget
+            automations={automations.items}
+            totalActive={automations.totalActive}
+            totalPaused={automations.totalPaused}
+            recentExecutions={automations.recentExecutions}
             loading={loading}
           />
         </div>
@@ -691,7 +750,7 @@ export default function DashboardPage() {
             compact
           >
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
-              <Link href="/network" className="flex flex-col items-center gap-2 p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors group">
+              <Link href="/chat-v2" className="flex flex-col items-center gap-2 p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors group">
                 <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-cyan-50 dark:bg-cyan-500/10 group-hover:bg-cyan-100 dark:group-hover:bg-cyan-500/20 transition-colors">
                   <svg className="w-5 h-5 text-cyan-600 dark:text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
@@ -732,7 +791,7 @@ export default function DashboardPage() {
                 </div>
                 <span className="text-xs font-medium text-slate-700 dark:text-slate-300 group-hover:text-slate-900 dark:group-hover:text-white text-center">ThousandEyes</span>
               </Link>
-              <Link href="/admin" className="flex flex-col items-center gap-2 p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors group">
+              <Link href="/admin/settings" className="flex flex-col items-center gap-2 p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors group">
                 <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-slate-100 dark:bg-slate-500/10 group-hover:bg-slate-200 dark:group-hover:bg-slate-500/20 transition-colors">
                   <svg className="w-5 h-5 text-slate-600 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />

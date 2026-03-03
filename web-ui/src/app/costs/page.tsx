@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState, useMemo, useCallback } from 'react';
-import { Loader2, BarChart3 } from 'lucide-react';
+import { Suspense, useEffect, useState, useMemo, useCallback } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
+import { AnimatePresence, motion } from 'framer-motion';
+import { Loader2, BarChart3, Globe } from 'lucide-react';
 import { ExportButton, ROIReportExport } from '@/components/reports';
-import { TopStatsBar, type StatItem } from '@/components/dashboard/TopStatsBar';
 import {
   CostsTabBar,
   DailySpendChart,
@@ -22,12 +23,112 @@ import {
   type MTTRData,
   type WeeklyReportData,
 } from '@/components/costs';
+import { NetworkCostImpactCard } from '@/components/costs/NetworkCostImpactCard';
 
 // ============================================================================
-// AICostDashboard Component
+// StatItem type (inlined from TopStatsBar)
 // ============================================================================
 
-export default function AICostDashboard() {
+interface StatItem {
+  id: string;
+  label: string;
+  value: string | number;
+  change?: number;
+  changeLabel?: string;
+  status?: 'normal' | 'success' | 'warning' | 'critical';
+  href?: string;
+  icon?: 'activity' | 'alert' | 'server' | 'cost';
+  tooltip?: string;
+}
+
+// ============================================================================
+// Loading Skeleton
+// ============================================================================
+
+function CostsLoadingSkeleton() {
+  return (
+    <div className="h-full bg-slate-50 dark:bg-slate-900 overflow-auto">
+      <div className="px-6 py-5 max-w-[1600px] mx-auto space-y-3">
+        {/* Header skeleton */}
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-slate-200 dark:bg-slate-700 animate-pulse" />
+          <div className="space-y-1.5">
+            <div className="h-5 w-48 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
+            <div className="h-3 w-64 bg-slate-100 dark:bg-slate-800 rounded animate-pulse" />
+          </div>
+        </div>
+
+        {/* Tab bar skeleton */}
+        <div className="flex gap-1 p-1 bg-slate-100 dark:bg-slate-800/50 rounded-lg w-fit">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <div key={i} className="h-9 w-28 bg-slate-200 dark:bg-slate-700 rounded-lg animate-pulse" />
+          ))}
+        </div>
+
+        {/* Stats grid skeleton */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+          {[1, 2, 3, 4].map((i) => (
+            <div
+              key={i}
+              className="bg-white dark:bg-slate-800/60 rounded-lg border border-slate-200 dark:border-slate-700/50 border-l-4 border-l-slate-200 dark:border-l-slate-700 p-3"
+            >
+              <div className="h-2.5 w-20 bg-slate-100 dark:bg-slate-700 rounded animate-pulse mb-2" />
+              <div className="h-5 w-16 bg-slate-200 dark:bg-slate-700 rounded animate-pulse mb-2" />
+              <div className="h-2 w-24 bg-slate-100 dark:bg-slate-800 rounded animate-pulse" />
+            </div>
+          ))}
+        </div>
+
+        {/* Content area skeleton */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+          <div className="lg:col-span-2 h-64 bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 animate-pulse" />
+          <div className="h-64 bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 animate-pulse" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Border color helper for stat cards
+// ============================================================================
+
+function getStatBorderColor(stat: StatItem): string {
+  switch (stat.id) {
+    case 'spend':
+      return 'border-l-cyan-500';
+    case 'queries':
+      return 'border-l-violet-500';
+    case 'trend':
+      return stat.status === 'warning' ? 'border-l-amber-500' : 'border-l-emerald-500';
+    case 'monthly':
+      return 'border-l-indigo-500';
+    case 'time_saved':
+      return 'border-l-emerald-500';
+    case 'cost':
+      return 'border-l-cyan-500';
+    case 'roi':
+      return stat.status === 'success'
+        ? 'border-l-emerald-500'
+        : stat.status === 'critical'
+          ? 'border-l-red-500'
+          : 'border-l-amber-500';
+    case 'savings':
+      return 'border-l-emerald-500';
+    default:
+      return 'border-l-cyan-500';
+  }
+}
+
+// ============================================================================
+// CostsDashboardContent (inner component with useSearchParams)
+// ============================================================================
+
+function CostsDashboardContent() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const activeTab = (searchParams.get('tab') as CostsTabType) || 'costs';
+
   // Cost data state
   const [summary, setSummary] = useState<CostSummary | null>(null);
   const [daily, setDaily] = useState<DailyCost[]>([]);
@@ -37,9 +138,6 @@ export default function AICostDashboard() {
   const [aiInsights, setAiInsights] = useState<string | null>(null);
   const [aiInsightsLoading, setAiInsightsLoading] = useState(false);
   const [aiInsightsExpanded, setAiInsightsExpanded] = useState(false);
-
-  // Tab state
-  const [activeTab, setActiveTab] = useState<CostsTabType>('costs');
 
   // Sessions state
   const [sessions, setSessions] = useState<AISessionData[]>([]);
@@ -71,6 +169,17 @@ export default function AICostDashboard() {
   const [mttrData, setMTTRData] = useState<MTTRData | null>(null);
   const [weeklyReport, setWeeklyReport] = useState<WeeklyReportData | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
+
+  // ============================================================================
+  // Tab Navigation (URL-persisted)
+  // ============================================================================
+
+  const handleTabChange = useCallback((tab: CostsTabType) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('tab', tab);
+    router.replace(`?${params.toString()}`, { scroll: false });
+    setSelectedSessionId(null);
+  }, [searchParams, router]);
 
   // ============================================================================
   // Data Fetching
@@ -210,7 +319,7 @@ export default function AICostDashboard() {
             sessionName: inc.session_name,
             incidentId: inc.incident_id,
             incidentType: inc.incident_title || 'general',
-            resolved: true, // Only resolved incidents are in recent_resolved
+            resolved: true,
             resolutionTimeMinutes: inc.resolution_time_minutes,
             baselineMinutes: inc.baseline_minutes || 30,
             startedAt: inc.resolved_at || '',
@@ -356,7 +465,28 @@ export default function AICostDashboard() {
     return { totalTimeSaved, avgDuration, avgROI, activeSessions };
   }, [sessions]);
 
-  // Cost stats for TopStatsBar
+  // Format time helper
+  const formatTimeSaved = (minutes: number): string => {
+    if (minutes < 60) return `${Math.round(minutes)}m`;
+    const hours = Math.floor(minutes / 60);
+    const mins = Math.round(minutes % 60);
+    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  };
+
+  // Format ROI helper - cap at 99999% for readability
+  const formatROIValue = (roi: number): string => {
+    if (roi > 99999) return '>99,999%';
+    return `${Math.round(roi).toLocaleString()}%`;
+  };
+
+  // Format cost helper - consistent formatting
+  const formatCostValue = (cost: number): string => {
+    if (cost >= 1) return `$${cost.toFixed(2)}`;
+    if (cost >= 0.01) return `$${cost.toFixed(2)}`;
+    return `$${cost.toFixed(4)}`;
+  };
+
+  // Cost stats for inline metric cards
   const costStats: StatItem[] = useMemo(() => {
     if (!summary) return [];
     return [
@@ -395,30 +525,8 @@ export default function AICostDashboard() {
     ];
   }, [summary, costTrendPct, trendUp, monthlyProjection]);
 
-  // Format time helper
-  const formatTimeSaved = (minutes: number): string => {
-    if (minutes < 60) return `${Math.round(minutes)}m`;
-    const hours = Math.floor(minutes / 60);
-    const mins = Math.round(minutes % 60);
-    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
-  };
-
-  // Format ROI helper - cap at 99999% for readability
-  const formatROIValue = (roi: number): string => {
-    if (roi > 99999) return '>99,999%';
-    return `${Math.round(roi).toLocaleString()}%`;
-  };
-
-  // Format cost helper - consistent formatting
-  const formatCostValue = (cost: number): string => {
-    if (cost >= 1) return `$${cost.toFixed(2)}`;
-    if (cost >= 0.01) return `$${cost.toFixed(2)}`;
-    return `$${cost.toFixed(4)}`;
-  };
-
-  // Session stats for TopStatsBar - calculated from actual sessions
+  // Session stats for inline metric cards - calculated from actual sessions
   const sessionStats: StatItem[] = useMemo(() => {
-    // Calculate metrics directly from sessions (not from 30-day backend aggregate)
     const completedSessions = sessions.filter(s => s.status === 'completed');
     const timeSaved = completedSessions.reduce((sum, s) => sum + (s.time_saved_minutes || 0), 0);
     const avgROI = completedSessions.length > 0
@@ -480,11 +588,6 @@ export default function AICostDashboard() {
   // Event Handlers
   // ============================================================================
 
-  const handleTabChange = useCallback((tab: CostsTabType) => {
-    setActiveTab(tab);
-    setSelectedSessionId(null);
-  }, []);
-
   const handleSelectSession = useCallback((session: AISessionData | null) => {
     setSelectedSessionId(session?.id ?? null);
   }, []);
@@ -516,24 +619,41 @@ export default function AICostDashboard() {
   }, [fetchSessions]);
 
   // ============================================================================
+  // Dynamic subtitle
+  // ============================================================================
+
+  const getSubtitle = (): string => {
+    switch (activeTab) {
+      case 'costs':
+        return summary
+          ? `Track AI usage and spending over the last ${summary.period_days} days`
+          : 'Track AI usage and spending';
+      case 'sessions':
+        return 'Review your AI-assisted work sessions';
+      case 'analytics':
+        return 'ROI analytics, MTTR metrics, and weekly reports';
+      case 'rag':
+        return 'Agentic RAG pipeline performance and metrics';
+      case 'network':
+        return 'Network cost impact and optimization insights';
+      default:
+        return 'Track AI usage and spending';
+    }
+  };
+
+  // ============================================================================
+  // Determine which stats to show
+  // ============================================================================
+
+  const currentStats = activeTab === 'costs' ? costStats : sessionStats;
+  const statsLoading = activeTab === 'sessions' && sessionsLoading && sessions.length === 0;
+
+  // ============================================================================
   // Loading State
   // ============================================================================
 
   if (loading) {
-    return (
-      <div className="h-full bg-slate-50 dark:bg-slate-900 overflow-auto">
-        <div className="px-6 py-8 max-w-[1600px] mx-auto">
-          <div className="flex items-center justify-center py-32">
-            <div className="text-center">
-              <Loader2 className="w-10 h-10 text-cyan-500 animate-spin mx-auto" />
-              <p className="mt-4 text-slate-500 dark:text-slate-400 text-sm">
-                Loading cost data...
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+    return <CostsLoadingSkeleton />;
   }
 
   // ============================================================================
@@ -543,15 +663,16 @@ export default function AICostDashboard() {
   if (!summary || summary.queries === 0) {
     return (
       <div className="h-full bg-slate-50 dark:bg-slate-900 overflow-auto">
-        <div className="px-6 py-8 max-w-[1600px] mx-auto">
-          {/* Header */}
-          <div className="mb-6">
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
-              AI Cost & ROI
-            </h1>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-              Track AI usage and spending
-            </p>
+        <div className="px-6 py-5 max-w-[1600px] mx-auto space-y-3">
+          {/* Enterprise Header */}
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-sm">
+              <BarChart3 className="w-4.5 h-4.5 text-white" />
+            </div>
+            <div>
+              <h1 className="text-xl font-semibold text-slate-900 dark:text-white tracking-tight">AI Cost & ROI Center</h1>
+              <p className="text-[12px] text-slate-500 dark:text-slate-400">Track AI usage and spending</p>
+            </div>
           </div>
 
           {/* Empty State Card */}
@@ -577,273 +698,327 @@ export default function AICostDashboard() {
 
   return (
     <div className="h-full bg-slate-50 dark:bg-slate-900 overflow-auto">
-      <div className="px-6 py-8 max-w-[1600px] mx-auto">
-        {/* Header */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
-                AI Cost & ROI
-              </h1>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                {activeTab === 'costs'
-                  ? `Track AI usage and spending over the last ${summary.period_days} days`
-                  : 'Review your AI-assisted work sessions'}
-              </p>
+      <div className="px-6 py-5 max-w-[1600px] mx-auto space-y-3">
+        {/* Enterprise Header */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+          {/* Title with gradient icon */}
+          <div className="flex items-center gap-3 flex-shrink-0">
+            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-sm">
+              <BarChart3 className="w-4.5 h-4.5 text-white" />
             </div>
-            {/* Export Buttons */}
-            <div className="flex items-center gap-2">
-              <ExportButton
-                data={activeTab === 'sessions'
-                  ? sessions.map(s => ({
-                      session_id: s.id,
-                      name: s.name || 'Untitled Session',
-                      started_at: new Date(s.started_at).toLocaleString(),
-                      status: s.status,
-                      total_events: s.total_events,
-                      ai_queries: s.ai_query_count,
-                      total_cost_usd: s.total_cost_usd,
-                      total_tokens: s.total_tokens,
-                      time_saved_minutes: s.time_saved_minutes ?? 0,
-                      roi_percentage: s.roi_percentage ?? 0,
-                    }))
-                  : daily.map(d => ({
-                      date: d.date,
-                      cost_usd: d.cost_usd,
-                      label: d.label,
-                    }))
-                }
-                filename={activeTab === 'sessions' ? 'ai_sessions' : 'ai_costs'}
-                formats={['csv', 'json']}
-                columns={activeTab === 'sessions'
-                  ? [
-                      { key: 'session_id', label: 'Session ID' },
-                      { key: 'name', label: 'Name' },
-                      { key: 'started_at', label: 'Started' },
-                      { key: 'status', label: 'Status' },
-                      { key: 'total_events', label: 'Events' },
-                      { key: 'ai_queries', label: 'AI Queries' },
-                      { key: 'total_cost_usd', label: 'Cost ($)' },
-                      { key: 'total_tokens', label: 'Tokens' },
-                      { key: 'time_saved_minutes', label: 'Time Saved (min)' },
-                      { key: 'roi_percentage', label: 'ROI (%)' },
-                    ]
-                  : [
-                      { key: 'date', label: 'Date' },
-                      { key: 'cost_usd', label: 'Cost ($)' },
-                      { key: 'label', label: 'Label' },
-                    ]
-                }
-                formatValue={(key, value) => {
-                  if (key === 'total_cost_usd' || key === 'cost_usd') {
-                    return typeof value === 'number' ? value.toFixed(4) : String(value);
-                  }
-                  if (key === 'roi_percentage') {
-                    return typeof value === 'number' ? `${value.toFixed(0)}%` : String(value);
-                  }
-                  return String(value ?? '');
-                }}
-                variant="secondary"
-                size="md"
-              />
-              <ROIReportExport
-                data={{
-                  summary,
-                  sessions,
-                  dailyCosts: daily,
-                  roiMetrics: {
-                    totalTimeSaved: roiDashboard?.total_time_saved_minutes ?? 0,
-                    averageROI: roiDashboard?.avg_roi_percentage ?? 0,
-                    totalManualCostSaved: roiDashboard?.total_manual_cost_estimate_usd ?? 0,
-                  },
-                }}
-                variant="primary"
-                size="md"
-              />
+            <div>
+              <h1 className="text-xl font-semibold text-slate-900 dark:text-white tracking-tight">AI Cost & ROI Center</h1>
+              <p className="text-[12px] text-slate-500 dark:text-slate-400">{getSubtitle()}</p>
             </div>
           </div>
 
-          {/* Tab Bar */}
-          <CostsTabBar
-            activeTab={activeTab}
-            onTabChange={handleTabChange}
-            sessionCount={sessions.length}
-          />
+          {/* Export buttons on right */}
+          <div className="flex items-center gap-2 ml-auto flex-shrink-0">
+            <ExportButton
+              data={activeTab === 'sessions'
+                ? sessions.map(s => ({
+                    session_id: s.id,
+                    name: s.name || 'Untitled Session',
+                    started_at: new Date(s.started_at).toLocaleString(),
+                    status: s.status,
+                    total_events: s.total_events,
+                    ai_queries: s.ai_query_count,
+                    total_cost_usd: s.total_cost_usd,
+                    total_tokens: s.total_tokens,
+                    time_saved_minutes: s.time_saved_minutes ?? 0,
+                    roi_percentage: s.roi_percentage ?? 0,
+                  }))
+                : daily.map(d => ({
+                    date: d.date,
+                    cost_usd: d.cost_usd,
+                    label: d.label,
+                  }))
+              }
+              filename={activeTab === 'sessions' ? 'ai_sessions' : 'ai_costs'}
+              formats={['csv', 'json']}
+              columns={activeTab === 'sessions'
+                ? [
+                    { key: 'session_id', label: 'Session ID' },
+                    { key: 'name', label: 'Name' },
+                    { key: 'started_at', label: 'Started' },
+                    { key: 'status', label: 'Status' },
+                    { key: 'total_events', label: 'Events' },
+                    { key: 'ai_queries', label: 'AI Queries' },
+                    { key: 'total_cost_usd', label: 'Cost ($)' },
+                    { key: 'total_tokens', label: 'Tokens' },
+                    { key: 'time_saved_minutes', label: 'Time Saved (min)' },
+                    { key: 'roi_percentage', label: 'ROI (%)' },
+                  ]
+                : [
+                    { key: 'date', label: 'Date' },
+                    { key: 'cost_usd', label: 'Cost ($)' },
+                    { key: 'label', label: 'Label' },
+                  ]
+              }
+              formatValue={(key, value) => {
+                if (key === 'total_cost_usd' || key === 'cost_usd') {
+                  return typeof value === 'number' ? value.toFixed(4) : String(value);
+                }
+                if (key === 'roi_percentage') {
+                  return typeof value === 'number' ? `${value.toFixed(0)}%` : String(value);
+                }
+                return String(value ?? '');
+              }}
+              variant="secondary"
+              size="md"
+            />
+            <ROIReportExport
+              data={{
+                summary,
+                sessions,
+                dailyCosts: daily,
+                roiMetrics: {
+                  totalTimeSaved: roiDashboard?.total_time_saved_minutes ?? 0,
+                  averageROI: roiDashboard?.avg_roi_percentage ?? 0,
+                  totalManualCostSaved: roiDashboard?.total_manual_cost_estimate_usd ?? 0,
+                },
+              }}
+              variant="primary"
+              size="md"
+            />
+          </div>
         </div>
 
-        {/* Stats Bar */}
-        <TopStatsBar
-          stats={activeTab === 'costs' ? costStats : sessionStats}
-          loading={activeTab === 'sessions' && sessionsLoading && sessions.length === 0}
-          className="mb-6"
+        {/* Tab Bar */}
+        <CostsTabBar
+          activeTab={activeTab}
+          onTabChange={handleTabChange}
+          sessionCount={sessions.length}
         />
 
-        {/* Cost Overview Tab Content */}
-        {activeTab === 'costs' && (
-          <div className="space-y-6">
-            {/* AI Insights Panel */}
-            <AIInsightsPanel
-              insights={aiInsights}
-              loading={aiInsightsLoading}
-              expanded={aiInsightsExpanded}
-              onToggleExpand={handleToggleInsights}
-              onAnalyze={fetchAIInsights}
-            />
-
-            {/* Chart and Summary Row */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <DailySpendChart data={daily} className="lg:col-span-2" />
-              <UsageSummaryCard summary={summary} />
-            </div>
-
-            {/* Model Breakdown Table */}
-            {summary.model_breakdown.length > 0 && (
-              <ModelBreakdownTable
-                models={summary.model_breakdown}
-                totalCost={summary.total_cost_usd}
-              />
-            )}
-          </div>
-        )}
-
-        {/* Sessions Tab Content */}
-        {activeTab === 'sessions' && (
-          <div className="space-y-6">
-            {/* ROI Comparison Card - only show if we have sessions */}
-            {sessions.length > 0 && (
-              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-                <ROIComparisonCard
-                  data={(() => {
-                    // Calculate from actual sessions, not 30-day backend aggregate
-                    const completedSessions = sessions.filter(s => s.status === 'completed');
-                    const timeSavedMinutes = completedSessions.reduce((sum, s) => sum + (s.time_saved_minutes || 0), 0);
-                    const totalCost = sessions.reduce((sum, s) => sum + (s.total_cost_usd || 0), 0);
-                    const laborSaved = (timeSavedMinutes / 60) * 85; // $85/hr
-                    const avgROI = completedSessions.length > 0
-                      ? completedSessions.reduce((sum, s) => sum + (s.roi_percentage || 0), 0) / completedSessions.length
-                      : 0;
-                    return {
-                      timeSavedMinutes,
-                      manualCostEstimate: laborSaved,
-                      aiCostTotal: totalCost,
-                      roiPercentage: avgROI,
-                      sessionsCount: completedSessions.length,
-                      avgSessionDuration: timeSavedMinutes / Math.max(1, completedSessions.length) / 2,
-                    };
-                  })()}
-                  className="lg:col-span-2"
-                />
-                <div className="lg:col-span-2 bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 p-5">
-                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white mb-4">
-                    Session Efficiency Breakdown
-                  </h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="text-center p-4 rounded-lg bg-slate-50 dark:bg-slate-800/30">
-                      <p className="text-3xl font-bold text-slate-900 dark:text-white">
-                        {sessions.filter(s => s.status === 'completed').length}
-                      </p>
-                      <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Completed</p>
-                    </div>
-                    <div className="text-center p-4 rounded-lg bg-slate-50 dark:bg-slate-800/30">
-                      <p className="text-3xl font-bold text-slate-900 dark:text-white">
-                        {sessions.filter(s => s.roi_percentage && s.roi_percentage > 0).length}
-                      </p>
-                      <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">With ROI Data</p>
-                    </div>
-                    <div className="text-center p-4 rounded-lg bg-slate-50 dark:bg-slate-800/30">
-                      <p className="text-3xl font-bold text-emerald-500">
-                        {roiDashboard?.avg_efficiency_score?.toFixed(0) || '-'}
-                      </p>
-                      <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Avg Efficiency</p>
-                    </div>
-                    <div className="text-center p-4 rounded-lg bg-slate-50 dark:bg-slate-800/30">
-                      <p className="text-3xl font-bold text-cyan-500">
-                        {roiDashboard?.mttr_improvement_pct != null
-                          ? `${roiDashboard.mttr_improvement_pct.toFixed(0)}%`
-                          : '-'}
-                      </p>
-                      <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">MTTR Improvement</p>
-                    </div>
+        {/* Inline border-l-4 metric cards */}
+        {(activeTab === 'costs' || activeTab === 'sessions') && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            {statsLoading
+              ? [1, 2, 3, 4].map((i) => (
+                  <div
+                    key={i}
+                    className="bg-white dark:bg-slate-800/60 rounded-lg border border-slate-200 dark:border-slate-700/50 border-l-4 border-l-slate-200 dark:border-l-slate-700 p-3"
+                  >
+                    <div className="h-2.5 w-20 bg-slate-100 dark:bg-slate-700 rounded animate-pulse mb-2" />
+                    <div className="h-5 w-16 bg-slate-200 dark:bg-slate-700 rounded animate-pulse mb-2" />
+                    <div className="h-2 w-24 bg-slate-100 dark:bg-slate-800 rounded animate-pulse" />
                   </div>
-                </div>
-              </div>
-            )}
-
-            {/* Sessions Table */}
-            <SessionsTable
-              sessions={sessions}
-              loading={sessionsLoading}
-              selectedSessionId={selectedSessionId}
-              filter={sessionFilter}
-              onSelectSession={handleSelectSession}
-              onFilterChange={handleFilterChange}
-              onRefresh={fetchSessions}
-              onLinkIncident={handleLinkIncident}
-            />
+                ))
+              : currentStats.map((stat) => (
+                  <div
+                    key={stat.id}
+                    className={`bg-white dark:bg-slate-800/60 rounded-lg border border-slate-200 dark:border-slate-700/50 border-l-4 ${getStatBorderColor(stat)} p-3 transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/40`}
+                  >
+                    <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                      {stat.label}
+                    </p>
+                    <div className="flex items-baseline gap-1.5 mb-1.5">
+                      <span className="text-lg font-bold text-slate-900 dark:text-white tabular-nums leading-none">
+                        {stat.value}
+                      </span>
+                    </div>
+                    {stat.changeLabel && (
+                      <p className="text-[10px] text-slate-400 dark:text-slate-500">{stat.changeLabel}</p>
+                    )}
+                  </div>
+                ))
+            }
           </div>
         )}
 
-        {/* Analytics Tab Content */}
-        {activeTab === 'analytics' && (
-          <div className="space-y-6">
-            {analyticsLoading && !weeklyReport && !mttrData ? (
-              <div className="flex items-center justify-center py-16">
-                <div className="text-center">
-                  <Loader2 className="w-8 h-8 text-cyan-500 animate-spin mx-auto" />
-                  <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">
-                    Loading analytics...
-                  </p>
+        {/* Tab Content with AnimatePresence */}
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={activeTab}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.15 }}
+          >
+            {/* Cost Overview Tab Content */}
+            {activeTab === 'costs' && (
+              <div className="space-y-3">
+                {/* AI Insights Panel */}
+                <AIInsightsPanel
+                  insights={aiInsights}
+                  loading={aiInsightsLoading}
+                  expanded={aiInsightsExpanded}
+                  onToggleExpand={handleToggleInsights}
+                  onAnalyze={fetchAIInsights}
+                />
+
+                {/* Chart and Summary Row */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                  <DailySpendChart data={daily} className="lg:col-span-2" />
+                  <UsageSummaryCard summary={summary} />
                 </div>
-              </div>
-            ) : (
-              <>
-                {/* Weekly ROI Report */}
-                {weeklyReport && (
-                  <WeeklyROIReport
-                    data={weeklyReport}
-                    onDownload={() => {
-                      // Generate and download PDF report
-                      const reportData = JSON.stringify(weeklyReport, null, 2);
-                      const blob = new Blob([reportData], { type: 'application/json' });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = `roi-report-${new Date().toISOString().split('T')[0]}.json`;
-                      a.click();
-                      URL.revokeObjectURL(url);
-                    }}
+
+                {/* Model Breakdown Table */}
+                {summary.model_breakdown.length > 0 && (
+                  <ModelBreakdownTable
+                    models={summary.model_breakdown}
+                    totalCost={summary.total_cost_usd}
                   />
                 )}
+              </div>
+            )}
 
-                {/* MTTR Dashboard */}
-                {mttrData && (
-                  <MTTRDashboard data={mttrData} />
-                )}
-
-                {/* Empty state if no data */}
-                {!weeklyReport && !mttrData && (
-                  <div className="bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 p-12 text-center">
-                    <div className="w-16 h-16 mx-auto mb-4 bg-slate-100 dark:bg-slate-700/50 rounded-full flex items-center justify-center">
-                      <BarChart3 className="w-8 h-8 text-slate-400 dark:text-slate-500" />
+            {/* Sessions Tab Content */}
+            {activeTab === 'sessions' && (
+              <div className="space-y-3">
+                {/* ROI Comparison Card - only show if we have sessions */}
+                {sessions.length > 0 && (
+                  <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
+                    <ROIComparisonCard
+                      data={(() => {
+                        const completedSessions = sessions.filter(s => s.status === 'completed');
+                        const timeSavedMinutes = completedSessions.reduce((sum, s) => sum + (s.time_saved_minutes || 0), 0);
+                        const totalCost = sessions.reduce((sum, s) => sum + (s.total_cost_usd || 0), 0);
+                        const laborSaved = (timeSavedMinutes / 60) * 85;
+                        const avgROI = completedSessions.length > 0
+                          ? completedSessions.reduce((sum, s) => sum + (s.roi_percentage || 0), 0) / completedSessions.length
+                          : 0;
+                        return {
+                          timeSavedMinutes,
+                          manualCostEstimate: laborSaved,
+                          aiCostTotal: totalCost,
+                          roiPercentage: avgROI,
+                          sessionsCount: completedSessions.length,
+                          avgSessionDuration: timeSavedMinutes / Math.max(1, completedSessions.length) / 2,
+                        };
+                      })()}
+                      className="lg:col-span-2"
+                    />
+                    <div className="lg:col-span-2 bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 p-5">
+                      <h3 className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-4">
+                        Session Efficiency Breakdown
+                      </h3>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="text-center p-4 rounded-lg bg-slate-50 dark:bg-slate-800/30">
+                          <p className="text-3xl font-bold text-slate-900 dark:text-white">
+                            {sessions.filter(s => s.status === 'completed').length}
+                          </p>
+                          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Completed</p>
+                        </div>
+                        <div className="text-center p-4 rounded-lg bg-slate-50 dark:bg-slate-800/30">
+                          <p className="text-3xl font-bold text-slate-900 dark:text-white">
+                            {sessions.filter(s => s.roi_percentage && s.roi_percentage > 0).length}
+                          </p>
+                          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">With ROI Data</p>
+                        </div>
+                        <div className="text-center p-4 rounded-lg bg-slate-50 dark:bg-slate-800/30">
+                          <p className="text-3xl font-bold text-emerald-500">
+                            {roiDashboard?.avg_efficiency_score?.toFixed(0) || '-'}
+                          </p>
+                          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Avg Efficiency</p>
+                        </div>
+                        <div className="text-center p-4 rounded-lg bg-slate-50 dark:bg-slate-800/30">
+                          <p className="text-3xl font-bold text-cyan-500">
+                            {roiDashboard?.mttr_improvement_pct != null
+                              ? `${roiDashboard.mttr_improvement_pct.toFixed(0)}%`
+                              : '-'}
+                          </p>
+                          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">MTTR Improvement</p>
+                        </div>
+                      </div>
                     </div>
-                    <p className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
-                      No analytics data yet
-                    </p>
-                    <p className="text-sm text-slate-500">
-                      Complete a few AI sessions to see ROI analytics and MTTR metrics
-                    </p>
                   </div>
                 )}
-              </>
-            )}
-          </div>
-        )}
 
-        {/* Agentic RAG Tab Content */}
-        {activeTab === 'rag' && (
-          <RAGMetricsDashboard />
-        )}
+                {/* Sessions Table */}
+                <SessionsTable
+                  sessions={sessions}
+                  loading={sessionsLoading}
+                  selectedSessionId={selectedSessionId}
+                  filter={sessionFilter}
+                  onSelectSession={handleSelectSession}
+                  onFilterChange={handleFilterChange}
+                  onRefresh={fetchSessions}
+                  onLinkIncident={handleLinkIncident}
+                />
+              </div>
+            )}
+
+            {/* Analytics Tab Content */}
+            {activeTab === 'analytics' && (
+              <div className="space-y-3">
+                {analyticsLoading && !weeklyReport && !mttrData ? (
+                  <div className="flex items-center justify-center py-16">
+                    <div className="text-center">
+                      <Loader2 className="w-8 h-8 text-cyan-500 animate-spin mx-auto" />
+                      <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">
+                        Loading analytics...
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {/* Weekly ROI Report */}
+                    {weeklyReport && (
+                      <WeeklyROIReport
+                        data={weeklyReport}
+                        onDownload={() => {
+                          const reportData = JSON.stringify(weeklyReport, null, 2);
+                          const blob = new Blob([reportData], { type: 'application/json' });
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement('a');
+                          a.href = url;
+                          a.download = `roi-report-${new Date().toISOString().split('T')[0]}.json`;
+                          a.click();
+                          URL.revokeObjectURL(url);
+                        }}
+                      />
+                    )}
+
+                    {/* MTTR Dashboard */}
+                    {mttrData && (
+                      <MTTRDashboard data={mttrData} />
+                    )}
+
+                    {/* Empty state if no data */}
+                    {!weeklyReport && !mttrData && (
+                      <div className="bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 p-12 text-center">
+                        <div className="w-16 h-16 mx-auto mb-4 bg-slate-100 dark:bg-slate-700/50 rounded-full flex items-center justify-center">
+                          <BarChart3 className="w-8 h-8 text-slate-400 dark:text-slate-500" />
+                        </div>
+                        <p className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
+                          No analytics data yet
+                        </p>
+                        <p className="text-sm text-slate-500">
+                          Complete a few AI sessions to see ROI analytics and MTTR metrics
+                        </p>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Agentic RAG Tab Content */}
+            {activeTab === 'rag' && (
+              <RAGMetricsDashboard />
+            )}
+
+            {/* Network Tab Content */}
+            {activeTab === 'network' && (
+              <NetworkCostImpactCard />
+            )}
+          </motion.div>
+        </AnimatePresence>
       </div>
     </div>
+  );
+}
+
+// ============================================================================
+// AICostDashboard - Default Export with Suspense Boundary
+// ============================================================================
+
+export default function AICostDashboard() {
+  return (
+    <Suspense fallback={<CostsLoadingSkeleton />}>
+      <CostsDashboardContent />
+    </Suspense>
   );
 }

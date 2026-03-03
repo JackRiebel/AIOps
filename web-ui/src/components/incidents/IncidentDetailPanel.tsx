@@ -131,7 +131,7 @@ function AISessionLink({ incident }: { incident: Incident }) {
         )}
       </div>
       <Link
-        href={`/network?session=${incident.ai_session_id}`}
+        href={`/chat-v2?session=${incident.ai_session_id}`}
         className="mt-2 flex items-center justify-between px-3 py-2 bg-emerald-100 dark:bg-emerald-500/20 hover:bg-emerald-200 dark:hover:bg-emerald-500/30 rounded-lg transition-colors group"
       >
         <span className="text-xs font-medium text-emerald-700 dark:text-emerald-300">

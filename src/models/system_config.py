@@ -49,6 +49,18 @@ CONFIG_DEFINITIONS = {
         "sensitive": True,
         "env_var": "THOUSANDEYES_OAUTH_TOKEN"
     },
+    "thousandeyes_mcp_endpoint": {
+        "category": "integrations",
+        "description": "ThousandEyes MCP server URL for dashboard access and AI queries",
+        "sensitive": False,
+        "env_var": "THOUSANDEYES_MCP_ENDPOINT"
+    },
+    "thousandeyes_mcp_token": {
+        "category": "integrations",
+        "description": "ThousandEyes MCP token (defaults to OAuth token if not set)",
+        "sensitive": True,
+        "env_var": "THOUSANDEYES_MCP_TOKEN"
+    },
     "splunk_host": {
         "category": "integrations",
         "description": "Splunk HEC host URL",
@@ -84,6 +96,18 @@ CONFIG_DEFINITIONS = {
         "description": "Splunk Bearer token (alternative to username/password)",
         "sensitive": True,
         "env_var": "SPLUNK_BEARER_TOKEN"
+    },
+    "splunk_mcp_endpoint": {
+        "category": "integrations",
+        "description": "Custom Splunk MCP endpoint URL (defaults to {API URL}/services/mcp)",
+        "sensitive": False,
+        "env_var": "SPLUNK_MCP_ENDPOINT"
+    },
+    "splunk_mcp_token": {
+        "category": "integrations",
+        "description": "Splunk MCP encrypted token (created in Splunk > MCP Server > Create Encrypted Token)",
+        "sensitive": True,
+        "env_var": "SPLUNK_MCP_TOKEN"
     },
     "catalyst_center_host": {
         "category": "integrations",
@@ -215,9 +239,84 @@ CONFIG_DEFINITIONS = {
     },
     "verify_ssl": {
         "category": "permissions",
-        "description": "Verify SSL certificates for external API connections",
+        "description": "Global default: Verify SSL certificates for external API connections",
         "sensitive": False,
         "env_var": "VERIFY_SSL",
+        "default": "true",
+        "type": "boolean"
+    },
+
+    # Per-service SSL verification overrides
+    "meraki_verify_ssl": {
+        "category": "ssl",
+        "description": "Verify SSL for Meraki Dashboard API calls",
+        "sensitive": False,
+        "env_var": "MERAKI_VERIFY_SSL",
+        "default": "true",
+        "type": "boolean"
+    },
+    "catalyst_verify_ssl": {
+        "category": "ssl",
+        "description": "Verify SSL for Catalyst Center API calls",
+        "sensitive": False,
+        "env_var": "CATALYST_VERIFY_SSL",
+        "default": "true",
+        "type": "boolean"
+    },
+    "thousandeyes_verify_ssl": {
+        "category": "ssl",
+        "description": "Verify SSL for ThousandEyes API calls",
+        "sensitive": False,
+        "env_var": "THOUSANDEYES_VERIFY_SSL",
+        "default": "true",
+        "type": "boolean"
+    },
+    "thousandeyes_agent_types": {
+        "category": "integrations",
+        "description": "ThousandEyes agent types to display (cloud, enterprise, enterprise-cluster, endpoint, or all)",
+        "sensitive": False,
+        "env_var": "THOUSANDEYES_AGENT_TYPES",
+        "default": "all",
+        "type": "select",
+        "options": ["all", "cloud", "enterprise", "enterprise-cluster", "endpoint"]
+    },
+    "splunk_verify_ssl": {
+        "category": "ssl",
+        "description": "Verify SSL for Splunk API calls (often disabled for self-signed certs)",
+        "sensitive": False,
+        "env_var": "SPLUNK_VERIFY_SSL",
+        "default": "false",
+        "type": "boolean"
+    },
+    "cisco_circuit_verify_ssl": {
+        "category": "ssl",
+        "description": "Verify SSL for Cisco Circuit AI API calls",
+        "sensitive": False,
+        "env_var": "CISCO_CIRCUIT_VERIFY_SSL",
+        "default": "true",
+        "type": "boolean"
+    },
+    "anthropic_verify_ssl": {
+        "category": "ssl",
+        "description": "Verify SSL for Anthropic (Claude) API calls",
+        "sensitive": False,
+        "env_var": "ANTHROPIC_VERIFY_SSL",
+        "default": "true",
+        "type": "boolean"
+    },
+    "openai_verify_ssl": {
+        "category": "ssl",
+        "description": "Verify SSL for OpenAI API calls",
+        "sensitive": False,
+        "env_var": "OPENAI_VERIFY_SSL",
+        "default": "true",
+        "type": "boolean"
+    },
+    "google_ai_verify_ssl": {
+        "category": "ssl",
+        "description": "Verify SSL for Google AI (Gemini) API calls",
+        "sensitive": False,
+        "env_var": "GOOGLE_AI_VERIFY_SSL",
         "default": "true",
         "type": "boolean"
     },

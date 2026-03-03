@@ -24,6 +24,77 @@ router = APIRouter()
 from src.config.database import get_db
 db = get_db()
 
+
+@router.get("/api/readiness")
+async def get_readiness():
+    """Public readiness endpoint for startup checks.
+
+    This endpoint does NOT require authentication and is used by the
+    startup script to verify the backend is fully initialized.
+
+    Returns 200 only when:
+    - Database connection is working
+    - All startup tasks have completed
+
+    Returns 503 if the service is not ready yet.
+    """
+    import time
+    from fastapi.responses import JSONResponse
+
+    checks = {
+        "database": False,
+        "startup_complete": False,
+    }
+
+    # Check database connection
+    db_start = time.time()
+    try:
+        async with db.session() as session:
+            await session.execute(select(1))
+            checks["database"] = True
+    except Exception as e:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "ready": False,
+                "checks": checks,
+                "error": f"Database not ready: {str(e)}",
+            }
+        )
+
+    # Check if startup tasks are complete by verifying we can query a core table
+    try:
+        from src.models.user import User
+        async with db.session() as session:
+            # This will fail if migrations haven't run
+            await session.execute(select(func.count()).select_from(User))
+            checks["startup_complete"] = True
+    except Exception as e:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "ready": False,
+                "checks": checks,
+                "error": f"Startup not complete: {str(e)}",
+            }
+        )
+
+    if all(checks.values()):
+        return {
+            "ready": True,
+            "checks": checks,
+            "response_time_ms": int((time.time() - db_start) * 1000),
+        }
+    else:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "ready": False,
+                "checks": checks,
+            }
+        )
+
+
 @router.get("/api/health", response_model=SystemHealthResponse, dependencies=[Depends(require_viewer)])
 async def get_health():
     """Get system health status with detailed service checks."""

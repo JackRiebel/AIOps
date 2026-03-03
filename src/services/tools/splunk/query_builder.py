@@ -192,7 +192,7 @@ Filter by device_serial or network_id to narrow results.""",
             },
             "device_serial": {
                 "type": "string",
-                "description": "Optional: Filter to a specific device serial (e.g., Q2KY-EVGL-CL3C)"
+                "description": "Optional: Filter to a specific device serial (e.g., XXXX-XXXX-XXXX)"
             },
             "network_id": {
                 "type": "string",
@@ -213,7 +213,7 @@ Filter by device_serial or network_id to narrow results.""",
             {"query": "WPA authentication issues", "params": {"intent": "wpa_auth_failures"}},
             {"query": "Wireless client problems", "params": {"intent": "wireless_client_issues"}},
             {"query": "Find errors", "params": {"intent": "errors", "time_range": "-24h"}},
-            {"query": "Events for device Q2KY-EVGL-CL3C", "params": {"intent": "device_specific", "device_serial": "Q2KY-EVGL-CL3C"}},
+            {"query": "Events for device XXXX-XXXX-XXXX", "params": {"intent": "device_specific", "device_serial": "XXXX-XXXX-XXXX"}},
         ],
     ),
 ]

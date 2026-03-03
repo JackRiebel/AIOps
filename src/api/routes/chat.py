@@ -20,8 +20,25 @@ router = APIRouter()
 from src.config.database import get_db
 db = get_db()
 
-@router.get("/api/chats", response_model=List[ConversationResponse], dependencies=[Depends(require_viewer)])
-async def get_conversations(hours: int = 24):
+
+async def _get_user_conversation(session, conversation_id: int, user: User) -> ChatConversation:
+    """Fetch a conversation and verify it belongs to the requesting user.
+
+    Raises HTTPException 404 if not found or not owned by user.
+    """
+    result = await session.execute(
+        select(ChatConversation).where(
+            ChatConversation.id == conversation_id,
+            ChatConversation.user_id == str(user.id),
+        )
+    )
+    conversation = result.scalar_one_or_none()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return conversation
+
+@router.get("/api/chats", response_model=List[ConversationResponse])
+async def get_conversations(hours: int = 24, user: User = Depends(require_viewer)):
     """Get all conversations from the last N hours (default 24)."""
     try:
         from sqlalchemy.orm import selectinload
@@ -31,7 +48,10 @@ async def get_conversations(hours: int = 24):
             result = await session.execute(
                 select(ChatConversation)
                 .options(selectinload(ChatConversation.messages))
-                .where(ChatConversation.last_activity >= cutoff_time)
+                .where(
+                    ChatConversation.user_id == str(user.id),
+                    ChatConversation.last_activity >= cutoff_time,
+                )
                 .order_by(ChatConversation.last_activity.desc())
             )
             conversations = result.scalars().all()
@@ -55,19 +75,13 @@ async def get_conversations(hours: int = 24):
 
 
 
-@router.get("/api/chats/{conversation_id}", response_model=dict, dependencies=[Depends(require_viewer)])
-async def get_conversation(conversation_id: int):
+@router.get("/api/chats/{conversation_id}", response_model=dict)
+async def get_conversation(conversation_id: int, user: User = Depends(require_viewer)):
     """Get a specific conversation with all its messages."""
     try:
         async with db.session() as session:
-            # Get conversation
-            result = await session.execute(
-                select(ChatConversation).where(ChatConversation.id == conversation_id)
-            )
-            conversation = result.scalar_one_or_none()
-
-            if not conversation:
-                raise HTTPException(status_code=404, detail="Conversation not found")
+            # Get conversation (scoped to current user)
+            conversation = await _get_user_conversation(session, conversation_id, user)
 
             # Get messages
             messages_result = await session.execute(
@@ -202,8 +216,8 @@ async def get_chat_suggestions():
     }
 
 
-@router.post("/api/chats", response_model=ConversationResponse, status_code=201, dependencies=[Depends(require_viewer)])
-async def create_conversation(conversation_data: ConversationCreate):
+@router.post("/api/chats", response_model=ConversationResponse, status_code=201)
+async def create_conversation(conversation_data: ConversationCreate, user: User = Depends(require_viewer)):
     """Create a new conversation."""
     try:
         async with db.session() as session:
@@ -211,7 +225,7 @@ async def create_conversation(conversation_data: ConversationCreate):
             new_conversation = ChatConversation(
                 title=conversation_data.title or "New Conversation",
                 organization=conversation_data.organization,
-                user_id="web-user",
+                user_id=str(user.id),
                 last_activity=datetime.utcnow()
             )
             session.add(new_conversation)
@@ -244,13 +258,8 @@ async def create_message(
     """Handle user message and return AI response with cost + disclaimer."""
     try:
         async with db.session() as session:
-            # Verify conversation exists
-            conv_result = await session.execute(
-                select(ChatConversation).where(ChatConversation.id == conversation_id)
-            )
-            conversation = conv_result.scalar_one_or_none()
-            if not conversation:
-                raise HTTPException(status_code=404, detail="Conversation not found")
+            # Verify conversation exists and belongs to user
+            conversation = await _get_user_conversation(session, conversation_id, user)
 
             user_content = request.get("content", "").strip()
             if not user_content:
@@ -266,63 +275,20 @@ async def create_message(
             session.add(user_msg)
 
             # Get AI response using user's preferred model and settings
-            preferred_model = user.preferred_model if user else None
+            # Use unified model selector for consistent provider priority
+            from src.services.model_selector import select_model, build_user_api_keys
+
+            user_preferred = user.preferred_model if user else None
             temperature = user.ai_temperature if user else None
             max_tokens = user.ai_max_tokens if user else None
+            user_api_keys = build_user_api_keys(user)
 
-            # If no preferred model, get the first available model from configured providers
-            if not preferred_model:
-                from src.services.config_service import get_config_or_env
-                from src.config.settings import get_settings
-                import logging
-                _logger = logging.getLogger(__name__)
-
-                settings = get_settings()
-                all_models = settings.available_models
-
-                # Check for configured providers (database first, then env)
-                db_anthropic = get_config_or_env("anthropic_api_key", "ANTHROPIC_API_KEY")
-                db_cisco_id = get_config_or_env("cisco_circuit_client_id", "CISCO_CIRCUIT_CLIENT_ID")
-                db_cisco_secret = get_config_or_env("cisco_circuit_client_secret", "CISCO_CIRCUIT_CLIENT_SECRET")
-                db_openai = get_config_or_env("openai_api_key", "OPENAI_API_KEY")
-                db_google = get_config_or_env("google_api_key", "GOOGLE_API_KEY")
-
-                _logger.info(f"[MODEL SELECT] db_anthropic={bool(db_anthropic)}, db_cisco_id={bool(db_cisco_id)}, db_cisco_secret={bool(db_cisco_secret)}, db_openai={bool(db_openai)}, db_google={bool(db_google)}")
-                _logger.info(f"[MODEL SELECT] settings.anthropic={bool(settings.anthropic_api_key)}, settings.cisco_id={bool(settings.cisco_circuit_client_id)}")
-
-                if db_cisco_id and db_cisco_secret:
-                    preferred_model = all_models["cisco"][0]["id"]
-                    _logger.info(f"[MODEL SELECT] Selected cisco: {preferred_model}")
-                elif db_anthropic or settings.anthropic_api_key:
-                    preferred_model = all_models["anthropic"][0]["id"]
-                    _logger.info(f"[MODEL SELECT] Selected anthropic: {preferred_model}")
-                elif db_openai or settings.openai_api_key:
-                    preferred_model = all_models["openai"][0]["id"]
-                    _logger.info(f"[MODEL SELECT] Selected openai: {preferred_model}")
-                elif db_google or settings.google_api_key:
-                    preferred_model = all_models["google"][0]["id"]
-                    _logger.info(f"[MODEL SELECT] Selected google: {preferred_model}")
-                else:
-                    _logger.warning("[MODEL SELECT] No AI provider configured!")
-
-            # Build user API keys dict for all providers
-            user_api_keys = {}
-            if user:
-                from src.api.routes.settings import get_user_api_key
-                for provider in ["anthropic", "openai", "google"]:
-                    key = get_user_api_key(user, provider)
-                    if key:
-                        user_api_keys[provider] = key
-                # Also add Cisco credentials if set
-                cisco_client_id = get_user_api_key(user, "cisco_client_id")
-                cisco_client_secret = get_user_api_key(user, "cisco_client_secret")
-                if cisco_client_id:
-                    user_api_keys["cisco_client_id"] = cisco_client_id
-                if cisco_client_secret:
-                    user_api_keys["cisco_client_secret"] = cisco_client_secret
-
-            # Detect provider from model and get appropriate assistant
-            provider = get_provider_from_model(preferred_model)
+            # Select model using unified logic (Cisco → Anthropic → OpenAI → Google)
+            preferred_model, provider = select_model(
+                preferred_model=user_preferred,
+                user=user,
+                user_api_keys=user_api_keys
+            )
             import logging
             logger = logging.getLogger(__name__)
             logger.info(f"[AI ROUTING] User: {user.username if user else 'None'}, preferred_model: {preferred_model}, detected provider: {provider}")
@@ -486,18 +452,12 @@ async def create_message(
 
 
 
-@router.put("/api/chats/{conversation_id}/activity", dependencies=[Depends(require_viewer)])
-async def update_activity(conversation_id: int):
+@router.put("/api/chats/{conversation_id}/activity")
+async def update_activity(conversation_id: int, user: User = Depends(require_viewer)):
     """Update the last activity timestamp for a conversation."""
     try:
         async with db.session() as session:
-            result = await session.execute(
-                select(ChatConversation).where(ChatConversation.id == conversation_id)
-            )
-            conversation = result.scalar_one_or_none()
-
-            if not conversation:
-                raise HTTPException(status_code=404, detail="Conversation not found")
+            conversation = await _get_user_conversation(session, conversation_id, user)
 
             conversation.last_activity = datetime.utcnow()
             # Context manager will auto-commit
@@ -511,18 +471,12 @@ async def update_activity(conversation_id: int):
 
 
 
-@router.delete("/api/chats/{conversation_id}", dependencies=[Depends(require_viewer)])
-async def delete_conversation(conversation_id: int):
+@router.delete("/api/chats/{conversation_id}")
+async def delete_conversation(conversation_id: int, user: User = Depends(require_viewer)):
     """Delete a conversation and all its messages."""
     try:
         async with db.session() as session:
-            result = await session.execute(
-                select(ChatConversation).where(ChatConversation.id == conversation_id)
-            )
-            conversation = result.scalar_one_or_none()
-
-            if not conversation:
-                raise HTTPException(status_code=404, detail="Conversation not found")
+            conversation = await _get_user_conversation(session, conversation_id, user)
 
             await session.delete(conversation)
             # Context manager will auto-commit
@@ -535,7 +489,7 @@ async def delete_conversation(conversation_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/api/chats/{conversation_id}/report", dependencies=[Depends(require_viewer)])
+@router.post("/api/chats/{conversation_id}/report")
 async def generate_report(
     conversation_id: int,
     user: User = Depends(require_viewer)
@@ -543,14 +497,8 @@ async def generate_report(
     """Generate an AI-powered summary report from a conversation."""
     try:
         async with db.session() as session:
-            # Get conversation
-            result = await session.execute(
-                select(ChatConversation).where(ChatConversation.id == conversation_id)
-            )
-            conversation = result.scalar_one_or_none()
-
-            if not conversation:
-                raise HTTPException(status_code=404, detail="Conversation not found")
+            # Get conversation (scoped to current user)
+            conversation = await _get_user_conversation(session, conversation_id, user)
 
             # Get all messages
             messages_result = await session.execute(
@@ -593,41 +541,18 @@ Suggested next steps or follow-up actions (if applicable)
 Keep the report concise but informative. Use professional tone."""
 
             # Get user's preferred model and settings
-            preferred_model = user.preferred_model if user else None
+            # Use unified model selector for consistent provider priority
+            from src.services.model_selector import select_model, build_user_api_keys
 
-            # If no preferred model, get the first available model from configured providers
-            if not preferred_model:
-                from src.services.config_service import get_config_or_env
-                from src.config.settings import get_settings
-                settings = get_settings()
-                all_models = settings.available_models
+            user_preferred = user.preferred_model if user else None
+            user_api_keys = build_user_api_keys(user)
 
-                db_anthropic = get_config_or_env("anthropic_api_key", "ANTHROPIC_API_KEY")
-                db_cisco_id = get_config_or_env("cisco_circuit_client_id", "CISCO_CIRCUIT_CLIENT_ID")
-                db_cisco_secret = get_config_or_env("cisco_circuit_client_secret", "CISCO_CIRCUIT_CLIENT_SECRET")
-                db_openai = get_config_or_env("openai_api_key", "OPENAI_API_KEY")
-                db_google = get_config_or_env("google_api_key", "GOOGLE_API_KEY")
-
-                if db_anthropic or settings.anthropic_api_key:
-                    preferred_model = all_models["anthropic"][0]["id"]
-                elif db_cisco_id and db_cisco_secret:
-                    preferred_model = all_models["cisco"][0]["id"]
-                elif db_openai or settings.openai_api_key:
-                    preferred_model = all_models["openai"][0]["id"]
-                elif db_google or settings.google_api_key:
-                    preferred_model = all_models["google"][0]["id"]
-
-            # Build user API keys dict for all providers
-            user_api_keys = {}
-            if user:
-                from src.api.routes.settings import get_user_api_key
-                for provider in ["anthropic", "openai", "google"]:
-                    key = get_user_api_key(user, provider)
-                    if key:
-                        user_api_keys[provider] = key
-
-            # Detect provider from model and get appropriate assistant
-            provider = get_provider_from_model(preferred_model)
+            # Select model using unified logic (Cisco → Anthropic → OpenAI → Google)
+            preferred_model, provider = select_model(
+                preferred_model=user_preferred,
+                user=user,
+                user_api_keys=user_api_keys
+            )
             assistant = get_ai_assistant(
                 model=preferred_model,
                 temperature=0.3,  # Lower temperature for consistent reports
@@ -640,7 +565,7 @@ Keep the report concise but informative. Use professional tone."""
                 raise HTTPException(status_code=503, detail=f"AI service not available — no {provider_name} API key configured")
 
             # Use the provider-agnostic simple response method
-            report_content = assistant.generate_simple_response(prompt, max_tokens=2000)
+            report_content = await assistant.generate_simple_response(prompt, max_tokens=2000)
 
             return {
                 "success": True,

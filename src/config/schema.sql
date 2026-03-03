@@ -180,6 +180,39 @@ COMMENT ON TABLE ai_sessions IS 'AI session tracking for comprehensive activity 
 COMMENT ON TABLE ai_session_events IS 'Individual events within AI sessions';
 
 -- ============================================================================
+-- Canvas Artifacts Table
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS canvas_artifacts (
+    id SERIAL PRIMARY KEY,
+    session_id INTEGER NOT NULL REFERENCES ai_sessions(id) ON DELETE CASCADE,
+    conversation_id INTEGER,
+    artifact_type VARCHAR(50) NOT NULL CHECK (artifact_type IN (
+        'code', 'data_table', 'chart', 'network_diagram', 'markdown',
+        'json', 'topology', 'device_card', 'device_cards', 'alert_panel',
+        'status_card', 'stat_card'
+    )),
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    content JSONB NOT NULL,
+    raw_content TEXT,
+    source_tool VARCHAR(100),
+    source_message_id VARCHAR(100),
+    render_config JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+    updated_at TIMESTAMPTZ,
+    version INTEGER DEFAULT 1 NOT NULL,
+    parent_id INTEGER REFERENCES canvas_artifacts(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_canvas_artifacts_session_id ON canvas_artifacts(session_id);
+CREATE INDEX IF NOT EXISTS idx_canvas_artifacts_artifact_type ON canvas_artifacts(artifact_type);
+CREATE INDEX IF NOT EXISTS idx_canvas_artifacts_created_at ON canvas_artifacts(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_canvas_artifacts_parent_id ON canvas_artifacts(parent_id);
+
+COMMENT ON TABLE canvas_artifacts IS 'Canvas artifacts generated from AI tool results for visualization';
+
+-- ============================================================================
 -- A2A (Agent-to-Agent) Protocol Tables
 -- ============================================================================
 
@@ -1636,3 +1669,122 @@ CREATE INDEX IF NOT EXISTS idx_saved_canvases_template ON saved_canvases(is_temp
 CREATE INDEX IF NOT EXISTS idx_saved_canvases_updated ON saved_canvases(updated_at DESC);
 
 COMMENT ON TABLE saved_canvases IS 'Saved canvas states for persistence and sharing (Lumen AI Canvas)';
+
+-- ============================================================================
+-- Network Configuration Changes Table (Performance Change Cards with Revert)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS network_changes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    network_id VARCHAR(255) NOT NULL,
+    organization_id VARCHAR(255) NOT NULL,
+    change_type VARCHAR(100) NOT NULL,
+    setting_path VARCHAR(500) NOT NULL,
+    previous_value JSONB,
+    new_value JSONB,
+    metrics_before JSONB,
+    metrics_after JSONB,
+    applied_at TIMESTAMPTZ DEFAULT NOW(),
+    reverted_at TIMESTAMPTZ,
+    user_id VARCHAR(255) NOT NULL,
+    status VARCHAR(50) DEFAULT 'applied' CHECK (status IN ('applied', 'reverted', 'failed', 'pending_metrics')),
+    description TEXT,
+    resource_id VARCHAR(255),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_network_changes_network_id ON network_changes(network_id);
+CREATE INDEX IF NOT EXISTS idx_network_changes_organization_id ON network_changes(organization_id);
+CREATE INDEX IF NOT EXISTS idx_network_changes_status ON network_changes(status);
+CREATE INDEX IF NOT EXISTS idx_network_changes_applied_at ON network_changes(applied_at DESC);
+CREATE INDEX IF NOT EXISTS idx_network_changes_user_id ON network_changes(user_id);
+CREATE INDEX IF NOT EXISTS idx_network_changes_change_type ON network_changes(change_type);
+
+-- Partial index for active changes (not reverted)
+CREATE INDEX IF NOT EXISTS idx_network_changes_active ON network_changes(applied_at DESC)
+    WHERE status != 'reverted';
+
+COMMENT ON TABLE network_changes IS 'Network configuration changes with performance tracking for rollback capability';
+COMMENT ON COLUMN network_changes.change_type IS 'Type of change: ssid_config, rf_profile, traffic_shaping, qos_rule, port_config, uplink_bandwidth, radio_settings';
+COMMENT ON COLUMN network_changes.setting_path IS 'Dot-notation path to the setting changed (e.g., wireless.ssids.0.bandSelection)';
+COMMENT ON COLUMN network_changes.metrics_before IS 'Performance metrics captured before the change was applied';
+COMMENT ON COLUMN network_changes.metrics_after IS 'Performance metrics captured after the change was applied';
+COMMENT ON COLUMN network_changes.status IS 'Change status: applied, reverted, failed, or pending_metrics';
+
+-- ============================================================================
+-- Pending AI Actions Table (Approval Flow for AI-Initiated Changes)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS pending_actions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id VARCHAR(255) NOT NULL,
+    user_id VARCHAR(255) NOT NULL,
+    tool_name VARCHAR(255) NOT NULL,
+    tool_input JSONB NOT NULL,
+    description TEXT,
+    organization_id VARCHAR(255),
+    network_id VARCHAR(255),
+    device_serial VARCHAR(255),
+    risk_level VARCHAR(50) DEFAULT 'medium' CHECK (risk_level IN ('low', 'medium', 'high', 'critical')),
+    impact_summary TEXT,
+    reversible BOOLEAN DEFAULT TRUE,
+    status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'executed', 'failed', 'expired')),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    expires_at TIMESTAMPTZ,
+    approved_by VARCHAR(255),
+    approved_at TIMESTAMPTZ,
+    rejection_reason TEXT,
+    executed_at TIMESTAMPTZ,
+    execution_result JSONB,
+    error_message TEXT,
+    metrics_before JSONB,
+    metrics_after JSONB
+);
+
+CREATE INDEX IF NOT EXISTS idx_pending_actions_session ON pending_actions(session_id);
+CREATE INDEX IF NOT EXISTS idx_pending_actions_user ON pending_actions(user_id);
+CREATE INDEX IF NOT EXISTS idx_pending_actions_status ON pending_actions(status);
+CREATE INDEX IF NOT EXISTS idx_pending_actions_created ON pending_actions(created_at DESC);
+
+-- Partial index for pending actions only
+CREATE INDEX IF NOT EXISTS idx_pending_actions_pending ON pending_actions(created_at DESC)
+    WHERE status = 'pending';
+
+-- Partial index for non-expired pending actions
+CREATE INDEX IF NOT EXISTS idx_pending_actions_active ON pending_actions(created_at DESC)
+    WHERE status = 'pending' AND (expires_at IS NULL OR expires_at > NOW());
+
+COMMENT ON TABLE pending_actions IS 'Pending AI actions requiring user approval before execution';
+COMMENT ON COLUMN pending_actions.risk_level IS 'Risk assessment: low, medium, high, critical';
+COMMENT ON COLUMN pending_actions.status IS 'Action status: pending, approved, rejected, executed, failed, expired';
+
+-- ============================================================================
+-- ThousandEyes 7-Day Local Test Metrics Storage
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS te_test_metrics (
+    id SERIAL PRIMARY KEY,
+    test_id INTEGER NOT NULL,
+    test_name VARCHAR(500),
+    test_type VARCHAR(100),
+    round_id BIGINT NOT NULL,
+    agent_id INTEGER,
+    agent_name VARCHAR(255),
+    timestamp TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+    avg_latency_ms DOUBLE PRECISION,
+    loss_pct DOUBLE PRECISION,
+    jitter_ms DOUBLE PRECISION,
+    response_time_ms DOUBLE PRECISION,
+    connect_time_ms DOUBLE PRECISION,
+    dns_time_ms DOUBLE PRECISION,
+    wait_time_ms DOUBLE PRECISION,
+    error_type VARCHAR(100),
+    path_hops JSONB,
+    UNIQUE(test_id, round_id, agent_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_te_metrics_test_id ON te_test_metrics(test_id);
+CREATE INDEX IF NOT EXISTS idx_te_metrics_timestamp ON te_test_metrics(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_te_metrics_test_ts ON te_test_metrics(test_id, timestamp DESC);
+
+COMMENT ON TABLE te_test_metrics IS 'ThousandEyes test metrics stored locally for 7-day trend analysis and bottleneck detection';

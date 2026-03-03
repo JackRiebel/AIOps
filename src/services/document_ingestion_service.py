@@ -1184,7 +1184,7 @@ Description: {description}
                 timeout=90.0,  # Longer timeout for JS rendering
                 follow_redirects=True,
                 headers={
-                    "User-Agent": "Mozilla/5.0 (compatible; Lumen/1.0; Knowledge Ingestion)",
+                    "User-Agent": "Mozilla/5.0 (compatible; CiscoAIOpsHub/1.0; Knowledge Ingestion)",
                     "Accept": "text/markdown, text/plain, */*",
                     "X-Return-Format": "markdown",  # Explicitly request markdown
                     "X-With-Images-Summary": "false",  # Skip image processing

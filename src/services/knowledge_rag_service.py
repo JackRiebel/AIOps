@@ -1067,7 +1067,7 @@ CRITICAL ACCURACY REQUIREMENTS for the product JSON:
             Hash string for cache key.
         """
         chunk_ids = sorted([str(c.id) for c in chunks])
-        return hashlib.md5(":".join(chunk_ids).encode()).hexdigest()[:16]
+        return hashlib.sha256(":".join(chunk_ids).encode()).hexdigest()[:16]
 
 
 # Singleton instances

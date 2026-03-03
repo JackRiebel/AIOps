@@ -39,7 +39,7 @@ interface PlatformOption {
 // ============================================================================
 
 const STEPS: WizardStep[] = [
-  { id: 'welcome', title: 'Welcome', description: 'Get started with Lumen' },
+  { id: 'welcome', title: 'Welcome', description: 'Get started with AI Ops Center' },
   { id: 'admin', title: 'Admin Account', description: 'Create your administrator account' },
   { id: 'ai', title: 'AI Provider', description: 'Configure an AI assistant' },
   { id: 'network', title: 'Network Platform', description: 'Connect your network management' },
@@ -109,6 +109,8 @@ const NETWORK_PLATFORMS: PlatformOption[] = [
     color: 'bg-purple-500',
     fields: [
       { key: 'thousandeyes_oauth_token', label: 'OAuth Token', type: 'password', placeholder: 'Bearer token from ThousandEyes' },
+      { key: 'thousandeyes_mcp_endpoint', label: 'MCP Endpoint (Optional)', type: 'url', placeholder: 'https://mcp.thousandeyes.com' },
+      { key: 'thousandeyes_mcp_token', label: 'MCP Token (Optional)', type: 'password', placeholder: 'MCP-specific token' },
     ],
     testEndpoint: 'thousandeyes',
   },
@@ -279,7 +281,7 @@ export default function SetupWizardPage() {
         </svg>
       </div>
       <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-4">
-        Welcome to Lumen
+        Welcome to AI Ops Center
       </h2>
       <p className="text-lg text-slate-600 dark:text-slate-300 mb-8">
         Let&apos;s get you set up in just a few steps. We&apos;ll configure your admin account,
@@ -641,7 +643,7 @@ export default function SetupWizardPage() {
         Setup Complete!
       </h2>
       <p className="text-lg text-slate-600 dark:text-slate-300 mb-8">
-        Your Lumen is ready to use. You can always adjust settings later from the Admin panel.
+        AI Ops Center is ready to use. You can always adjust settings later from the Admin panel.
       </p>
 
       {configuredItems.length > 0 && (

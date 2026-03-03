@@ -15,10 +15,11 @@ Tool naming convention: thousandeyes_{action}_{entity}
 """
 
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from src.services.tool_registry import get_tool_registry, Tool, create_tool
 from src.services.thousandeyes_service import ThousandEyesClient
+from src.services.instrumented_httpx import InstrumentedAsyncTransport, RequestTiming
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,20 @@ logger = logging.getLogger(__name__)
 class ThousandEyesExecutionContext:
     """Context for executing ThousandEyes tools."""
     def __init__(self, oauth_token: str, base_url: str = "https://api.thousandeyes.com/v7"):
-        self.client = ThousandEyesClient(oauth_token=oauth_token, base_url=base_url)
+        from src.config.settings import get_settings
+        settings = get_settings()
+        self._transport = InstrumentedAsyncTransport(verify=settings.thousandeyes_verify_ssl)
+        self.client = ThousandEyesClient(
+            oauth_token=oauth_token,
+            base_url=base_url,
+            transport=self._transport,
+        )
+
+    def pop_timing(self) -> Optional[RequestTiming]:
+        """Pop and return the last captured network timing."""
+        if self._transport:
+            return self._transport.pop_timing()
+        return None
 
 
 # =============================================================================
@@ -311,7 +325,7 @@ THOUSANDEYES_TOOLS = [
     # Test Tools - with examples for improved accuracy (per Anthropic: 72% → 90%)
     create_tool(
         name="thousandeyes_list_tests",
-        description="List all ThousandEyes tests with optional type filter",
+        description="List all ThousandEyes synthetic tests with optional type filter. Use this FIRST when investigating any network issue to find tests monitoring the affected service, device IP, or path. Results include test name, target URL/server, type, interval, and status.",
         platform="thousandeyes",
         category="tests",
         properties={
@@ -388,7 +402,7 @@ THOUSANDEYES_TOOLS = [
     # Agent Tools - with examples
     create_tool(
         name="thousandeyes_list_agents",
-        description="List ThousandEyes agents (cloud and enterprise)",
+        description="List ThousandEyes monitoring agents. Enterprise agents run inside your network; cloud agents test from external vantage points. Filter by agent_type: 'Cloud', 'Enterprise', 'Enterprise Cluster'. Agent location helps interpret results — high latency from a local enterprise agent is concerning, from a distant cloud agent may be expected.",
         platform="thousandeyes",
         category="agents",
         properties={
@@ -421,7 +435,7 @@ THOUSANDEYES_TOOLS = [
     # Alert Tools - with examples
     create_tool(
         name="thousandeyes_list_alerts",
-        description="List ThousandEyes alerts",
+        description="List active ThousandEyes alerts indicating performance degradation or outages. Check this FIRST in any troubleshooting workflow — active alerts often explain issues seen in Meraki. Returns alert type, severity, affected test, and start time. Differs from list_alert_rules which shows configured thresholds, not active violations.",
         platform="thousandeyes",
         category="alerts",
         properties={
@@ -463,7 +477,7 @@ THOUSANDEYES_TOOLS = [
     # Result Tools - with examples
     create_tool(
         name="thousandeyes_get_test_results",
-        description="Get test results for a test",
+        description="Get recent metrics for a specific test. Returns latency, packet loss, jitter for network tests; HTTP response code, response time, availability for HTTP tests. Set result_type: 'network' for latency/loss, 'http-server' for HTTP metrics, 'path-vis' for path data. Compare against Meraki to determine if issues are internal or external.",
         platform="thousandeyes",
         category="results",
         properties={
@@ -480,7 +494,7 @@ THOUSANDEYES_TOOLS = [
     ),
     create_tool(
         name="thousandeyes_get_path_visualization",
-        description="Get path visualization data for a test",
+        description="Get hop-by-hop network path trace for a test. Shows every router between agent and target with per-hop latency, loss, and IP. Use this to identify WHERE in the path a failure occurs — local network, ISP, peering point, or destination. Critical for distinguishing internal vs external issues.",
         platform="thousandeyes",
         category="results",
         properties={"test_id": {"type": "string", "description": "Test ID"}},
@@ -498,7 +512,7 @@ THOUSANDEYES_TOOLS = [
     ),
     create_tool(
         name="thousandeyes_get_http_results",
-        description="Get HTTP server test results",
+        description="Get HTTP server test results: response code, response time, throughput, availability. Shows whether an HTTP endpoint is responding and how fast. Differs from get_test_results(result_type='network') which shows layer-3 metrics rather than application-layer HTTP behavior.",
         platform="thousandeyes",
         category="results",
         properties={"test_id": {"type": "string", "description": "Test ID"}},

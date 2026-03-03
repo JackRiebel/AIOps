@@ -1,10 +1,18 @@
 """Unified AI service supporting multiple providers (Claude, GPT, Gemini)."""
 
+import asyncio
 import json
+import logging
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
 from src.config.settings import get_settings
 from src.services.security_service import SecurityConfigService
+
+logger = logging.getLogger(__name__)
+
+# Maximum number of tool-call round-trips before forcing a text response.
+# Prevents infinite loops from misbehaving models and bounds API costs.
+MAX_TOOL_ITERATIONS = 15
 
 
 def get_provider_from_model(model_id: str, provider_hint: str = None) -> str:
@@ -77,18 +85,18 @@ class BaseNetworkAssistant(ABC):
         pass
 
     @abstractmethod
-    def generate_simple_response(self, prompt: str, max_tokens: int = 2000) -> str:
+    async def generate_simple_response(self, prompt: str, max_tokens: int = 2000) -> str:
         """Generate a simple response without tools (for reports, summaries, etc.)."""
         pass
 
-    def generate_response_with_usage(self, prompt: str, max_tokens: int = 2000) -> Dict[str, Any]:
+    async def generate_response_with_usage(self, prompt: str, max_tokens: int = 2000) -> Dict[str, Any]:
         """Generate a response and return both text and usage statistics.
 
         Returns:
             Dict with 'text', 'input_tokens', 'output_tokens', and 'model'
         """
         # Default implementation - subclasses should override for accurate usage
-        text = self.generate_simple_response(prompt, max_tokens)
+        text = await self.generate_simple_response(prompt, max_tokens)
         return {
             "text": text,
             "input_tokens": 0,
@@ -139,7 +147,7 @@ CURRENT CONTEXT:
 {session_context_section}
 PLATFORM ARCHITECTURE - UNDERSTAND THIS:
 • Organization = Top-level container (what you're currently in: "{org_name}")
-• Network = Logical grouping within an organization (e.g., "Riebel Home", "Office Network")
+• Network = Logical grouping within an organization (e.g., "Demo Home", "Office Network")
 • Devices = Physical hardware (APs, switches, cameras, sensors) - belong to a network
 • Clients = End-user devices connected to the network (laptops, phones, IoT devices)
 
@@ -171,7 +179,7 @@ You are an ACTION-ORIENTED assistant. When users ask for ANY information, you MU
 
 COMMON REQUESTS → IMMEDIATE TOOL CALLS:
 • "get my networks" / "show networks" / "list networks" → call list_networks
-• "get Riebel Home" / "show me [network name]" → call get_network_by_name with the name
+• "get Demo Home" / "show me [network name]" → call get_network_by_name with the name
 • "show devices" / "what devices" → call list_devices
 • "devices in [network]" → call get_devices_in_network_by_name
 • "show SSIDs" / "wireless networks" → call list_ssids
@@ -198,23 +206,25 @@ class OpenAINetworkAssistant(BaseNetworkAssistant):
         from openai import OpenAI
         self.client = OpenAI(api_key=api_key)
 
-    def generate_simple_response(self, prompt: str, max_tokens: int = 2000) -> str:
+    async def generate_simple_response(self, prompt: str, max_tokens: int = 2000) -> str:
         """Generate a simple response without tools."""
-        response = self.client.chat.completions.create(
+        response = await asyncio.to_thread(
+            self.client.chat.completions.create,
             model=self.model,
             messages=[{"role": "user", "content": prompt}],
             temperature=self.temperature,
-            max_tokens=max_tokens
+            max_tokens=max_tokens,
         )
         return response.choices[0].message.content or ""
 
-    def generate_response_with_usage(self, prompt: str, max_tokens: int = 2000) -> Dict[str, Any]:
+    async def generate_response_with_usage(self, prompt: str, max_tokens: int = 2000) -> Dict[str, Any]:
         """Generate a response and return both text and usage statistics."""
-        response = self.client.chat.completions.create(
+        response = await asyncio.to_thread(
+            self.client.chat.completions.create,
             model=self.model,
             messages=[{"role": "user", "content": prompt}],
             temperature=self.temperature,
-            max_tokens=max_tokens
+            max_tokens=max_tokens,
         )
         return {
             "text": response.choices[0].message.content or "",
@@ -291,8 +301,14 @@ class OpenAINetworkAssistant(BaseNetworkAssistant):
                 max_tokens=self.max_tokens
             )
 
-            # Handle tool calls in a loop
+            # Handle tool calls in a loop (bounded to prevent infinite loops)
+            tool_iterations = 0
             while response.choices[0].message.tool_calls:
+                tool_iterations += 1
+                if tool_iterations > MAX_TOOL_ITERATIONS:
+                    logger.warning(f"[OpenAI] Hit tool iteration limit ({MAX_TOOL_ITERATIONS}), forcing text response")
+                    break
+
                 tool_calls = response.choices[0].message.tool_calls
 
                 # Add assistant message with tool calls
@@ -327,12 +343,13 @@ class OpenAINetworkAssistant(BaseNetworkAssistant):
                         "content": json.dumps(result)
                     })
 
-                # Get next response
+                # Get next response (disable tool_choice on last allowed iteration to force text)
+                choice = "auto" if tool_iterations < MAX_TOOL_ITERATIONS else "none"
                 response = self.client.chat.completions.create(
                     model=self.model,
                     messages=messages,
                     tools=openai_tools,
-                    tool_choice="auto",
+                    tool_choice=choice,
                     temperature=self.temperature,
                     max_tokens=self.max_tokens
                 )
@@ -400,7 +417,7 @@ class GoogleNetworkAssistant(BaseNetworkAssistant):
         genai.configure(api_key=api_key)
         self.genai = genai
 
-    def generate_simple_response(self, prompt: str, max_tokens: int = 2000) -> str:
+    async def generate_simple_response(self, prompt: str, max_tokens: int = 2000) -> str:
         """Generate a simple response without tools."""
         from google.generativeai.types import GenerationConfig
 
@@ -411,10 +428,10 @@ class GoogleNetworkAssistant(BaseNetworkAssistant):
                 max_output_tokens=max_tokens
             )
         )
-        response = model.generate_content(prompt)
+        response = await asyncio.to_thread(model.generate_content, prompt)
         return response.text or ""
 
-    def generate_response_with_usage(self, prompt: str, max_tokens: int = 2000) -> Dict[str, Any]:
+    async def generate_response_with_usage(self, prompt: str, max_tokens: int = 2000) -> Dict[str, Any]:
         """Generate a response and return both text and usage statistics."""
         from google.generativeai.types import GenerationConfig
 
@@ -425,7 +442,7 @@ class GoogleNetworkAssistant(BaseNetworkAssistant):
                 max_output_tokens=max_tokens
             )
         )
-        response = model.generate_content(prompt)
+        response = await asyncio.to_thread(model.generate_content, prompt)
 
         # Google Gemini uses usage_metadata for token counts
         input_tokens = 0
@@ -518,7 +535,8 @@ class GoogleNetworkAssistant(BaseNetworkAssistant):
             # Send message
             response = chat.send_message(message)
 
-            # Handle function calls
+            # Handle function calls (bounded to prevent infinite loops)
+            tool_iterations = 0
             while response.candidates[0].content.parts:
                 has_function_call = False
                 function_responses = []
@@ -556,6 +574,11 @@ class GoogleNetworkAssistant(BaseNetworkAssistant):
                         )
 
                 if not has_function_call:
+                    break
+
+                tool_iterations += 1
+                if tool_iterations > MAX_TOOL_ITERATIONS:
+                    logger.warning(f"[Gemini] Hit tool iteration limit ({MAX_TOOL_ITERATIONS}), forcing text response")
                     break
 
                 # Send function responses back

@@ -48,25 +48,46 @@ async def _get_health_data() -> Dict[str, Any]:
             "response_time_ms": db_time_ms
         })
 
-    # Check clusters
+    # Check Cluster/Credential Configuration
+    # Check both clusters table AND system_config for credentials
     cluster_status = "healthy"
-    cluster_message = "No clusters configured"
+    cluster_message = "No credentials configured"
     try:
+        from src.services.credential_pool import get_initialized_pool
+
+        # Check clusters table
+        cluster_count = 0
         async with db.session() as session:
             result = await session.execute(
-                select(Cluster).where(Cluster.is_active == True)
+                select(func.count(Cluster.id)).where(Cluster.is_active == True)
             )
-            clusters = result.scalars().all()
-            if clusters:
-                cluster_message = f"{len(clusters)} cluster(s) configured"
-            else:
-                cluster_status = "degraded"
+            cluster_count = result.scalar() or 0
+
+        # Check system_config via credential_pool
+        system_config_count = 0
+        try:
+            pool = await get_initialized_pool()
+            available = pool.get_available_platforms()
+            system_config_count = len(available)
+        except Exception:
+            pass
+
+        total_configured = cluster_count + system_config_count
+        if total_configured > 0:
+            parts = []
+            if cluster_count > 0:
+                parts.append(f"{cluster_count} cluster(s)")
+            if system_config_count > 0:
+                parts.append(f"{system_config_count} platform(s) from setup")
+            cluster_message = f"{' + '.join(parts)} configured"
+        else:
+            cluster_status = "degraded"
     except Exception as e:
         cluster_status = "unhealthy"
-        cluster_message = f"Failed to check clusters: {str(e)}"
+        cluster_message = f"Failed to check credentials: {str(e)}"
 
     services.append({
-        "name": "Cluster Configuration",
+        "name": "Credential Configuration",
         "status": cluster_status,
         "message": cluster_message,
         "response_time_ms": None

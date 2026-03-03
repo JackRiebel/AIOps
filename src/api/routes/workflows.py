@@ -677,7 +677,11 @@ async def get_execution(
             if not execution:
                 raise HTTPException(status_code=404, detail="Execution not found")
             ex_dict = execution.to_dict()
-            ex_dict["workflow_name"] = execution.workflow.name if execution.workflow else None
+            # Include workflow details for the ExecutionMonitor to show full flow
+            if execution.workflow:
+                ex_dict["workflow_name"] = execution.workflow.name
+                ex_dict["workflow_flow_data"] = execution.workflow.flow_data
+                ex_dict["workflow_actions"] = execution.workflow.actions
             return ex_dict
     except HTTPException:
         raise
@@ -933,7 +937,7 @@ async def export_workflow(
                 "auto_execute_min_confidence": workflow.auto_execute_min_confidence,
                 "auto_execute_max_risk": workflow.auto_execute_max_risk.value if workflow.auto_execute_max_risk else "low",
                 "tags": workflow.tags or [],
-                "mode": workflow.mode.value if workflow.mode else "cards",
+                "mode": workflow.workflow_mode.value if workflow.workflow_mode else "cards",
                 "cli_code": workflow.cli_code,
                 "python_code": workflow.python_code,
                 "exported_at": datetime.utcnow().isoformat(),

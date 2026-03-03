@@ -55,21 +55,51 @@ export default function AISettingsPage() {
   const loadSettings = useCallback(async () => {
     try {
       setLoading(true);
-      const [modelsRes, currentRes, aiSettingsRes, keyStatusRes] = await Promise.all([
+      const [modelsRes, currentRes, aiSettingsRes, keyStatusRes] = await Promise.allSettled([
         apiClient.getAvailableModels(),
         apiClient.getUserModel(),
         apiClient.getAISettings(),
         apiClient.getAPIKeyStatus(),
       ]);
-      setModels(modelsRes.models);
-      setSelectedModel(currentRes.model);
-      setOriginalModel(currentRes.model);
-      setTemperature(aiSettingsRes.temperature);
-      setOriginalTemperature(aiSettingsRes.temperature);
-      setMaxTokens(aiSettingsRes.max_tokens);
-      setOriginalMaxTokens(aiSettingsRes.max_tokens);
-      setApiKeyStatus(keyStatusRes);
-      setError(null);
+
+      if (modelsRes.status === 'fulfilled') {
+        setModels(modelsRes.value.models);
+      }
+      if (currentRes.status === 'fulfilled') {
+        setSelectedModel(currentRes.value.model);
+        setOriginalModel(currentRes.value.model);
+      }
+      if (aiSettingsRes.status === 'fulfilled') {
+        setTemperature(aiSettingsRes.value.temperature);
+        setOriginalTemperature(aiSettingsRes.value.temperature);
+        setMaxTokens(aiSettingsRes.value.max_tokens);
+        setOriginalMaxTokens(aiSettingsRes.value.max_tokens);
+      }
+      if (keyStatusRes.status === 'fulfilled') {
+        setApiKeyStatus(keyStatusRes.value);
+      }
+
+      // Collect failures
+      const results = [
+        { name: 'models', result: modelsRes },
+        { name: 'model', result: currentRes },
+        { name: 'ai', result: aiSettingsRes },
+        { name: 'api-keys', result: keyStatusRes },
+      ];
+      const failures = results.filter(r => r.result.status === 'rejected');
+
+      if (failures.length > 0 && failures.length === results.length) {
+        // All failed — show first error for context
+        const firstErr = (failures[0].result as PromiseRejectedResult).reason;
+        const msg = firstErr?.message || String(firstErr);
+        setError(`Failed to load AI settings: ${msg}`);
+      } else if (failures.length > 0) {
+        // Partial failure — non-critical, clear error
+        console.warn('Some AI settings endpoints failed:', failures.map(f => `${f.name}: ${(f.result as PromiseRejectedResult).reason?.message}`));
+        setError(null);
+      } else {
+        setError(null);
+      }
     } catch (err) {
       console.error('Failed to load settings:', err);
       setError('Failed to load AI settings');

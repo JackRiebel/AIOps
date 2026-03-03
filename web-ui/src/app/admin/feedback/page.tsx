@@ -250,11 +250,11 @@ export default function AIFeedbackAnalyticsPage() {
         {/* Header */}
         <div className="mb-6">
           <Link
-            href="/network"
+            href="/chat-v2"
             className="group inline-flex items-center gap-2 text-[11px] font-medium text-slate-500 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-400 mb-3 transition-colors uppercase tracking-wider"
           >
             <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
-            Back to Lumen AI
+            Back to AIOps Chat
           </Link>
 
           <div className="flex items-center justify-between">

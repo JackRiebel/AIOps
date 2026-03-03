@@ -91,7 +91,7 @@ async def analyze_session_roi(
 Your job is to determine: "How long would this work have taken a network engineer to do MANUALLY without AI assistance?"
 
 IMPORTANT CONTEXT:
-- This is a Cisco Meraki/ThousandEyes/Splunk monitoring platform called "Lumen"
+- This is a Cisco Meraki/ThousandEyes/Splunk monitoring platform called "Cisco AIOps Hub"
 - Manual work means: logging into dashboards, navigating menus, clicking through pages, copying data, correlating information, researching documentation, etc.
 - AI assistance compressed this work into the session duration
 

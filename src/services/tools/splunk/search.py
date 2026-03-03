@@ -97,7 +97,8 @@ async def handle_search_run_splunk_query(params: Dict, context: Any) -> Dict:
 
         # Call LOCAL API endpoint (not context.base_url which is the Splunk server)
         import httpx
-        async with httpx.AsyncClient(timeout=120.0, verify=False) as client:
+        from src.config.settings import get_settings
+        async with httpx.AsyncClient(timeout=120.0, verify=get_settings().splunk_verify_ssl) as client:
             # Always use localhost for API calls - context.base_url is the Splunk server URL
             api_base_url = _get_backend_url()
             logger.info(f"[Splunk Tool] Calling API: {api_base_url}/api/splunk/search?organization={organization}")
@@ -256,7 +257,7 @@ Queries without stats/aggregations will auto-add: | stats count by sourcetype, t
                 "earliest_time": "-24h"
             }},
             {"query": "Logs for specific device", "params": {
-                "search_query": "deviceSerial=Q2KY-EVGL-CL3C NOT sourcetype=meraki:sensorreadingshistory | stats count by type, category | sort -count",
+                "search_query": "deviceSerial=XXXX-XXXX-XXXX NOT sourcetype=meraki:sensorreadingshistory | stats count by type, category | sort -count",
                 "earliest_time": "-24h"
             }},
         ],

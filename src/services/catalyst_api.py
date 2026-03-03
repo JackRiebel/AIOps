@@ -39,9 +39,9 @@ class CatalystCenterClient:
             version: API version to use (default: v1)
             api_token: Bearer token for authentication (X-Auth-Token)
         """
-        # Use global setting if verify_ssl not explicitly provided
+        # Use Catalyst-specific setting if verify_ssl not explicitly provided
         if verify_ssl is None:
-            verify_ssl = get_settings().verify_ssl
+            verify_ssl = get_settings().catalyst_verify_ssl
 
         # Strip any trailing slashes and remove API path if it's already included
         self.base_url = base_url.rstrip('/')

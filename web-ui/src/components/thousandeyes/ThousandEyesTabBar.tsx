@@ -1,7 +1,7 @@
 'use client';
 
 import { memo } from 'react';
-import { Activity, AlertTriangle, Server } from 'lucide-react';
+import { Activity, AlertTriangle, Server, Zap, WifiOff, Monitor, Route, Globe } from 'lucide-react';
 import type { TabType } from './types';
 
 // ============================================================================
@@ -12,6 +12,8 @@ export interface ThousandEyesTabBarProps {
   activeTab: TabType;
   onTabChange: (tab: TabType) => void;
   alertCount?: number;
+  eventCount?: number;
+  outageCount?: number;
   className?: string;
 }
 
@@ -23,6 +25,10 @@ const tabs: { id: TabType; label: string; icon: React.ElementType }[] = [
   { id: 'tests', label: 'Tests', icon: Activity },
   { id: 'alerts', label: 'Alerts', icon: AlertTriangle },
   { id: 'agents', label: 'Agents', icon: Server },
+  { id: 'events', label: 'Events', icon: Zap },
+  { id: 'outages', label: 'Outages', icon: WifiOff },
+  { id: 'endpoint-agents', label: 'Endpoint Agents', icon: Monitor },
+  { id: 'path-analysis', label: 'Path & BGP', icon: Route },
 ];
 
 // ============================================================================
@@ -33,14 +39,20 @@ export const ThousandEyesTabBar = memo(({
   activeTab,
   onTabChange,
   alertCount = 0,
+  eventCount = 0,
+  outageCount = 0,
   className = '',
 }: ThousandEyesTabBarProps) => {
   return (
-    <div className={`flex gap-1 bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 p-1.5 ${className}`}>
+    <div className={`flex flex-wrap gap-1 bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 p-1.5 ${className}`}>
       {tabs.map(tab => {
         const Icon = tab.icon;
         const isActive = activeTab === tab.id;
-        const showBadge = tab.id === 'alerts' && alertCount > 0;
+        const badgeCount = tab.id === 'alerts' ? alertCount
+          : tab.id === 'events' ? eventCount
+          : tab.id === 'outages' ? outageCount
+          : 0;
+        const showBadge = badgeCount > 0;
 
         return (
           <button
@@ -58,9 +70,9 @@ export const ThousandEyesTabBar = memo(({
               <span className={`ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
                 isActive
                   ? 'bg-white/20 text-white'
-                  : 'bg-red-500 text-white'
+                  : tab.id === 'outages' ? 'bg-orange-500 text-white' : 'bg-red-500 text-white'
               }`}>
-                {alertCount}
+                {badgeCount}
               </span>
             )}
           </button>

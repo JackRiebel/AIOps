@@ -199,7 +199,7 @@ class KnowledgeService:
         credentials = f"{self.client_id}:{self.client_secret}"
         basic_auth = base64.b64encode(credentials.encode()).decode()
 
-        async with httpx.AsyncClient(verify=False) as client:
+        async with httpx.AsyncClient(verify=get_settings().cisco_circuit_verify_ssl) as client:
             response = await client.post(
                 self.TOKEN_URL,
                 headers={
@@ -246,7 +246,7 @@ class KnowledgeService:
             {"role": "user", "content": user_prompt}
         ]
 
-        async with httpx.AsyncClient(verify=False) as client:
+        async with httpx.AsyncClient(verify=get_settings().cisco_circuit_verify_ssl) as client:
             response = await client.post(
                 chat_url,
                 headers={

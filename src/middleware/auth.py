@@ -3,7 +3,6 @@
 import logging
 from typing import Any, Callable, Dict, Optional
 
-from src.core.api_registry import APIRegistry
 from src.services.credential_manager import CredentialManager
 from src.services.meraki_api import MerakiAPIClient
 

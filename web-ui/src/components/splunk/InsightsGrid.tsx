@@ -43,7 +43,7 @@ export const InsightsGrid = memo(({
     return (
       <div className="bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 p-12">
         <div className="flex flex-col items-center justify-center">
-          <Loader2 className="w-10 h-10 text-purple-500 animate-spin mb-4" />
+          <Loader2 className="w-8 h-8 text-cyan-500 animate-spin mb-3" />
           <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
             {generating ? 'AI is analyzing logs...' : 'Loading insights...'}
           </p>
@@ -60,8 +60,8 @@ export const InsightsGrid = memo(({
     return (
       <div className="bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 p-12">
         <div className="flex flex-col items-center justify-center">
-          <div className="w-14 h-14 mb-4 bg-slate-100 dark:bg-slate-700/50 rounded-full flex items-center justify-center">
-            <FileText className="w-7 h-7 text-slate-400 dark:text-slate-500" />
+          <div className="w-12 h-12 mb-3 bg-slate-100 dark:bg-slate-700/50 rounded-full flex items-center justify-center">
+            <FileText className="w-6 h-6 text-slate-400 dark:text-slate-500" />
           </div>
           <p className="text-sm font-medium text-slate-700 dark:text-slate-300">No log insights yet</p>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
@@ -78,23 +78,23 @@ export const InsightsGrid = memo(({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Lightbulb className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
-          <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+          <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500 dark:text-slate-400">
             Log Insights
-          </h3>
-          <span className="text-xs text-slate-400 dark:text-slate-500">
-            ({totalEvents.toLocaleString()} events in {insights.length} categories)
+          </span>
+          <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-slate-100 dark:bg-slate-700/60 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600/50">
+            {totalEvents.toLocaleString()} events in {insights.length} categories
           </span>
         </div>
         <button
           onClick={onToggleRawLogs}
-          className="px-3 py-1.5 bg-slate-100 dark:bg-slate-700/50 text-slate-600 dark:text-slate-300 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition text-xs font-medium"
+          className="px-3 py-1.5 bg-white dark:bg-slate-800/60 text-slate-600 dark:text-slate-300 rounded-lg border border-slate-200 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-700/30 hover:border-slate-300 dark:hover:border-slate-600/50 transition text-xs font-medium"
         >
           {showRawLogs ? 'Hide' : 'Show'} Raw Logs
         </button>
       </div>
 
       {/* Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
         {insights.map((insight) => (
           <InsightCard
             key={insight.id}

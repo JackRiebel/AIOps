@@ -48,8 +48,8 @@ def get_actions_for_model(model: str) -> list[str]:
     if model_upper.startswith("MS"):
         actions.extend(["cable-test", "port-cycle", "port-config"])
 
-    # MR (Wireless AP) - wireless-specific tools
-    if model_upper.startswith("MR") or model_upper.startswith("CW"):
+    # MR/CW/GR (Wireless AP) - wireless-specific tools
+    if model_upper.startswith(("MR", "CW", "GR")):
         actions.extend(["rf-spectrum"])
 
     # MV (Camera) - snapshot
@@ -581,7 +581,7 @@ async def send_slack_notification(
     payload = {
         "channel": request.channel,
         "text": text,
-        "username": "Lumen",
+        "username": "Cisco AIOps Hub",
         "icon_emoji": ":satellite:",
     }
 
@@ -1015,6 +1015,13 @@ async def splunk_search_action(request: SplunkSearchRequest):
             get_config_or_env("splunk_bearer_token", "SPLUNK_BEARER_TOKEN") or
             settings.splunk_token
         )
+        # Load per-credential verify_ssl from DB, fall back to settings
+        splunk_verify_ssl_str = get_config_or_env("splunk_verify_ssl", "SPLUNK_VERIFY_SSL")
+        if splunk_verify_ssl_str is not None:
+            # DB stores as string "true"/"false"
+            splunk_verify_ssl = str(splunk_verify_ssl_str).lower() == "true"
+        else:
+            splunk_verify_ssl = settings.splunk_verify_ssl
 
         if not splunk_host:
             raise HTTPException(status_code=501, detail="Splunk is not configured")
@@ -1024,7 +1031,7 @@ async def splunk_search_action(request: SplunkSearchRequest):
             username=splunk_username,
             password=splunk_password,
             token=splunk_token,
-            verify_ssl=settings.splunk_verify_ssl,
+            verify_ssl=splunk_verify_ssl,
         )
 
         results = await client.run_search(

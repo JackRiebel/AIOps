@@ -22,30 +22,40 @@ const INTEGRATION_FIELDS: Record<string, FieldConfig[]> = {
   // Network Platforms
   meraki: [
     { key: 'meraki_api_key', displayName: 'API Key', type: 'password', required: true, placeholder: 'Enter your Meraki Dashboard API key', helpUrl: 'https://developer.cisco.com/meraki/api-v1/' },
+    { key: 'meraki_verify_ssl', displayName: 'Verify SSL', type: 'boolean', description: 'Verify SSL certificates for Meraki API calls' },
   ],
   catalyst: [
     { key: 'catalyst_center_host', displayName: 'Host URL', type: 'url', required: true, placeholder: 'https://your-catalyst-center.example.com', description: 'Your Catalyst Center instance URL' },
     { key: 'catalyst_center_username', displayName: 'Username', type: 'text', required: true, placeholder: 'admin' },
     { key: 'catalyst_center_password', displayName: 'Password', type: 'password', required: true, placeholder: 'Enter password' },
+    { key: 'catalyst_verify_ssl', displayName: 'Verify SSL', type: 'boolean', description: 'Verify SSL certificates for Catalyst Center API calls' },
   ],
   thousandeyes: [
     { key: 'thousandeyes_oauth_token', displayName: 'OAuth Token', type: 'password', required: true, placeholder: 'Bearer token from ThousandEyes', helpUrl: 'https://developer.thousandeyes.com/' },
+    { key: 'thousandeyes_agent_types', displayName: 'Agent Types to Display', type: 'multiselect', required: false, description: 'Select which agent types are shown in the dashboard.', options: ['all', 'cloud', 'enterprise', 'enterprise-cluster', 'endpoint'] },
+    { key: 'thousandeyes_mcp_endpoint', displayName: 'MCP Endpoint (Optional)', type: 'url', required: false, placeholder: 'https://mcp.thousandeyes.com', description: 'ThousandEyes MCP server URL. Enables dashboard access and AI-driven queries.' },
+    { key: 'thousandeyes_mcp_token', displayName: 'MCP Token (Optional)', type: 'password', required: false, placeholder: 'MCP-specific token', description: 'Defaults to OAuth token above if not set.' },
+    { key: 'thousandeyes_verify_ssl', displayName: 'Verify SSL', type: 'boolean', description: 'Verify SSL certificates for ThousandEyes API calls' },
   ],
 
   // AI Providers
   anthropic: [
     { key: 'anthropic_api_key', displayName: 'API Key', type: 'password', required: true, placeholder: 'sk-ant-...', helpUrl: 'https://console.anthropic.com/settings/keys' },
+    { key: 'anthropic_verify_ssl', displayName: 'Verify SSL', type: 'boolean', description: 'Verify SSL certificates for Anthropic API calls' },
   ],
   openai: [
     { key: 'openai_api_key', displayName: 'API Key', type: 'password', required: true, placeholder: 'sk-...', helpUrl: 'https://platform.openai.com/api-keys' },
+    { key: 'openai_verify_ssl', displayName: 'Verify SSL', type: 'boolean', description: 'Verify SSL certificates for OpenAI API calls' },
   ],
   google: [
     { key: 'google_api_key', displayName: 'API Key', type: 'password', required: true, placeholder: 'Enter Google AI API key', helpUrl: 'https://aistudio.google.com/app/apikey' },
+    { key: 'google_ai_verify_ssl', displayName: 'Verify SSL', type: 'boolean', description: 'Verify SSL certificates for Google AI API calls' },
   ],
   'cisco-circuit': [
     { key: 'cisco_circuit_client_id', displayName: 'Client ID', type: 'password', required: true, placeholder: 'OAuth Client ID' },
     { key: 'cisco_circuit_client_secret', displayName: 'Client Secret', type: 'password', required: true, placeholder: 'OAuth Client Secret' },
     { key: 'cisco_circuit_app_key', displayName: 'App Key', type: 'password', required: true, placeholder: 'Application Key' },
+    { key: 'cisco_circuit_verify_ssl', displayName: 'Verify SSL', type: 'boolean', description: 'Verify SSL certificates for Cisco Circuit API calls' },
   ],
 
   // Monitoring
@@ -54,6 +64,9 @@ const INTEGRATION_FIELDS: Record<string, FieldConfig[]> = {
     { key: 'splunk_bearer_token', displayName: 'Bearer Token', type: 'password', required: true, placeholder: 'eyJraWQi...', description: 'JWT token from Splunk Settings > Tokens', helpUrl: 'https://docs.splunk.com/Documentation/Splunk/latest/Security/UseAuthTokens' },
     { key: 'splunk_host', displayName: 'HEC Host (Optional)', type: 'url', required: false, defaultValue: 'http://localhost:8088', placeholder: 'http://localhost:8088', description: 'Local: localhost:8088 | Cloud: https://http-inputs-your-instance.splunkcloud.com:443' },
     { key: 'splunk_hec_token', displayName: 'HEC Token (Optional)', type: 'password', required: false, placeholder: 'HEC token', helpUrl: 'https://docs.splunk.com/Documentation/Splunk/latest/Data/UsetheHTTPEventCollector' },
+    { key: 'splunk_mcp_token', displayName: 'MCP Encrypted Token', type: 'password', required: false, placeholder: 'MCP encrypted token from Splunk MCP Server page', description: 'Created in Splunk > MCP Server > Create Encrypted Token. Required for MCP features.' },
+    { key: 'splunk_mcp_endpoint', displayName: 'MCP Endpoint (Optional)', type: 'url', required: false, placeholder: 'https://your-instance.splunkcloud.com/services/mcp', description: 'Custom MCP endpoint URL. Defaults to {API URL}/services/mcp if not set.' },
+    { key: 'splunk_verify_ssl', displayName: 'Verify SSL', type: 'boolean', description: 'Verify SSL certificates (disable for self-signed certs)' },
   ],
 
   // Notifications
@@ -232,8 +245,13 @@ export default function AdminSettingsPage() {
     const values: Record<string, string> = {};
     integration.fields.forEach((field) => {
       const config = configValues[field.key];
-      // Use current_value if exists, otherwise use defaultValue, otherwise empty
-      values[field.key] = config?.current_value || field.defaultValue || '';
+      // For password/sensitive fields, don't populate with masked "••••••••"
+      // The field will show as empty with a placeholder indicating a value is stored
+      if (field.type === 'password' && config?.current_value === '••••••••') {
+        values[field.key] = '';
+      } else {
+        values[field.key] = config?.current_value || field.defaultValue || '';
+      }
     });
     return values;
   }, [configValues]);
@@ -263,6 +281,12 @@ export default function AdminSettingsPage() {
       for (const [key, value] of Object.entries(values)) {
         if (value) {
           await apiClient.updateSystemConfig(key, value);
+        } else {
+          // Clear the value if it was set to empty (delete from DB)
+          const existing = configValues[key];
+          if (existing?.has_value) {
+            await apiClient.deleteSystemConfig(key);
+          }
         }
       }
       setSuccess(`${integration.name} saved successfully`);
@@ -272,7 +296,7 @@ export default function AdminSettingsPage() {
       setError(err instanceof Error ? err.message : `Failed to save ${integration.name}`);
       throw err;
     }
-  }, [fetchConfig]);
+  }, [fetchConfig, configValues]);
 
   // Test integration
   const handleTest = useCallback(async (integration: IntegrationConfig) => {

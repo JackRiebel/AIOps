@@ -103,13 +103,13 @@ def _build_aggregate_agent_card(include_extended: bool = False) -> Dict[str, Any
 
     # Build the aggregate card
     card = {
-        "id": "lumen-a2a",
-        "name": "Lumen A2A Server",
+        "id": "cisco-aiops-hub-a2a",
+        "name": "Cisco AIOps Hub A2A Server",
         "description": "Enterprise network management AI agents with Meraki, Catalyst, ThousandEyes, and Splunk integrations",
         "protocolVersion": "0.3",
         "provider": {
-            "organization": "Lumen",
-            "url": "https://github.com/lumen",
+            "organization": "Cisco AIOps Hub",
+            "url": "https://github.com/cisco-aiops-hub",
         },
         "capabilities": {
             "streaming": True,

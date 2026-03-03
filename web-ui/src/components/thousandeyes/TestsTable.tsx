@@ -1,10 +1,11 @@
 'use client';
 
 import { memo, useState, useMemo, useCallback, Fragment } from 'react';
-import { Activity, ChevronRight, Plus } from 'lucide-react';
+import { Activity, ChevronRight, Plus, Play } from 'lucide-react';
 import { DashboardCard } from '@/components/dashboard/DashboardCard';
 import { TestPerformanceChart } from './TestPerformanceChart';
 import { Pagination } from './Pagination';
+import { isEnabled } from './types';
 import type { Test, TestResult } from './types';
 
 // ============================================================================
@@ -21,14 +22,15 @@ export interface TestsTableProps {
   onCreateTest: () => void;
   onToggleResults: (testId: number, testType: string) => void;
   onAskAI: (context: string) => void;
+  onRunInstantTest?: (testConfig: any) => Promise<any>;
 }
 
 // ============================================================================
 // Status Badge Component
 // ============================================================================
 
-function StatusBadge({ enabled }: { enabled: number }) {
-  return enabled === 1 ? (
+function StatusBadge({ enabled }: { enabled: number | boolean }) {
+  return isEnabled(enabled) ? (
     <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-700/50">
       <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
       Enabled
@@ -55,8 +57,10 @@ export const TestsTable = memo(({
   onCreateTest,
   onToggleResults,
   onAskAI,
+  onRunInstantTest,
 }: TestsTableProps) => {
   const [expandedTestId, setExpandedTestId] = useState<number | null>(null);
+  const [runningInstantTest, setRunningInstantTest] = useState<number | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
 
@@ -199,6 +203,25 @@ export const TestsTable = memo(({
                         selectedOrg={selectedOrg}
                         onAskAI={onAskAI}
                       />
+                      {onRunInstantTest && (
+                        <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700/50">
+                          <button
+                            onClick={async () => {
+                              setRunningInstantTest(test.testId);
+                              try {
+                                await onRunInstantTest({ testId: test.testId, type: test.type });
+                              } finally {
+                                setRunningInstantTest(null);
+                              }
+                            }}
+                            disabled={runningInstantTest === test.testId}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-green-600 to-emerald-600 text-white text-xs rounded-lg hover:from-green-700 hover:to-emerald-700 transition font-medium shadow-sm disabled:opacity-50"
+                          >
+                            <Play className="w-3.5 h-3.5" />
+                            {runningInstantTest === test.testId ? 'Running...' : 'Run Instant Test'}
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 )}

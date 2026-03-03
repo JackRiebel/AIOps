@@ -1,4 +1,3 @@
-from .mcp_server import MerakiDashboardMCP
-from .api_loader import APILoader
+from .meraki_magic_server import MerakiMagicServer
 
-__all__ = ["MerakiDashboardMCP", "APILoader"]
+__all__ = ["MerakiMagicServer"]

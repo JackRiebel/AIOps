@@ -19,9 +19,9 @@ const nextConfig: NextConfig = {
     ],
   },
 
-  // Empty turbopack config to silence the warning in Next.js 16+
-  // Turbopack is now the default bundler for dev mode
-  turbopack: {},
+  // Note: Using webpack instead of Turbopack due to known 404 issues with sub-pages
+  // See: https://github.com/vercel/next.js/issues/81271
+  // Turbopack can be enabled with: npm run dev:turbo
 
   // Image optimization
   images: {

@@ -14,6 +14,17 @@ from src.services.meraki_api import MerakiAPIClient
 
 logger = logging.getLogger(__name__)
 
+
+def _validate_context(context: Any) -> Dict:
+    """Validate that context has a Meraki client configured."""
+    if not hasattr(context, 'client') or context.client is None:
+        return {
+            "success": False,
+            "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+        }
+    return None
+
+
 # =============================================================================
 # HANDLERS
 # =============================================================================
@@ -21,6 +32,7 @@ logger = logging.getLogger(__name__)
 async def handle_licensing_get_coterm_licenses(params: Dict, context: Any) -> Dict:
     """Handler for Get Co-term Licenses."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/licensing/get/coterm/licenses"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -35,6 +47,7 @@ async def handle_licensing_get_coterm_licenses(params: Dict, context: Any) -> Di
 async def handle_licensing_move_coterm_licenses(params: Dict, context: Any) -> Dict:
     """Handler for Move Co-term Licenses."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/licensing/move/coterm/licenses"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -49,6 +62,7 @@ async def handle_licensing_move_coterm_licenses(params: Dict, context: Any) -> D
 async def handle_licensing_get_per_device_overview(params: Dict, context: Any) -> Dict:
     """Handler for Get Per-Device Licensing Overview."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/licensing/get/per/device/overview"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -63,6 +77,7 @@ async def handle_licensing_get_per_device_overview(params: Dict, context: Any) -
 async def handle_licensing_list_per_device_licenses(params: Dict, context: Any) -> Dict:
     """Handler for List Per-Device Licenses."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/licensing/list/per/device/licenses"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -79,6 +94,7 @@ async def handle_licensing_list_per_device_licenses(params: Dict, context: Any) 
 async def handle_licensing_assign_per_device_license(params: Dict, context: Any) -> Dict:
     """Handler for Assign Per-Device License."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/licensing/assign/per/device/license"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -94,6 +110,7 @@ async def handle_licensing_assign_per_device_license(params: Dict, context: Any)
 async def handle_licensing_move_per_device_licenses(params: Dict, context: Any) -> Dict:
     """Handler for Move Per-Device Licenses."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/licensing/move/per/device/licenses"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -108,6 +125,7 @@ async def handle_licensing_move_per_device_licenses(params: Dict, context: Any) 
 async def handle_licensing_renew_per_device_seats(params: Dict, context: Any) -> Dict:
     """Handler for Renew Per-Device Seats."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/licensing/renew/per/device/seats"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -122,6 +140,7 @@ async def handle_licensing_renew_per_device_seats(params: Dict, context: Any) ->
 async def handle_licensing_get_subscription_entitlements(params: Dict, context: Any) -> Dict:
     """Handler for Get Subscription Entitlements."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/licensing/get/subscription/entitlements"
         pass
@@ -136,6 +155,7 @@ async def handle_licensing_get_subscription_entitlements(params: Dict, context: 
 async def handle_licensing_list_subscriptions(params: Dict, context: Any) -> Dict:
     """Handler for List Subscriptions."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/licensing/list/subscriptions"
         pass
@@ -150,6 +170,7 @@ async def handle_licensing_list_subscriptions(params: Dict, context: Any) -> Dic
 async def handle_licensing_get_subscription(params: Dict, context: Any) -> Dict:
     """Handler for Get Subscription."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/licensing/get/subscription"
         pass
@@ -164,6 +185,7 @@ async def handle_licensing_get_subscription(params: Dict, context: Any) -> Dict:
 async def handle_licensing_claim_subscription(params: Dict, context: Any) -> Dict:
     """Handler for Claim Subscription."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/licensing/claim/subscription"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -178,6 +200,7 @@ async def handle_licensing_claim_subscription(params: Dict, context: Any) -> Dic
 async def handle_licensing_bind_subscription(params: Dict, context: Any) -> Dict:
     """Handler for Bind Subscription."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/licensing/bind/subscription"
         pass
@@ -192,6 +215,7 @@ async def handle_licensing_bind_subscription(params: Dict, context: Any) -> Dict
 async def handle_licensing_get_compliance(params: Dict, context: Any) -> Dict:
     """Handler for Get License Compliance."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/licensing/get/compliance"
         path = path.replace("{organization_id}", params.get("organization_id", ""))
@@ -206,6 +230,7 @@ async def handle_licensing_get_compliance(params: Dict, context: Any) -> Dict:
 async def handle_licensing_get_device_licenses(params: Dict, context: Any) -> Dict:
     """Handler for Get Device Licenses."""
     try:
+        if err := _validate_context(context): return err
         # Build API path
         path = "/licensing/get/device/licenses"
         path = path.replace("{organization_id}", params.get("organization_id", ""))

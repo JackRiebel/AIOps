@@ -8,6 +8,7 @@ import GlobalSearch from './GlobalSearch';
 import NotificationsPanel from './NotificationsPanel';
 import AccountSettings from './AccountSettings';
 import AISessionToggle from './AISessionToggle';
+import EditModeIndicator from './EditModeIndicator';
 
 export default function TopBar() {
   const [searchOpen, setSearchOpen] = useState(false);
@@ -94,6 +95,12 @@ export default function TopBar() {
 
         {/* Right Side Actions */}
         <div className="flex items-center gap-2">
+          {/* Edit Mode Indicator */}
+          <EditModeIndicator />
+
+          {/* Divider */}
+          <div className="h-6 w-px bg-slate-200 dark:bg-slate-700 mx-1" />
+
           {/* AI Session Toggle - Always Visible */}
           <AISessionToggle />
 

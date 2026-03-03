@@ -645,7 +645,7 @@ class AISessionService:
                 conversation_transcript = "No AI conversations recorded"
 
             # Build summary prompt with rich context
-            prompt = f"""You are analyzing an AI-assisted network operations session in Lumen (a Cisco Meraki/ThousandEyes/Splunk monitoring platform).
+            prompt = f"""You are analyzing an AI-assisted network operations session in Cisco AIOps Hub (a Cisco Meraki/ThousandEyes/Splunk monitoring platform).
 
 SESSION METRICS:
 - Duration: {duration_minutes:.1f} minutes

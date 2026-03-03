@@ -61,6 +61,9 @@ class User(Base):
     mfa_enabled = Column(Boolean, default=False, nullable=False)
     duo_user_id = Column(String(255), nullable=True)  # Duo Security user ID
 
+    # Account recovery (hash of one-time recovery key shown at registration)
+    recovery_key_hash = Column(String(255), nullable=True)
+
     # AI Preferences (no default - will be auto-detected based on configured providers)
     preferred_model = Column(String(100), default=None, nullable=True)
     ai_temperature = Column(Float, default=0.7, nullable=True)

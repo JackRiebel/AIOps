@@ -139,7 +139,9 @@ async def create_admin_user(request: CreateAdminRequest):
     return {
         "success": True,
         "user": result["user"],
+        "recovery_key": result.get("recovery_key"),
         "message": "Admin user created successfully",
+        "warning": "IMPORTANT: Save your recovery key now! It will NOT be shown again. You need it to reset your password if you get locked out.",
     }
 
 

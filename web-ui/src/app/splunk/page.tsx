@@ -1,11 +1,26 @@
 'use client';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
-import { RefreshCw, AlertTriangle } from 'lucide-react';
-import { useSplunkChat } from '@/hooks/useSplunkChat';
-import { TopStatsBar, type StatItem } from '@/components/dashboard/TopStatsBar';
+import { useCallback, useMemo, useState, Suspense } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
+import { AlertTriangle } from 'lucide-react';
+import { AnimatePresence } from 'framer-motion';
+import { useAISession } from '@/contexts/AISessionContext';
 import {
-  SplunkSearchCard,
+  SplunkCommandHeader,
+  SplunkNavigationBar,
+  SplunkStatsRow,
+  SplunkAIStreamPanel,
+  SplunkPlatformSidebar,
+  SplunkActivityFeed,
+  SplunkCorrelatedDevicesCard,
+  SplunkIndexChart,
+  SplunkSeverityChart,
+  SplunkSecurityOverview,
+  SplunkNetworkSecurityPanel,
+  SplunkInvestigatePanel,
+  SplunkIndexExplorer,
+  SplunkKnowledgeBrowser,
+  SplunkSecuritySummaryCard,
   InsightsGrid,
   RawLogsCard,
   InvestigationModal,
@@ -13,355 +28,204 @@ import {
   type SplunkInsight,
   type SplunkLog,
 } from '@/components/splunk';
+import { useSplunkCommandCenter } from '@/components/splunk/useSplunkCommandCenter';
+import type { SplunkDashboardView } from '@/components/splunk/types';
 
 // ============================================================================
-// Splunk Page Component
+// Sub-nav pill types
 // ============================================================================
 
-export default function SplunkPage() {
-  // Use 'default' as org parameter - config comes from system_config
-  const selectedOrg = 'default';
-  const [isConfigured, setIsConfigured] = useState(true);
+type InvestigateSubView = 'search-spl' | 'security' | 'indexes' | 'knowledge' | 'insights';
 
-  // Data state
-  const [insights, setInsights] = useState<SplunkInsight[]>([]);
-  const [rawLogs, setRawLogs] = useState<SplunkLog[]>([]);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+// ============================================================================
+// Loading Skeleton (for Suspense)
+// ============================================================================
 
-  // Search state
-  // Simple default - AI categorization will filter out irrelevant API metadata
-  const [searchQuery, setSearchQuery] = useState('search index=* | head 100');
-  const [timeRange, setTimeRange] = useState('-24h');
-  const [aiPrompt, setAiPrompt] = useState('');
-  const [maxLogs, setMaxLogs] = useState(100);
-  const [showAdvanced, setShowAdvanced] = useState(false);
+function LoadingSkeleton() {
+  return (
+    <div className="h-full bg-slate-50 dark:bg-slate-900">
+      <div className="px-6 py-5 max-w-[1600px] mx-auto space-y-3">
+        <div className="h-14 bg-slate-200 dark:bg-slate-700/50 rounded-xl animate-pulse" />
+        <div className="h-10 w-96 bg-slate-200 dark:bg-slate-700/50 rounded-lg animate-pulse" />
+        <div className="h-96 bg-slate-200 dark:bg-slate-700/50 rounded-xl animate-pulse" />
+      </div>
+    </div>
+  );
+}
 
-  // UI state
-  const [loading, setLoading] = useState(false);
-  const [generating, setGenerating] = useState(false);
-  const [aiProcessing, setAiProcessing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [showRawLogs, setShowRawLogs] = useState(false);
+// ============================================================================
+// Sub-Nav Pills
+// ============================================================================
+
+function SubNavPills<T extends string>({
+  items,
+  value,
+  onChange,
+}: {
+  items: { id: T; label: string }[];
+  value: T;
+  onChange: (id: T) => void;
+}) {
+  return (
+    <div className="bg-slate-100 dark:bg-slate-800/40 rounded-lg p-1 inline-flex gap-1">
+      {items.map(pill => (
+        <button
+          key={pill.id}
+          onClick={() => onChange(pill.id)}
+          className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${
+            value === pill.id
+              ? 'bg-white dark:bg-slate-700 shadow-sm text-slate-900 dark:text-white'
+              : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+          }`}
+        >
+          {pill.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ============================================================================
+// Valid tab IDs for URL persistence
+// ============================================================================
+
+const VALID_TABS = new Set<string>(['overview', 'investigate']);
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+const INVESTIGATE_PILLS: { id: InvestigateSubView; label: string }[] = [
+  { id: 'search-spl', label: 'Search & SPL' },
+  { id: 'security', label: 'Security' },
+  { id: 'indexes', label: 'Indexes' },
+  { id: 'knowledge', label: 'Knowledge' },
+  { id: 'insights', label: 'Insights' },
+];
+
+// ============================================================================
+// Wrapper — Suspense for useSearchParams
+// ============================================================================
+
+export default function SplunkPageWrapper() {
+  return (
+    <Suspense fallback={<LoadingSkeleton />}>
+      <SplunkPage />
+    </Suspense>
+  );
+}
+
+// ============================================================================
+// Splunk Intelligence Center — AI-First Redesign
+// ============================================================================
+
+function SplunkPage() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const { logAIQuery, isActive: isAISessionActive } = useAISession();
+  const cc = useSplunkCommandCenter({ logAIQuery, isAISessionActive });
+
+  // Persist active tab in URL
+  const tabParam = searchParams.get('tab') || '';
+  const view: SplunkDashboardView = VALID_TABS.has(tabParam)
+    ? (tabParam as SplunkDashboardView)
+    : 'overview';
 
   // Modal state
   const [expandedCard, setExpandedCard] = useState<SplunkInsight | null>(null);
   const [cardInvestigation, setCardInvestigation] = useState<string | null>(null);
   const [investigatingCard, setInvestigatingCard] = useState<string | null>(null);
   const [selectedLog, setSelectedLog] = useState<SplunkLog | null>(null);
+  const [showRawLogs, setShowRawLogs] = useState(false);
+  const [commandQuery, setCommandQuery] = useState<string | null>(null);
 
-  // AI chat hook
-  const { analyzeInsight, generateSPL } = useSplunkChat();
-
-  // ============================================================================
-  // Data Fetching (uses system_config, no organization selection needed)
-  // ============================================================================
-
-  const loadInsights = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const response = await fetch(
-        `/api/splunk/insights?organization=${encodeURIComponent(selectedOrg)}`,
-        { credentials: 'include' }
-      );
-
-      if (response.status === 503) {
-        setIsConfigured(false);
-        setError('Splunk is not configured. Add your credentials in Admin > System Config.');
-        return;
-      }
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || `HTTP ${response.status}`);
-      }
-
-      const data = await response.json();
-      setInsights(data.insights || []);
-      setIsConfigured(true);
-
-      if (data.insights?.length > 0) {
-        const mostRecent = data.insights.reduce((latest: SplunkInsight, curr: SplunkInsight) => {
-          if (!latest.created_at) return curr;
-          if (!curr.created_at) return latest;
-          return new Date(curr.created_at) > new Date(latest.created_at) ? curr : latest;
-        });
-        if (mostRecent.created_at) {
-          setLastUpdated(new Date(mostRecent.created_at));
-        }
-      }
-    } catch (err) {
-      const errMessage = err instanceof Error ? err.message : '';
-      if (!errMessage.includes('404')) {
-        setError(errMessage || 'Failed to load insights');
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedOrg]);
-
-  const generateInsights = useCallback(async () => {
-    try {
-      setGenerating(true);
-      setError(null);
-
-      const response = await fetch(
-        `/api/splunk/insights/generate?organization=${encodeURIComponent(selectedOrg)}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            search_query: searchQuery,
-            time_range: timeRange,
-            max_logs: maxLogs,
-          }),
-          credentials: 'include',
-        }
-      );
-
-      if (response.status === 503) {
-        setIsConfigured(false);
-        setError('Splunk is not configured. Add your credentials in Admin > System Config.');
-        return;
-      }
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || `HTTP ${response.status}`);
-      }
-
-      const data = await response.json();
-      setInsights(data.insights || []);
-      setLastUpdated(new Date());
-      setIsConfigured(true);
-
-      if (data.insights?.length === 0) {
-        setError('No logs found for the specified query and time range');
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to generate insights');
-    } finally {
-      setGenerating(false);
-    }
-  }, [selectedOrg, searchQuery, timeRange, maxLogs]);
-
-  const searchWithAI = useCallback(async () => {
-    if (!aiPrompt.trim()) {
-      setError('Please describe what you want to search for');
-      return;
-    }
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
-
-    try {
-      setAiProcessing(true);
-      setError(null);
-
-      const response = await fetch(
-        `/api/splunk/search/ai?organization=${encodeURIComponent(selectedOrg)}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            prompt: aiPrompt,
-            earliest_time: timeRange,
-          }),
-          signal: controller.signal,
-          credentials: 'include',
-        }
-      );
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || `HTTP ${response.status}`);
-      }
-
-      const data = await response.json();
-      if (data.spl_query || data.generated_spl) {
-        setSearchQuery(data.spl_query || data.generated_spl || searchQuery);
-      }
-
-      await generateInsights();
-    } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        setError('AI search timed out after 30 seconds');
-      } else {
-        setError(err instanceof Error ? err.message : 'Failed to search with AI');
-      }
-    } finally {
-      clearTimeout(timeoutId);
-      setAiProcessing(false);
-    }
-  }, [selectedOrg, aiPrompt, timeRange, searchQuery, generateInsights]);
-
-  const fetchRawLogs = useCallback(async () => {
-    if (!selectedOrg) return;
-
-    try {
-      setLoading(true);
-      const response = await fetch(
-        `/api/splunk/search?organization=${encodeURIComponent(selectedOrg)}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            search: searchQuery,
-            earliest_time: timeRange,
-            latest_time: 'now',
-            max_results: maxLogs,
-          }),
-          credentials: 'include',
-        }
-      );
-
-      if (response.ok) {
-        const data = await response.json();
-        setRawLogs(data.results || []);
-      }
-    } catch {
-      // Fetch failed silently
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedOrg, searchQuery, timeRange, maxLogs]);
+  // Investigate sub-view
+  const [investigateSubView, setInvestigateSubView] = useState<InvestigateSubView>('search-spl');
 
   // ============================================================================
-  // Card Actions
+  // View change handler (URL + hook sync)
   // ============================================================================
 
-  const investigateCard = useCallback(async (card: SplunkInsight) => {
-    setExpandedCard(card);
-    setInvestigatingCard(card.title);
-    setCardInvestigation(null);
-
-    try {
-      const prompt = `You are a senior SRE/DevOps engineer analyzing Splunk logs. Based on this log category summary, provide a detailed investigation:
-
-Category: ${card.title}
-Severity: ${card.severity}
-Count: ${card.log_count} occurrences
-Description: ${card.description}
-Source System: ${card.source_system || 'Unknown'}
-
-Example log entries:
-${card.examples.map((ex, i) => `${i + 1}. ${ex}`).join('\n')}
-
-Please provide:
-1. **Root Cause Analysis**: What are the most likely causes of these events?
-2. **Impact Assessment**: What systems or users might be affected?
-3. **Recommended Actions**: What immediate steps should be taken?
-4. **Prevention**: How can we prevent this in the future?
-5. **Related Patterns**: What other log patterns should we look for?
-
-Keep the response concise but actionable.`;
-
-      const result = await analyzeInsight(prompt, selectedOrg);
-
-      if (result.error) {
-        throw new Error(result.error);
-      }
-
-      setCardInvestigation(result.content || 'No analysis available');
-    } catch (err) {
-      setCardInvestigation(`Failed to generate analysis: ${err instanceof Error ? err.message : 'Unknown error'}. Please try again.`);
-    } finally {
-      setInvestigatingCard(null);
-    }
-  }, [selectedOrg, analyzeInsight]);
-
-  const getSuggestedQuery = useCallback(async (card: SplunkInsight) => {
-    setInvestigatingCard(card.title + '-query');
-
-    try {
-      const prompt = `Based on this log category, generate a Splunk SPL query that would help investigate further:
-
-Category: ${card.title}
-Severity: ${card.severity}
-Examples:
-${card.examples.slice(0, 2).join('\n')}
-
-Return ONLY a valid SPL query (no explanation). The query should help find related events and provide useful statistics.`;
-
-      const result = await generateSPL(prompt, selectedOrg);
-
-      if (!result.error && result.content) {
-        const query = result.content.trim();
-        const splMatch = query.match(/```(?:spl)?\s*([\s\S]*?)```/) || query.match(/^(search\s+.+)$/m);
-        if (splMatch) {
-          setSearchQuery(splMatch[1].trim());
-        } else {
-          setSearchQuery(query.split('\n')[0]);
-        }
-        setShowAdvanced(true);
-      }
-    } catch {
-      // Query suggestion failed silently
-    } finally {
-      setInvestigatingCard(null);
-    }
-  }, [selectedOrg, generateSPL]);
-
-  const findSimilarLogs = useCallback((card: SplunkInsight) => {
-    const keywords = card.title.toLowerCase().split(' ').filter(w => w.length > 3);
-    const searchTerms = keywords.slice(0, 3).join(' OR ');
-    setAiPrompt(`Find more logs related to: ${card.title}. Look for patterns involving ${searchTerms}`);
-    setExpandedCard(null);
-  }, []);
-
-  const handleToggleRawLogs = useCallback(() => {
-    setShowRawLogs(!showRawLogs);
-    if (!showRawLogs && rawLogs.length === 0) {
-      fetchRawLogs();
-    }
-  }, [showRawLogs, rawLogs.length, fetchRawLogs]);
+  const handleViewChange = useCallback((newView: SplunkDashboardView) => {
+    router.replace(`/splunk?tab=${newView}`, { scroll: false });
+    cc.setCurrentView(newView);
+  }, [router, cc]);
 
   // ============================================================================
-  // Effects
-  // ============================================================================
-
-  useEffect(() => {
-    loadInsights();
-  }, [loadInsights]);
-
-  // ============================================================================
-  // Computed Stats
+  // Stats
   // ============================================================================
 
   const severityCounts = useMemo(() => {
     const counts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
-    insights.forEach(i => {
-      if (i.severity in counts) {
-        counts[i.severity as keyof typeof counts]++;
-      }
+    cc.insights.forEach(i => {
+      if (i.severity in counts) counts[i.severity as keyof typeof counts]++;
     });
     return counts;
-  }, [insights]);
+  }, [cc.insights]);
 
-  const stats: StatItem[] = useMemo(() => [
-    { id: 'total', label: 'Total Insights', value: insights.length, icon: 'activity', tooltip: 'AI-generated insights from Splunk log analysis.' },
-    { id: 'critical', label: 'Critical', value: severityCounts.critical, icon: 'alert', status: severityCounts.critical > 0 ? 'critical' : 'normal', tooltip: 'Severe issues requiring immediate attention.' },
-    { id: 'high', label: 'High', value: severityCounts.high, icon: 'alert', status: severityCounts.high > 0 ? 'warning' : 'normal', tooltip: 'Important issues that should be addressed soon.' },
-    { id: 'medium', label: 'Medium', value: severityCounts.medium, icon: 'alert', tooltip: 'Moderate issues for planned remediation.' },
-    { id: 'low', label: 'Low', value: severityCounts.low, icon: 'activity', tooltip: 'Informational findings and minor issues.' },
-  ], [insights.length, severityCounts]);
+  const activeAlerts = severityCounts.critical + severityCounts.high;
+  const healthScore = useMemo(() => {
+    if (cc.indexCount === 0) return 0;
+    const base = 100;
+    const penalty = severityCounts.critical * 15 + severityCounts.high * 8 + severityCounts.medium * 3;
+    return Math.max(0, Math.min(100, base - penalty));
+  }, [cc.indexCount, severityCounts]);
 
   // ============================================================================
-  // Helpers
+  // Card actions
   // ============================================================================
 
-  const formatLastUpdated = (date: Date): string => {
-    const ageMs = Date.now() - date.getTime();
-    const minutes = Math.floor(ageMs / 60000);
-    if (minutes < 1) return 'just now';
-    if (minutes === 1) return '1 minute ago';
-    if (minutes < 60) return `${minutes} minutes ago`;
-    const hours = Math.floor(minutes / 60);
-    if (hours === 1) return '1 hour ago';
-    if (hours < 24) return `${hours} hours ago`;
-    return date.toLocaleDateString();
-  };
+  const investigateCard = useCallback((card: SplunkInsight) => {
+    const prompt = `Investigate Splunk log category: ${card.title} (${card.severity} severity, ${card.log_count} occurrences). Examples: ${card.examples.slice(0, 3).join('; ')}. Provide root cause analysis, impact, and recommendations.`;
+    router.push(`/chat-v2?q=${encodeURIComponent(prompt)}`);
+  }, [router]);
+
+  const getSuggestedQuery = useCallback((card: SplunkInsight) => {
+    const prompt = `Generate a Splunk SPL query to investigate: ${card.title} (${card.severity} severity, ${card.log_count} occurrences). Return ONLY a valid SPL query.`;
+    router.push(`/chat-v2?q=${encodeURIComponent(prompt)}`);
+  }, [router]);
+
+  const findSimilarLogs = useCallback((_card: SplunkInsight) => {
+    setExpandedCard(null);
+  }, []);
+
+  const handleToggleRawLogs = useCallback(() => {
+    setShowRawLogs(prev => !prev);
+    if (!showRawLogs && cc.rawLogs.length === 0) {
+      cc.searchLogs('search index=* | head 100', '-24h', 100);
+    }
+  }, [showRawLogs, cc]);
+
+  const handleRunSavedSearch = useCallback((search: string) => {
+    router.replace('/splunk?tab=investigate', { scroll: false });
+    cc.setCurrentView('investigate');
+    setInvestigateSubView('search-spl');
+    cc.searchLogs(search, '-24h', 1000);
+  }, [router, cc]);
+
+  const handleCommandSubmit = useCallback((q: string) => {
+    setCommandQuery(q);
+    router.replace('/splunk?tab=investigate', { scroll: false });
+    cc.setCurrentView('investigate');
+    setInvestigateSubView('search-spl');
+  }, [router, cc]);
+
+  const handleAskAI = useCallback((query: string) => {
+    router.push(`/chat-v2?q=${encodeURIComponent(query)}`);
+  }, [router]);
+
+  const handleSecuritySearch = useCallback((query: string) => {
+    router.replace('/splunk?tab=investigate', { scroll: false });
+    cc.setCurrentView('investigate');
+    setInvestigateSubView('search-spl');
+    setCommandQuery(query);
+  }, [router, cc]);
+
+  const handleViewSecurityDetails = useCallback(() => {
+    router.replace('/splunk?tab=investigate', { scroll: false });
+    cc.setCurrentView('investigate');
+    setInvestigateSubView('security');
+  }, [router, cc]);
 
   // ============================================================================
   // Render
@@ -369,115 +233,268 @@ Return ONLY a valid SPL query (no explanation). The query should help find relat
 
   return (
     <div className="h-full bg-slate-50 dark:bg-slate-900 overflow-auto">
-      <div className="px-6 py-8 max-w-[1600px] mx-auto">
+      <div className="px-6 py-5 max-w-[1600px] mx-auto space-y-3">
         {/* Header */}
-        <div className="flex items-start justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Splunk Log Analysis</h1>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-              AI-powered log analysis and insights
-              {lastUpdated && (
-                <span className="ml-2">• Last updated {formatLastUpdated(lastUpdated)}</span>
-              )}
-            </p>
-          </div>
+        <SplunkCommandHeader
+          serverName={cc.serverInfo?.serverName || null}
+          lastSyncTime={cc.lastSyncTime}
+          loading={cc.loading}
+          isConfigured={cc.isConfigured}
+          healthScore={healthScore}
+          onRefresh={cc.refresh}
+          onCommandSubmit={handleCommandSubmit}
+        />
 
-          <div className="flex items-center gap-3">
-            {/* Refresh Button */}
-            <button
-              onClick={() => generateInsights()}
-              disabled={generating || !isConfigured}
-              aria-label={generating ? 'Generating insights...' : 'Generate new insights'}
-              className="p-2.5 bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/50 rounded-xl text-slate-600 dark:text-slate-400 hover:text-purple-600 dark:hover:text-purple-400 hover:border-purple-300 dark:hover:border-purple-500/50 transition disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
-            >
-              <RefreshCw className={`w-4 h-4 ${generating ? 'animate-spin' : ''}`} aria-hidden="true" />
-            </button>
-          </div>
-        </div>
+        {/* Navigation — 2 tabs */}
+        <SplunkNavigationBar
+          currentView={view}
+          onViewChange={handleViewChange}
+        />
 
-        {/* Configuration Warning */}
-        {!isConfigured && (
-          <div role="alert" className="mb-6 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 rounded-xl p-4">
+        {/* Config warning */}
+        {!cc.isConfigured && (
+          <div role="alert" className="bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 rounded-xl p-4">
             <div className="flex items-start gap-3">
               <div className="p-2 bg-amber-100 dark:bg-amber-500/20 rounded-lg">
-                <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+                <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
               </div>
               <div>
                 <h3 className="text-sm font-medium text-amber-800 dark:text-amber-200">Configuration Required</h3>
                 <p className="mt-1 text-sm text-amber-700 dark:text-amber-300">
-                  Splunk is not configured. Please add your Splunk credentials in Admin → System Config.
+                  Splunk is not configured. Please add your Splunk credentials in Admin &rarr; System Config.
                 </p>
               </div>
             </div>
           </div>
         )}
 
-        {/* Top Stats Bar */}
-        <TopStatsBar stats={stats} loading={loading && !insights.length} className="mb-6" />
-
-        {/* Error Banner */}
-        {error && (
-          <div role="alert" className="mb-6 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 rounded-xl p-4">
+        {/* Error banner */}
+        {cc.error && (
+          <div role="alert" className="bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 rounded-xl p-4">
             <div className="flex items-start gap-3">
               <div className="p-2 bg-red-100 dark:bg-red-500/20 rounded-lg">
-                <AlertTriangle className="w-4 h-4 text-red-600 dark:text-red-400" aria-hidden="true" />
+                <AlertTriangle className="w-4 h-4 text-red-600 dark:text-red-400" />
               </div>
-              <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
+              <p className="text-sm text-red-700 dark:text-red-400">{cc.error}</p>
             </div>
           </div>
         )}
 
-        {/* Search Card */}
-        <div className="mb-6">
-          <SplunkSearchCard
-            aiPrompt={aiPrompt}
-            onAiPromptChange={setAiPrompt}
-            searchQuery={searchQuery}
-            onSearchQueryChange={setSearchQuery}
-            timeRange={timeRange}
-            onTimeRangeChange={setTimeRange}
-            maxLogs={maxLogs}
-            onMaxLogsChange={setMaxLogs}
-            showAdvanced={showAdvanced}
-            onShowAdvancedChange={setShowAdvanced}
-            onSearchWithAI={searchWithAI}
-            onSearchManual={() => generateInsights()}
-            aiProcessing={aiProcessing}
-            generating={generating}
-            disabled={!isConfigured}
+        {/* ============================================================ */}
+        {/* Overview Tab — AI Command Center */}
+        {/* Always mounted to preserve AI analysis state across tab switches */}
+        {/* ============================================================ */}
+        <div className={view === 'overview' ? 'space-y-3' : 'hidden'}>
+          {/* Stats Row */}
+          <SplunkStatsRow
+            indexCount={cc.indexCount}
+            totalEventCount={cc.totalEventCount}
+            sourceCount={cc.sourceCount}
+            hostCount={cc.hostCount}
+            activeAlerts={activeAlerts}
+            healthScore={healthScore}
+            loading={cc.loadingEnvironment && !cc.initialLoadComplete}
           />
+
+          {/* Hero: AI Panel + Platform Sidebar */}
+          <div className="grid grid-cols-12 gap-4">
+            <div className="col-span-12 lg:col-span-8">
+              <SplunkAIStreamPanel
+                indexCount={cc.indexCount}
+                totalEventCount={cc.totalEventCount}
+                sourceCount={cc.sourceCount}
+                hostCount={cc.hostCount}
+                saiaAvailable={cc.saiaAvailable}
+                insightCount={cc.insights.length}
+                dataReady={cc.initialLoadComplete}
+                logAIQuery={logAIQuery}
+                isAISessionActive={isAISessionActive}
+              />
+            </div>
+            <div className="col-span-12 lg:col-span-4">
+              <SplunkPlatformSidebar
+                serverInfo={cc.serverInfo}
+                userInfo={cc.userInfo}
+                merakiCount={cc.merakiDevices.length}
+                catalystCount={cc.catalystDevices.length}
+                teAgentCount={0}
+                isConfigured={cc.isConfigured}
+                onNavigate={(v) => {
+                  if (v === 'explore') {
+                    router.replace('/splunk?tab=investigate', { scroll: false });
+                    cc.setCurrentView('investigate');
+                    setInvestigateSubView('indexes');
+                  } else {
+                    handleViewChange(v as SplunkDashboardView);
+                  }
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Security Summary Card + Severity Chart */}
+          <div className="grid grid-cols-12 gap-4">
+            <div className="col-span-12 lg:col-span-8">
+              <SplunkSecuritySummaryCard
+                insights={cc.insights}
+                loading={cc.loadingInsights && !cc.initialLoadComplete}
+                onViewDetails={handleViewSecurityDetails}
+              />
+            </div>
+            <div className="col-span-12 lg:col-span-4">
+              <SplunkSeverityChart
+                insights={cc.insights}
+                loading={cc.loadingInsights && !cc.initialLoadComplete}
+              />
+            </div>
+          </div>
+
+          {/* Activity Feed + Correlated Devices */}
+          <div className="grid grid-cols-12 gap-4">
+            <div className="col-span-12 lg:col-span-8">
+              <SplunkActivityFeed
+                logs={cc.activityFeed}
+                loading={!cc.initialLoadComplete}
+                onViewAll={() => {
+                  router.replace('/splunk?tab=investigate', { scroll: false });
+                  cc.setCurrentView('investigate');
+                  setInvestigateSubView('search-spl');
+                }}
+              />
+            </div>
+            <div className="col-span-12 lg:col-span-4">
+              <SplunkCorrelatedDevicesCard
+                devices={cc.correlatedDevices}
+                loading={cc.loadingCorrelation}
+                merakiDevices={cc.merakiDevices}
+                catalystDevices={cc.catalystDevices}
+              />
+            </div>
+          </div>
         </div>
 
-        {/* Insights Grid */}
-        <InsightsGrid
-          insights={insights}
-          loading={loading}
-          generating={generating}
-          showRawLogs={showRawLogs}
-          onToggleRawLogs={handleToggleRawLogs}
-          onInvestigate={investigateCard}
-          onGetSPL={(card) => {
-            getSuggestedQuery(card);
-            setExpandedCard(null);
-            setCardInvestigation(null);
-          }}
-          onFindSimilar={findSimilarLogs}
-          investigatingCard={investigatingCard}
-        />
+        {/* ============================================================ */}
+        {/* Investigate Tab — Search, Security, Indexes, Knowledge, Insights */}
+        {/* ============================================================ */}
+        <AnimatePresence>
+          {view === 'investigate' && (
+            <div className="space-y-4">
+              <SubNavPills
+                items={INVESTIGATE_PILLS}
+                value={investigateSubView}
+                onChange={setInvestigateSubView}
+              />
 
-        {/* Raw Logs Card */}
-        {showRawLogs && (
-          <div className="mt-6">
-            <RawLogsCard
-              logs={rawLogs}
-              maxLogs={maxLogs}
-              onSelectLog={setSelectedLog}
-            />
-          </div>
-        )}
+              {/* Search & SPL */}
+              {investigateSubView === 'search-spl' && (
+                <SplunkInvestigatePanel
+                  saiaAvailable={cc.saiaAvailable}
+                  loadingSaia={cc.loadingSaia}
+                  generatedSpl={cc.generatedSpl}
+                  splExplanation={cc.splExplanation}
+                  optimizedSpl={cc.optimizedSpl}
+                  onGenerateSpl={cc.generateSpl}
+                  onExplainSpl={cc.explainSpl}
+                  onOptimizeSpl={cc.optimizeSpl}
+                  loadingSearch={cc.loadingSearch}
+                  searchResults={cc.searchResults}
+                  onSearch={cc.searchLogs}
+                  correlatedDevices={cc.correlatedDevices}
+                  loadingCorrelation={cc.loadingCorrelation}
+                  onCorrelate={cc.correlateSearchResults}
+                  saiaAnswer={cc.saiaAnswer}
+                  onAskSplunk={cc.askSplunk}
+                  initialQuery={commandQuery}
+                />
+              )}
+
+              {/* Security */}
+              {investigateSubView === 'security' && (
+                <div className="space-y-4">
+                  <SplunkSecurityOverview
+                    insights={cc.insights}
+                    correlatedDevices={cc.correlatedDevices}
+                    merakiDevices={cc.merakiDevices}
+                    catalystDevices={cc.catalystDevices}
+                    totalEventCount={cc.totalEventCount}
+                    hostCount={cc.hostCount}
+                    loading={cc.loadingInsights && !cc.initialLoadComplete}
+                  />
+                  <SplunkNetworkSecurityPanel
+                    correlatedDevices={cc.correlatedDevices}
+                    merakiDevices={cc.merakiDevices}
+                    catalystDevices={cc.catalystDevices}
+                    insights={cc.insights}
+                    totalEventCount={cc.totalEventCount}
+                    loadingCorrelation={cc.loadingCorrelation}
+                    onAskAI={handleAskAI}
+                    onSearch={handleSecuritySearch}
+                  />
+                </div>
+              )}
+
+              {/* Indexes */}
+              {investigateSubView === 'indexes' && (
+                <div className="space-y-4">
+                  <SplunkIndexExplorer
+                    indexes={cc.indexes}
+                    indexDetails={cc.indexDetails}
+                    indexMetadata={cc.indexMetadata}
+                    loading={cc.loadingEnvironment}
+                    onFetchDetail={cc.fetchIndexDetail}
+                    onFetchMetadata={cc.fetchIndexMetadata}
+                  />
+                  <SplunkIndexChart
+                    indexes={cc.indexes}
+                    loading={cc.loadingEnvironment && !cc.initialLoadComplete}
+                    onIndexClick={() => {}}
+                  />
+                </div>
+              )}
+
+              {/* Knowledge */}
+              {investigateSubView === 'knowledge' && (
+                <SplunkKnowledgeBrowser
+                  objects={cc.knowledgeObjects}
+                  loading={cc.loadingKnowledge}
+                  onFetchObjects={cc.fetchKnowledgeObjects}
+                  onRunSearch={handleRunSavedSearch}
+                />
+              )}
+
+              {/* Insights */}
+              {investigateSubView === 'insights' && (
+                <div className="space-y-4">
+                  <InsightsGrid
+                    insights={cc.insights}
+                    loading={cc.loadingInsights}
+                    generating={false}
+                    showRawLogs={showRawLogs}
+                    onToggleRawLogs={handleToggleRawLogs}
+                    onInvestigate={investigateCard}
+                    onGetSPL={(card) => {
+                      getSuggestedQuery(card);
+                      setExpandedCard(null);
+                      setCardInvestigation(null);
+                    }}
+                    onFindSimilar={findSimilarLogs}
+                    investigatingCard={investigatingCard}
+                  />
+                  {showRawLogs && (
+                    <RawLogsCard
+                      logs={cc.rawLogs}
+                      maxLogs={100}
+                      onSelectLog={setSelectedLog}
+                    />
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </AnimatePresence>
       </div>
 
-      {/* Investigation Modal */}
+      {/* Modals */}
       {expandedCard && (
         <InvestigationModal
           insight={expandedCard}
@@ -497,7 +514,6 @@ Return ONLY a valid SPL query (no explanation). The query should help find relat
         />
       )}
 
-      {/* Log Detail Modal */}
       {selectedLog && (
         <LogDetailModal
           log={selectedLog}

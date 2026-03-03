@@ -106,8 +106,8 @@ export default function NotificationsPanel({ isOpen, onClose, onNotificationCoun
         notifs.push({
           id: 'system-welcome',
           type: 'info',
-          title: 'Welcome to Lumen',
-          message: 'Your network intelligence platform is ready',
+          title: 'Welcome to AI Ops Center',
+          message: 'Your intelligent network operations platform is ready',
           timestamp: new Date().toISOString(),
           read: true,
         });

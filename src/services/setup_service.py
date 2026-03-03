@@ -342,7 +342,7 @@ class SetupService:
             password: Admin password (will be hashed)
 
         Returns:
-            Status dict with success and user info
+            Status dict with success, user info, and recovery_key
         """
         from src.services.auth_service import AuthService
 
@@ -352,8 +352,6 @@ class SetupService:
                 "success": False,
                 "error": "Password must be at least 8 characters",
             }
-
-        auth_service = AuthService()
 
         try:
             async with self.db.session() as session:
@@ -370,6 +368,9 @@ class SetupService:
                         return {"success": False, "error": "Username already exists"}
                     return {"success": False, "error": "Email already exists"}
 
+                # Generate recovery key
+                plain_key, hashed_key = AuthService.generate_recovery_key()
+
                 # Create admin user - use bcrypt directly due to passlib compatibility issue
                 import bcrypt
                 password_bytes = password.encode('utf-8')[:72]
@@ -383,6 +384,7 @@ class SetupService:
                     is_active=True,
                     is_super_admin=True,  # First admin is super admin with all permissions
                     created_at=datetime.utcnow(),
+                    recovery_key_hash=hashed_key,
                 )
 
                 session.add(admin)
@@ -397,6 +399,7 @@ class SetupService:
                         "email": admin.email,
                         "role": admin.role,
                     },
+                    "recovery_key": plain_key,
                     "message": "Admin user created successfully",
                 }
         except Exception as e:

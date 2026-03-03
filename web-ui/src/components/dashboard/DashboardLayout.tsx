@@ -96,7 +96,7 @@ export const DashboardLayout = memo(({
                   </div>
                 </div>
                 <Link
-                  href="/network"
+                  href="/chat-v2"
                   className="p-2 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
                   title="Open full chat view"
                 >

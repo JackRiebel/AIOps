@@ -76,6 +76,7 @@ class AISession(Base):
 
     # Relationships
     events = relationship("AISessionEvent", back_populates="session", cascade="all, delete-orphan")
+    artifacts = relationship("CanvasArtifact", back_populates="session", cascade="all, delete-orphan")
 
 
 class AISessionEvent(Base):

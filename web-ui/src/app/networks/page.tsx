@@ -403,7 +403,7 @@ export default function NetworksManagementPage() {
     if (context) {
       sessionStorage.setItem('ai_initial_message', context);
     }
-    router.push('/network');
+    router.push('/chat-v2');
   }, [router]);
 
   const navigateToDevices = useCallback((orgName?: string, networkId?: string) => {

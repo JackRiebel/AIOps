@@ -62,6 +62,16 @@ def validate_network_id(network_id: Optional[str]) -> Tuple[bool, Optional[str]]
     )
 
 
+def _validate_context(context: Any) -> Dict:
+    """Validate that context has a Meraki client configured."""
+    if not hasattr(context, 'client') or context.client is None:
+        return {
+            "success": False,
+            "error": "Meraki API credentials not configured. Please configure your Meraki API key in Settings > Integrations."
+        }
+    return None
+
+
 # =============================================================================
 # HANDLERS
 # =============================================================================
@@ -69,6 +79,7 @@ def validate_network_id(network_id: Optional[str]) -> Tuple[bool, Optional[str]]
 async def handle_wireless_list_ssids(params: Dict, context: Any) -> Dict:
     """Handler for List SSIDs."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         is_valid, error_msg = validate_network_id(network_id)
         if not is_valid:
@@ -85,6 +96,7 @@ async def handle_wireless_list_ssids(params: Dict, context: Any) -> Dict:
 async def handle_wireless_get_ssid(params: Dict, context: Any) -> Dict:
     """Handler for Get SSID."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         number = params.get("number")
         if not network_id:
@@ -103,6 +115,7 @@ async def handle_wireless_get_ssid(params: Dict, context: Any) -> Dict:
 async def handle_wireless_update_ssid(params: Dict, context: Any) -> Dict:
     """Handler for Update SSID."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         number = params.get("number")
         if not network_id:
@@ -123,6 +136,7 @@ async def handle_wireless_update_ssid(params: Dict, context: Any) -> Dict:
 async def handle_wireless_get_ssid_splash_settings(params: Dict, context: Any) -> Dict:
     """Handler for Get SSID Splash Settings."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         number = params.get("number")
         if not network_id:
@@ -141,6 +155,7 @@ async def handle_wireless_get_ssid_splash_settings(params: Dict, context: Any) -
 async def handle_wireless_update_ssid_splash_settings(params: Dict, context: Any) -> Dict:
     """Handler for Update SSID Splash Settings."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         number = params.get("number")
         if not network_id:
@@ -160,6 +175,7 @@ async def handle_wireless_update_ssid_splash_settings(params: Dict, context: Any
 async def handle_wireless_get_ssid_firewall_rules(params: Dict, context: Any) -> Dict:
     """Handler for Get SSID Firewall Rules."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         number = params.get("number")
         if not network_id:
@@ -178,6 +194,7 @@ async def handle_wireless_get_ssid_firewall_rules(params: Dict, context: Any) ->
 async def handle_wireless_update_ssid_firewall_rules(params: Dict, context: Any) -> Dict:
     """Handler for Update SSID Firewall Rules."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         number = params.get("number")
         if not network_id:
@@ -197,6 +214,7 @@ async def handle_wireless_update_ssid_firewall_rules(params: Dict, context: Any)
 async def handle_wireless_get_ssid_traffic_shaping(params: Dict, context: Any) -> Dict:
     """Handler for Get SSID Traffic Shaping."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         number = params.get("number")
         if not network_id:
@@ -215,6 +233,7 @@ async def handle_wireless_get_ssid_traffic_shaping(params: Dict, context: Any) -
 async def handle_wireless_update_ssid_traffic_shaping(params: Dict, context: Any) -> Dict:
     """Handler for Update SSID Traffic Shaping."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         number = params.get("number")
         if not network_id:
@@ -234,6 +253,7 @@ async def handle_wireless_update_ssid_traffic_shaping(params: Dict, context: Any
 async def handle_wireless_list_rf_profiles(params: Dict, context: Any) -> Dict:
     """Handler for List RF Profiles."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         is_valid, error_msg = validate_network_id(network_id)
         if not is_valid:
@@ -251,6 +271,7 @@ async def handle_wireless_list_rf_profiles(params: Dict, context: Any) -> Dict:
 async def handle_wireless_create_rf_profile(params: Dict, context: Any) -> Dict:
     """Handler for Create RF Profile."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -267,6 +288,7 @@ async def handle_wireless_create_rf_profile(params: Dict, context: Any) -> Dict:
 async def handle_wireless_get_rf_profile(params: Dict, context: Any) -> Dict:
     """Handler for Get RF Profile."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         rf_profile_id = params.get("rf_profile_id")
         if not network_id:
@@ -285,6 +307,7 @@ async def handle_wireless_get_rf_profile(params: Dict, context: Any) -> Dict:
 async def handle_wireless_update_rf_profile(params: Dict, context: Any) -> Dict:
     """Handler for Update RF Profile."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         rf_profile_id = params.get("rf_profile_id")
         if not network_id:
@@ -304,6 +327,7 @@ async def handle_wireless_update_rf_profile(params: Dict, context: Any) -> Dict:
 async def handle_wireless_delete_rf_profile(params: Dict, context: Any) -> Dict:
     """Handler for Delete RF Profile."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         rf_profile_id = params.get("rf_profile_id")
         if not network_id:
@@ -322,6 +346,7 @@ async def handle_wireless_delete_rf_profile(params: Dict, context: Any) -> Dict:
 async def handle_wireless_get_bluetooth_settings(params: Dict, context: Any) -> Dict:
     """Handler for Get Bluetooth Settings."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -337,6 +362,7 @@ async def handle_wireless_get_bluetooth_settings(params: Dict, context: Any) -> 
 async def handle_wireless_update_bluetooth_settings(params: Dict, context: Any) -> Dict:
     """Handler for Update Bluetooth Settings."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -353,6 +379,7 @@ async def handle_wireless_update_bluetooth_settings(params: Dict, context: Any) 
 async def handle_wireless_get_device_bluetooth(params: Dict, context: Any) -> Dict:
     """Handler for Get Device Bluetooth Settings."""
     try:
+        if err := _validate_context(context): return err
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -368,6 +395,7 @@ async def handle_wireless_get_device_bluetooth(params: Dict, context: Any) -> Di
 async def handle_wireless_update_device_bluetooth(params: Dict, context: Any) -> Dict:
     """Handler for Update Device Bluetooth Settings."""
     try:
+        if err := _validate_context(context): return err
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -384,6 +412,7 @@ async def handle_wireless_update_device_bluetooth(params: Dict, context: Any) ->
 async def handle_wireless_get_air_marshal(params: Dict, context: Any) -> Dict:
     """Handler for Get Air Marshal Data."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -400,6 +429,7 @@ async def handle_wireless_get_air_marshal(params: Dict, context: Any) -> Dict:
 async def handle_wireless_get_air_marshal_settings(params: Dict, context: Any) -> Dict:
     """Handler for Get Air Marshal Settings."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -415,6 +445,7 @@ async def handle_wireless_get_air_marshal_settings(params: Dict, context: Any) -
 async def handle_wireless_update_air_marshal_settings(params: Dict, context: Any) -> Dict:
     """Handler for Update Air Marshal Settings."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -431,6 +462,7 @@ async def handle_wireless_update_air_marshal_settings(params: Dict, context: Any
 async def handle_wireless_list_air_marshal_rules(params: Dict, context: Any) -> Dict:
     """Handler for List Air Marshal Rules."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -446,6 +478,7 @@ async def handle_wireless_list_air_marshal_rules(params: Dict, context: Any) -> 
 async def handle_wireless_create_air_marshal_rule(params: Dict, context: Any) -> Dict:
     """Handler for Create Air Marshal Rule."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -462,6 +495,7 @@ async def handle_wireless_create_air_marshal_rule(params: Dict, context: Any) ->
 async def handle_wireless_get_connection_stats(params: Dict, context: Any) -> Dict:
     """Handler for Get Wireless Connection Stats."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         logger.info(f"[Wireless] get_connection_stats called with network_id={network_id}")
 
@@ -494,6 +528,7 @@ async def handle_wireless_get_connection_stats(params: Dict, context: Any) -> Di
 async def handle_wireless_get_clients_connection_stats(params: Dict, context: Any) -> Dict:
     """Handler for Get Clients Connection Stats."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         is_valid, error_msg = validate_network_id(network_id)
         if not is_valid:
@@ -511,6 +546,7 @@ async def handle_wireless_get_clients_connection_stats(params: Dict, context: An
 async def handle_wireless_get_device_connection_stats(params: Dict, context: Any) -> Dict:
     """Handler for Get Device Connection Stats."""
     try:
+        if err := _validate_context(context): return err
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -527,6 +563,7 @@ async def handle_wireless_get_device_connection_stats(params: Dict, context: Any
 async def handle_wireless_get_failed_connections(params: Dict, context: Any) -> Dict:
     """Handler for Get Failed Connections."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         logger.info(f"[Wireless] get_failed_connections called with network_id={network_id}")
 
@@ -555,6 +592,7 @@ async def handle_wireless_get_failed_connections(params: Dict, context: Any) -> 
 async def handle_wireless_get_latency_stats(params: Dict, context: Any) -> Dict:
     """Handler for Get Wireless Latency Stats."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         logger.info(f"[Wireless] get_latency_stats called with network_id={network_id}")
 
@@ -586,6 +624,7 @@ async def handle_wireless_get_latency_stats(params: Dict, context: Any) -> Dict:
 async def handle_wireless_get_latency_history(params: Dict, context: Any) -> Dict:
     """Handler for Get Wireless Latency History."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         is_valid, error_msg = validate_network_id(network_id)
         if not is_valid:
@@ -603,6 +642,7 @@ async def handle_wireless_get_latency_history(params: Dict, context: Any) -> Dic
 async def handle_wireless_get_client_latency_stats(params: Dict, context: Any) -> Dict:
     """Handler for Get Client Latency Stats."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         client_id = params.get("client_id")
         is_valid, error_msg = validate_network_id(network_id)
@@ -623,6 +663,7 @@ async def handle_wireless_get_client_latency_stats(params: Dict, context: Any) -
 async def handle_wireless_get_device_radio_settings(params: Dict, context: Any) -> Dict:
     """Handler for Get Device Radio Settings."""
     try:
+        if err := _validate_context(context): return err
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -638,6 +679,7 @@ async def handle_wireless_get_device_radio_settings(params: Dict, context: Any) 
 async def handle_wireless_update_device_radio_settings(params: Dict, context: Any) -> Dict:
     """Handler for Update Device Radio Settings."""
     try:
+        if err := _validate_context(context): return err
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -654,6 +696,7 @@ async def handle_wireless_update_device_radio_settings(params: Dict, context: An
 async def handle_wireless_get_channel_utilization(params: Dict, context: Any) -> Dict:
     """Handler for Get Channel Utilization."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         is_valid, error_msg = validate_network_id(network_id)
         if not is_valid:
@@ -677,6 +720,7 @@ async def handle_wireless_get_channel_utilization(params: Dict, context: Any) ->
 async def handle_wireless_get_device_channel_utilization(params: Dict, context: Any) -> Dict:
     """Handler for Get Device Channel Utilization."""
     try:
+        if err := _validate_context(context): return err
         serial = params.get("serial")
         if not serial:
             return {"success": False, "error": "serial is required"}
@@ -696,6 +740,7 @@ async def handle_wireless_get_device_channel_utilization(params: Dict, context: 
 async def handle_wireless_get_mesh_statuses(params: Dict, context: Any) -> Dict:
     """Handler for Get Mesh Statuses."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -712,6 +757,7 @@ async def handle_wireless_get_mesh_statuses(params: Dict, context: Any) -> Dict:
 async def handle_wireless_get_settings(params: Dict, context: Any) -> Dict:
     """Handler for Get Wireless Settings."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -727,6 +773,7 @@ async def handle_wireless_get_settings(params: Dict, context: Any) -> Dict:
 async def handle_wireless_update_settings(params: Dict, context: Any) -> Dict:
     """Handler for Update Wireless Settings."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -743,6 +790,7 @@ async def handle_wireless_update_settings(params: Dict, context: Any) -> Dict:
 async def handle_wireless_get_signal_quality_history(params: Dict, context: Any) -> Dict:
     """Handler for Get Signal Quality History."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -759,6 +807,7 @@ async def handle_wireless_get_signal_quality_history(params: Dict, context: Any)
 async def handle_wireless_get_usage_history(params: Dict, context: Any) -> Dict:
     """Handler for Get Wireless Usage History."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -775,6 +824,7 @@ async def handle_wireless_get_usage_history(params: Dict, context: Any) -> Dict:
 async def handle_wireless_get_data_rate_history(params: Dict, context: Any) -> Dict:
     """Handler for Get Wireless Data Rate History."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         if not network_id:
             return {"success": False, "error": "network_id is required"}
@@ -791,6 +841,7 @@ async def handle_wireless_get_data_rate_history(params: Dict, context: Any) -> D
 async def handle_wireless_get_client_count_history(params: Dict, context: Any) -> Dict:
     """Handler for Get Client Count History."""
     try:
+        if err := _validate_context(context): return err
         network_id = params.get("network_id")
         is_valid, error_msg = validate_network_id(network_id)
         if not is_valid:

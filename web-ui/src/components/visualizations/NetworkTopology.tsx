@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
+import ReactMarkdown from 'react-markdown';
 import { apiClient } from '@/lib/api-client';
 import {
   TopologyNode,
@@ -180,8 +181,40 @@ export default function NetworkTopology({ organization, networkId, networkName }
         serial: device.serial,
         lanIp: device.lanIp,
         wan1Ip: device.wan1Ip,
+        firmware: device.firmware,
         healthData: healthData,
       };
+
+      // Extract unique incidents from device events
+      const incidentMap = new Map<number, { id: number; title: string; status: string; severity: string }>();
+      deviceEvents.forEach(event => {
+        if (event.incident && event.incident_id) {
+          if (!incidentMap.has(event.incident_id)) {
+            incidentMap.set(event.incident_id, {
+              id: event.incident_id,
+              title: event.incident.title || event.title,
+              status: event.incident.status || 'open',
+              severity: event.incident.severity || event.severity,
+            });
+          }
+        }
+      });
+      const incidents = Array.from(incidentMap.values());
+
+      // Get connected devices from edges
+      const connectedDevices = edges
+        .filter(edge => edge.source === device.id || edge.target === device.id)
+        .map(edge => {
+          const connectedId = edge.source === device.id ? edge.target : edge.source;
+          const connectedNode = nodes.find(n => n.id === connectedId);
+          return connectedNode ? {
+            name: connectedNode.name,
+            model: connectedNode.model,
+            type: connectedNode.type,
+            status: connectedNode.status,
+          } : null;
+        })
+        .filter(Boolean);
 
       // Call AI analysis endpoint
       const response = await fetch('/api/ai/analyze-device', {
@@ -192,6 +225,9 @@ export default function NetworkTopology({ organization, networkId, networkName }
           device: deviceContext,
           organization,
           networkId,
+          networkName,
+          incidents,
+          connections: connectedDevices,
         }),
       });
 
@@ -199,16 +235,26 @@ export default function NetworkTopology({ organization, networkId, networkName }
         const result = await response.json();
         setAiAnalysis(result.analysis);
       } else {
-        // Fallback to local analysis
-        setAiAnalysis(generateLocalAnalysis(device, healthData));
+        // Log the error and try to get error details
+        let errorDetail = '';
+        try {
+          const errorJson = await response.json();
+          // Handle both standard FastAPI format (detail) and custom format (error)
+          errorDetail = errorJson.detail || errorJson.error || JSON.stringify(errorJson);
+        } catch {
+          errorDetail = await response.text();
+        }
+        console.error('AI analysis API error:', response.status, errorDetail);
+        // Show error message with details
+        setAiAnalysis(`**Analysis Error (${response.status})**\n\n${errorDetail}`);
       }
     } catch (err) {
       console.error('AI analysis failed:', err);
-      setAiAnalysis(generateLocalAnalysis(device, null));
+      setAiAnalysis(`**Analysis Error**\n\nFailed to connect to AI service: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
       setAiLoading(false);
     }
-  }, [organization, networkId]);
+  }, [organization, networkId, networkName, deviceEvents, edges, nodes]);
 
   // Fetch device events/incidents
   const fetchDeviceEvents = useCallback(async (device: TopologyNode) => {
@@ -744,7 +790,9 @@ export default function NetworkTopology({ organization, networkId, networkName }
 
                 {aiAnalysis ? (
                   <div className="p-3 rounded-lg bg-purple-500/10 border border-purple-500/20 hover:bg-purple-500/15 hover:border-purple-500/30 transition-colors cursor-default">
-                    <div className="text-sm theme-text-secondary whitespace-pre-wrap">{aiAnalysis}</div>
+                    <div className="text-sm theme-text-secondary prose prose-sm dark:prose-invert prose-headings:text-sm prose-headings:font-semibold prose-headings:mb-1 prose-headings:mt-2 prose-p:my-1 prose-ul:my-1 prose-li:my-0 max-w-none">
+                      <ReactMarkdown>{aiAnalysis}</ReactMarkdown>
+                    </div>
                   </div>
                 ) : (
                   <div className="p-3 rounded-lg theme-bg-primary border theme-border hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors cursor-default">

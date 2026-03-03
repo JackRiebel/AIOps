@@ -1,7 +1,7 @@
 'use client';
 
 import { memo } from 'react';
-import { DollarSign, Lightbulb, BarChart3, Sparkles } from 'lucide-react';
+import { DollarSign, Lightbulb, BarChart3, Sparkles, Globe } from 'lucide-react';
 import type { CostsTabType } from './types';
 
 // ============================================================================
@@ -28,13 +28,13 @@ export const CostsTabBar = memo(({
   const getTabClasses = (tab: CostsTabType) =>
     `px-4 py-2 text-sm font-medium rounded-lg transition-all flex items-center gap-2 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 ${
       activeTab === tab
-        ? 'bg-gradient-to-r from-purple-600 to-cyan-600 text-white shadow-sm'
+        ? 'bg-cyan-600 dark:bg-cyan-500 text-white shadow-sm'
         : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-700/50'
     }`;
 
   return (
     <div
-      className={`flex gap-1 p-1 bg-slate-100 dark:bg-slate-800/50 rounded-lg w-fit ${className}`}
+      className={`flex gap-1 p-1 bg-slate-100/80 dark:bg-slate-800/40 rounded-xl w-fit ${className}`}
       role="tablist"
       aria-label="Cost analysis views"
     >
@@ -89,6 +89,16 @@ export const CostsTabBar = memo(({
       >
         <Sparkles className="w-4 h-4" aria-hidden="true" />
         Agentic RAG
+      </button>
+      <button
+        onClick={() => onTabChange('network')}
+        className={getTabClasses('network')}
+        role="tab"
+        aria-selected={activeTab === 'network'}
+        aria-controls="tabpanel-network"
+      >
+        <Globe className="w-4 h-4" aria-hidden="true" />
+        Network
       </button>
     </div>
   );

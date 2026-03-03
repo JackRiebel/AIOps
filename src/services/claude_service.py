@@ -75,13 +75,15 @@ class ClaudeNetworkAssistant:
         self.orchestrator = AgentOrchestrator(self.agent_registry)
         logger.info("[A2A] Agent orchestrator initialized with Knowledge and Implementation agents")
 
-    def generate_simple_response(self, prompt: str, max_tokens: int = 2000) -> str:
+    async def generate_simple_response(self, prompt: str, max_tokens: int = 2000) -> str:
         """Generate a simple response without tools (for reports, summaries, etc.)."""
-        response = self.client.messages.create(
+        import asyncio
+        response = await asyncio.to_thread(
+            self.client.messages.create,
             model=self.model,
             max_tokens=max_tokens,
             temperature=self.temperature,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
         )
         return response.content[0].text if response.content else ""
 
@@ -1007,6 +1009,23 @@ class ClaudeNetworkAssistant:
                         }
                     },
                     "required": ["serial"]
+                }
+            },
+            {
+                "name": "analyze_network_wireless",
+                "description": "Comprehensive wireless analysis for a network. Accepts network NAME or ID - automatically resolves names. Returns AP inventory, SSIDs, channel utilization, and health recommendations. Use this when users ask to 'analyze wireless' for a specific network.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "network_name": {
+                            "type": "string",
+                            "description": "Network name (e.g., 'Demo Home'). Will be resolved to network_id."
+                        },
+                        "network_id": {
+                            "type": "string",
+                            "description": "Network ID if already known"
+                        }
+                    }
                 }
             },
             {
@@ -2719,6 +2738,72 @@ The Knowledge Agent will return:
                     else:
                         return {"success": False, "error": f"HTTP {response.status_code} - {response.text}"}
 
+                elif tool_name == "analyze_network_wireless":
+                    # Comprehensive wireless analysis - handles network name resolution
+                    network_name = tool_input.get("network_name")
+                    network_id = tool_input.get("network_id")
+
+                    # Resolve network name to ID if needed
+                    if network_name and not network_id:
+                        nets_response = await client.get(f"{base_url}/organizations/{org_id}/networks", headers=headers)
+                        if nets_response.status_code == 200:
+                            networks = nets_response.json()
+                            name_lower = network_name.lower()
+                            matches = [n for n in networks if name_lower in n.get("name", "").lower()]
+                            if matches:
+                                target = next((n for n in matches if n.get("name", "").lower() == name_lower), matches[0])
+                                network_id = target["id"]
+                                network_name = target.get("name", network_name)
+                            else:
+                                available = [n.get("name", "Unknown") for n in networks[:10]]
+                                return {"success": False, "error": f"No network found matching '{network_name}'. Available: {', '.join(available)}"}
+                        else:
+                            return {"success": False, "error": f"Failed to list networks: HTTP {nets_response.status_code}"}
+
+                    if not network_id:
+                        return {"success": False, "error": "Either network_name or network_id is required"}
+
+                    # Get devices and filter for wireless APs
+                    analysis = {"network_id": network_id, "network_name": network_name or "Unknown", "wireless_devices": [], "ssids": [], "summary": ""}
+
+                    try:
+                        # Get network name if not already known
+                        if not network_name or network_name == "Unknown":
+                            net_response = await client.get(f"{base_url}/networks/{network_id}", headers=headers)
+                            if net_response.status_code == 200:
+                                analysis["network_name"] = net_response.json().get("name", "Unknown")
+
+                        # Get devices
+                        dev_response = await client.get(f"{base_url}/networks/{network_id}/devices", headers=headers)
+                        if dev_response.status_code == 200:
+                            devices = dev_response.json()
+                            wireless_devices = [d for d in devices if d.get("model", "").startswith(("MR", "CW", "GR"))]
+                            analysis["wireless_devices"] = [{"name": d.get("name", d.get("serial")), "serial": d.get("serial"), "model": d.get("model")} for d in wireless_devices]
+                            analysis["total_devices"] = len(devices)
+                            analysis["device_breakdown"] = {
+                                "wireless_aps": len(wireless_devices),
+                                "switches": len([d for d in devices if d.get("model", "").startswith("MS")]),
+                                "appliances": len([d for d in devices if d.get("model", "").startswith(("MX", "Z"))]),
+                            }
+
+                        # Get SSIDs
+                        ssid_response = await client.get(f"{base_url}/networks/{network_id}/wireless/ssids", headers=headers)
+                        if ssid_response.status_code == 200:
+                            ssids = ssid_response.json()
+                            analysis["ssids"] = [{"name": s.get("name"), "enabled": s.get("enabled"), "number": s.get("number")} for s in ssids if s.get("enabled")]
+
+                        # Build summary
+                        ap_count = len(analysis["wireless_devices"])
+                        ssid_count = len(analysis["ssids"])
+                        if ap_count == 0:
+                            analysis["summary"] = f"Network '{analysis['network_name']}' has {analysis.get('total_devices', 0)} total devices but no wireless APs (MR/CW/GR). Device breakdown: {analysis.get('device_breakdown', {})}"
+                        else:
+                            analysis["summary"] = f"Network '{analysis['network_name']}' has {ap_count} wireless AP(s) broadcasting {ssid_count} SSID(s)."
+
+                        return {"success": True, "data": analysis, "summary": analysis["summary"]}
+                    except Exception as e:
+                        return {"success": False, "error": f"Wireless analysis failed: {e}"}
+
                 elif tool_name == "get_wireless_channel_utilization":
                     network_id = tool_input.get("network_id")
                     timespan = tool_input.get("timespan", 86400)
@@ -3048,7 +3133,7 @@ CURRENT CONTEXT:
 
 PLATFORM ARCHITECTURE - UNDERSTAND THIS:
 • Organization = Top-level container (what you're currently in: "{org_name}")
-• Network = Logical grouping within an organization (e.g., "Riebel Home", "Office Network")
+• Network = Logical grouping within an organization (e.g., "Demo Home", "Office Network")
 • Devices = Physical hardware (APs, switches, cameras, sensors) - belong to a network
 • Clients = End-user devices connected to the network (laptops, phones, IoT devices)
 
@@ -3112,14 +3197,16 @@ You are an ACTION-ORIENTED assistant. When users ask for ANY information, you MU
 
 COMMON REQUESTS → IMMEDIATE TOOL CALLS:
 • "get my networks" / "show networks" / "list networks" → call list_networks
-• "get Riebel Home" / "show me [network name]" → call get_network_by_name with the name
+• "get Demo Home" / "show me [network name]" → call get_network_by_name with the name
 • "show devices" / "what devices" → call list_devices
 • "devices in [network]" → call get_devices_in_network_by_name
 • "show SSIDs" / "wireless networks" → call list_ssids
 • "show clients" → call list_clients
 • "network health" → call get_organization_overview
+• **"analyze wireless" / "wireless health" for [network]** → call **analyze_network_wireless** with network_name
 
 TOOL USAGE GUIDELINES:
+• **Wireless Analysis**: Use **analyze_network_wireless** - accepts network NAME directly, handles resolution, and returns comprehensive wireless data (APs, SSIDs, channel utilization)
 • **Devices in a Network by Name**: Use **get_devices_in_network_by_name** - finds the network AND lists all devices in one call
 • **Network Lookups Only**: Use get_network_by_name when you only need network info (not devices)
 • For specialized Meraki functions not in standard tools, use discover_meraki_functions to search, then call_meraki_sdk_function
@@ -3159,7 +3246,16 @@ System mode: {edit_mode_text}"""
             requires_confirmation = False
             pending_implementation = None
 
+            # Maximum tool-call iterations to prevent infinite loops and bound costs
+            MAX_TOOL_ITERATIONS = 15
+            tool_iterations = 0
+
             while response.stop_reason == "tool_use":
+                tool_iterations += 1
+                if tool_iterations > MAX_TOOL_ITERATIONS:
+                    logger.warning(f"[Claude] Hit tool iteration limit ({MAX_TOOL_ITERATIONS}), forcing text response")
+                    break
+
                 tool_uses = [block for block in response.content if block.type == "tool_use"]
                 tool_results = []
 
@@ -3419,7 +3515,7 @@ You are an ACTION-ORIENTED assistant. When users ask for ANY information, you MU
 
 COMMON REQUESTS → IMMEDIATE TOOL CALLS:
 • "get my networks" / "show networks" / "list networks" → call list_networks
-• "get Riebel Home" / "show me [network name]" → call get_network_by_name with the name
+• "get Demo Home" / "show me [network name]" → call get_network_by_name with the name
 • "show devices" / "what devices" → call list_devices
 • "devices in [network]" → call get_devices_in_network_by_name
 • "show SSIDs" / "wireless networks" → call list_ssids
