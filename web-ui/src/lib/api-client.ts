@@ -263,7 +263,7 @@ export const apiClient = {
 
   // AI Settings
   async getAvailableModels() {
-    return request<string[]>('/api/ai/models');
+    return request<{ models: string[] }>('/api/ai/models');
   },
 
   async getUserModel() {
