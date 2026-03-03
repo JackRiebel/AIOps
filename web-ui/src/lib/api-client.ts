@@ -263,7 +263,7 @@ export const apiClient = {
 
   // AI Settings
   async getAvailableModels() {
-    return request<{ models: string[] }>('/api/ai/models');
+    return request<{ models: Array<{ id: string; name: string; description: string; provider: string; cost_input_1k: number; cost_output_1k: number; speed: number; capability: number; context_window: number; best_for: string[]; key_source?: string }> }>('/api/ai/models');
   },
 
   async getUserModel() {
@@ -289,7 +289,7 @@ export const apiClient = {
   },
 
   async getAPIKeyStatus() {
-    return request<{ configured: boolean; provider: string }>('/api/ai/key-status');
+    return request<Record<string, { user_key_set: boolean; admin_key_available: boolean }>>('/api/ai/key-status');
   },
 
   // Setup
