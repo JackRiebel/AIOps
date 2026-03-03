@@ -573,13 +573,27 @@ install_python_deps() {
     fi
 
     # Pre-download the local embedding model (first-time only, ~90MB)
+    # This is optional — the app will work without it (falls back to API-based embeddings)
     print_step "Checking local embedding model..."
+
+    # Fix macOS Python SSL certificates (common issue with Homebrew/python.org installs)
+    CERT_FILE=$(python3 -c "import certifi; print(certifi.where())" 2>/dev/null || true)
+    if [ -n "$CERT_FILE" ]; then
+        export SSL_CERT_FILE="$CERT_FILE"
+        export REQUESTS_CA_BUNDLE="$CERT_FILE"
+    fi
+
     if python3 -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('intfloat/e5-small-v2')" 2>/dev/null; then
         print_success "Embedding model available"
     else
         print_step "Downloading embedding model (first-time only, ~90MB)..."
-        python3 -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('intfloat/e5-small-v2')" 2>&1 | tee -a "$LOG_FILE"
-        print_success "Embedding model downloaded"
+        if python3 -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('intfloat/e5-small-v2')" >> "$LOG_FILE" 2>&1; then
+            print_success "Embedding model downloaded"
+        else
+            print_warning "Could not download embedding model (SSL issue) — skipping"
+            print_info "The app will use API-based embeddings instead"
+            print_info "To fix: run 'pip install certifi' and retry, or set SSL_CERT_FILE"
+        fi
     fi
 }
 
@@ -635,12 +649,15 @@ build_frontend() {
     fi
 
     print_step "Building frontend for production (this may take 30-60 seconds)..."
+    set +e
     npm run build >> "$LOG_FILE" 2>&1
+    BUILD_EXIT=$?
+    set -e
 
-    if [ $? -ne 0 ]; then
+    if [ $BUILD_EXIT -ne 0 ]; then
         print_error "Frontend build failed - check $LOG_FILE for errors"
-        print_info "Last 20 lines of build log:"
-        tail -20 "$LOG_FILE" 2>/dev/null || true
+        print_info "Last 30 lines of build log:"
+        tail -30 "$LOG_FILE" 2>/dev/null || true
         exit 1
     fi
 
