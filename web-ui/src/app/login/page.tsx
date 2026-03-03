@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
@@ -26,7 +26,7 @@ interface SetupStatus {
   };
 }
 
-export default function LoginPage() {
+function LoginContent() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -100,6 +100,12 @@ export default function LoginPage() {
       setError('OAuth login failed. Please try again or use username/password.');
     } else if (errorParam === 'no_account') {
       setError('No account exists for this email. Please contact an administrator to create your account.');
+    } else if (errorParam === 'invalid_state') {
+      setError('OAuth session expired. Please try again.');
+    } else if (errorParam === 'missing_params') {
+      setError('OAuth callback was missing required parameters. Please try again.');
+    } else if (errorParam) {
+      setError(`Authentication error: ${errorParam}. Please try again.`);
     }
   }, [searchParams]);
 
@@ -321,8 +327,8 @@ export default function LoginPage() {
                 </svg>
               </div>
               <div>
-                <h1 className="text-3xl font-bold text-slate-900 dark:text-white">Lumen</h1>
-                <p className="text-cyan-600 dark:text-cyan-400 font-medium">Illuminating Your Network</p>
+                <h1 className="text-3xl font-bold text-slate-900 dark:text-white">AI Ops Center</h1>
+                <p className="text-cyan-600 dark:text-cyan-400 font-medium">Intelligent Network Operations</p>
               </div>
             </div>
           </div>
@@ -330,11 +336,11 @@ export default function LoginPage() {
           {/* Headline */}
           <div className="mb-10">
             <h2 className="text-3xl xl:text-4xl font-bold text-slate-900 dark:text-white leading-tight mb-4">
-              Illuminate your network.<br />
+              Intelligent network ops.<br />
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-600 to-purple-600 dark:from-cyan-400 dark:to-purple-400">Just ask.</span>
             </h2>
             <p className="text-slate-600 dark:text-slate-400 text-lg">
-              Skip the CLI and vendor dashboards. Lumen lets you query, troubleshoot, and take action across your entire infrastructure — through simple conversation.
+              Powered by Cisco APIs, MCP servers, and AI — scale your infrastructure operations without sacrificing the quality of support your network demands.
             </p>
           </div>
 
@@ -412,8 +418,8 @@ export default function LoginPage() {
                 </svg>
               </div>
             </div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Lumen</h1>
-            <p className="text-cyan-600 dark:text-cyan-400 text-sm font-medium">Illuminating Your Network</p>
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white">AI Ops Center</h1>
+            <p className="text-cyan-600 dark:text-cyan-400 text-sm font-medium">Intelligent Network Operations</p>
           </div>
 
           {/* Login Card */}
@@ -562,7 +568,7 @@ export default function LoginPage() {
                     href="/register"
                     className="text-cyan-600 dark:text-cyan-400 hover:text-cyan-500 dark:hover:text-cyan-300 font-medium text-sm transition"
                   >
-                    Set up Lumen
+                    Set up AI Ops Center
                   </Link>
                 </div>
               </div>
@@ -572,11 +578,32 @@ export default function LoginPage() {
           {/* Footer */}
           <div className="mt-8 text-center">
             <p className="text-xs text-slate-500 dark:text-slate-600">
-              Lumen &bull; Illuminating your network with AI
+              AI Ops Center &bull; Intelligent network operations
             </p>
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+// Loading fallback for Suspense
+function LoginFallback() {
+  return (
+    <div className="min-h-screen bg-slate-100 dark:bg-slate-950 flex items-center justify-center">
+      <div className="text-center">
+        <div className="w-16 h-16 mx-auto border-4 border-cyan-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+        <p className="text-slate-600 dark:text-slate-300 text-lg">Loading...</p>
+      </div>
+    </div>
+  );
+}
+
+// Wrap in Suspense for useSearchParams
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<LoginFallback />}>
+      <LoginContent />
+    </Suspense>
   );
 }
