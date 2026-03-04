@@ -23,9 +23,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // Register global session expiration handler
     // This will be called when any API request returns 401
+    // Don't redirect if already on a public page (avoids redirect loops on fresh install)
     setSessionExpiredHandler(() => {
       setUser(null);
-      router.push('/login');
+      const path = window.location.pathname;
+      const isPublic = path === '/login' || path === '/register' || path === '/setup' || path.startsWith('/setup/');
+      if (!isPublic) {
+        router.push('/login');
+      }
     });
 
     checkAuth();

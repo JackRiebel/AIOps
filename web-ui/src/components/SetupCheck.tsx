@@ -22,8 +22,8 @@ export function SetupCheck({ children }: SetupCheckProps) {
   const [setupRequired, setSetupRequired] = useState(false);
 
   useEffect(() => {
-    // Don't check on setup pages or registration
-    if (pathname === '/setup' || pathname.startsWith('/setup/') || pathname === '/register') {
+    // Don't check on setup pages, login, or registration
+    if (pathname === '/setup' || pathname.startsWith('/setup/') || pathname === '/register' || pathname === '/login') {
       setChecking(false);
       return;
     }
@@ -56,7 +56,7 @@ export function SetupCheck({ children }: SetupCheckProps) {
   }, [pathname, router]);
 
   // Pages that bypass setup check entirely
-  const bypassPages = ['/setup', '/register'];
+  const bypassPages = ['/setup', '/register', '/login'];
   const isBypassPage = bypassPages.includes(pathname) || pathname.startsWith('/setup/');
 
   // Show loading state while checking setup
