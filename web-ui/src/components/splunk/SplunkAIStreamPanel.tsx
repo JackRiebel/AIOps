@@ -209,7 +209,7 @@ Keep it concise and actionable. Use bullet points.`;
 
       {/* Card Body */}
       <div className="bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 p-4 transition-colors hover:border-cyan-300 dark:hover:border-cyan-500/30 focus-within:ring-2 focus-within:ring-cyan-500/40">
-        <div className="min-h-[180px]">
+        <div className="h-[220px] overflow-y-auto">
           {streaming && !content && (
             <div className="flex items-center gap-3 py-8 justify-center">
               <Loader2 className="w-5 h-5 text-cyan-500 animate-spin" />

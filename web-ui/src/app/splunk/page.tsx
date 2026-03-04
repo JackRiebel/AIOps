@@ -332,23 +332,6 @@ function SplunkPage() {
             </div>
           </div>
 
-          {/* Security Summary Card + Severity Chart */}
-          <div className="grid grid-cols-12 gap-4">
-            <div className="col-span-12 lg:col-span-8">
-              <SplunkSecuritySummaryCard
-                insights={cc.insights}
-                loading={cc.loadingInsights && !cc.initialLoadComplete}
-                onViewDetails={handleViewSecurityDetails}
-              />
-            </div>
-            <div className="col-span-12 lg:col-span-4">
-              <SplunkSeverityChart
-                insights={cc.insights}
-                loading={cc.loadingInsights && !cc.initialLoadComplete}
-              />
-            </div>
-          </div>
-
           {/* Activity Feed + Correlated Devices */}
           <div className="grid grid-cols-12 gap-4">
             <div className="col-span-12 lg:col-span-8">
@@ -368,6 +351,23 @@ function SplunkPage() {
                 loading={cc.loadingCorrelation}
                 merakiDevices={cc.merakiDevices}
                 catalystDevices={cc.catalystDevices}
+              />
+            </div>
+          </div>
+
+          {/* Security Summary Card + Severity Chart */}
+          <div className="grid grid-cols-12 gap-4">
+            <div className="col-span-12 lg:col-span-8">
+              <SplunkSecuritySummaryCard
+                insights={cc.insights}
+                loading={cc.loadingInsights && !cc.initialLoadComplete}
+                onViewDetails={handleViewSecurityDetails}
+              />
+            </div>
+            <div className="col-span-12 lg:col-span-4">
+              <SplunkSeverityChart
+                insights={cc.insights}
+                loading={cc.loadingInsights && !cc.initialLoadComplete}
               />
             </div>
           </div>

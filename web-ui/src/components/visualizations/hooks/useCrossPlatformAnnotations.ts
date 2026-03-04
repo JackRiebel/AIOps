@@ -14,9 +14,23 @@ export interface UseCrossPlatformAnnotationsParams {
   teTestResults?: Record<number, TestResult[]>;
 }
 
+export interface UnmatchedTETest {
+  testId: number;
+  testName: string;
+  testType: string;
+  sourceName: string;
+  targetName: string;
+  sourceAgent?: Agent;
+  targetAgent?: Agent;
+  status: 'healthy' | 'degraded' | 'failing' | 'unknown';
+  latency?: number;
+  loss?: number;
+}
+
 export interface UseCrossPlatformAnnotationsReturn {
   deviceAnnotations: Map<string, DeviceAnnotation>;
   linkAnnotations: Map<string, LinkAnnotation>;
+  unmatchedTETests: UnmatchedTETest[];
 }
 
 export function useCrossPlatformAnnotations({
@@ -243,5 +257,59 @@ export function useCrossPlatformAnnotations({
     return map;
   }, [teTestHealthMap, teTests, teTestResults, deviceAnnotations, topologyNodes]);
 
-  return { deviceAnnotations, linkAnnotations };
+  // Identify TE tests where neither source nor target agent matched any Meraki device
+  const unmatchedTETests = useMemo((): UnmatchedTETest[] => {
+    if (!teTests.length || !teAgents.length) return [];
+
+    // Collect all agent IDs that matched a Meraki device
+    const matchedAgentIds = new Set<number>();
+    deviceAnnotations.forEach(ann => {
+      ann.teAgentIds.forEach(id => matchedAgentIds.add(id));
+    });
+
+    const result: UnmatchedTETest[] = [];
+
+    teTests.forEach(test => {
+      const testAgents = test.agents || [];
+      if (testAgents.length === 0) return;
+
+      // Check if ANY agent in this test matched a Meraki device
+      const hasMatchedAgent = testAgents.some(a => matchedAgentIds.has(a.agentId));
+      if (hasMatchedAgent) return;
+
+      // This test has no Meraki-matched agents — it's unmatched
+      const health = teTestHealthMap.find(h => h.testId === test.testId);
+      const status: UnmatchedTETest['status'] = health?.health === 'healthy' ? 'healthy'
+        : health?.health === 'degraded' ? 'degraded'
+        : health?.health === 'failing' ? 'failing'
+        : 'unknown';
+
+      const latency = health?.latestMetrics?.latency;
+      const loss = health?.latestMetrics?.loss;
+
+      // Determine source and target from test agents
+      const sourceAgent = testAgents[0] ? teAgents.find(a => a.agentId === testAgents[0].agentId) : undefined;
+      const targetAgent = testAgents.length > 1 ? teAgents.find(a => a.agentId === testAgents[testAgents.length - 1].agentId) : undefined;
+
+      // Extract target from test fields
+      const targetName = test.url || test.server || targetAgent?.agentName || test.testName;
+
+      result.push({
+        testId: test.testId,
+        testName: test.testName,
+        testType: test.type || 'unknown',
+        sourceName: sourceAgent?.agentName || 'Unknown Agent',
+        targetName: targetName || 'Unknown Target',
+        sourceAgent,
+        targetAgent,
+        status,
+        latency,
+        loss,
+      });
+    });
+
+    return result;
+  }, [teTests, teAgents, teTestHealthMap, deviceAnnotations]);
+
+  return { deviceAnnotations, linkAnnotations, unmatchedTETests };
 }

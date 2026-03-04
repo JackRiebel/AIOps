@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo, useEffect, useRef, memo } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef, memo, createContext, useContext } from 'react';
 import {
   ReactFlow,
   Background,
@@ -52,6 +52,7 @@ import {
   Info,
 } from 'lucide-react';
 import type { VisualizationHubState } from './useVisualizationHub';
+import type { UnmatchedTETest } from './hooks/useCrossPlatformAnnotations';
 import { isAgentOnline } from '@/components/thousandeyes/types';
 import type { Alert, TestHealthCell } from '@/components/thousandeyes/types';
 import {
@@ -109,6 +110,35 @@ interface VpnNodeData {
 }
 
 // ============================================================================
+// Hover Context — isolates hover state to avoid edge recomputation
+// ============================================================================
+
+interface HoverContextValue {
+  hoveredNodeId: string | null;
+  setHoveredNodeId: (id: string | null) => void;
+}
+
+const HoverContext = createContext<HoverContextValue>({
+  hoveredNodeId: null,
+  setHoveredNodeId: () => {},
+});
+
+// ============================================================================
+// TE Test Node Data
+// ============================================================================
+
+interface TETestNodeData {
+  label: string;
+  testType: string;
+  sourceName: string;
+  targetName: string;
+  status: 'healthy' | 'degraded' | 'failing' | 'unknown';
+  latency?: number;
+  loss?: number;
+  [key: string]: unknown;
+}
+
+// ============================================================================
 // Device Icon Map
 // ============================================================================
 
@@ -151,10 +181,10 @@ const DeviceNode = memo(({ data, selected }: NodeProps<Node<DeviceNodeData>>) =>
 
   return (
     <div className="relative group">
-      <Handle type="target" position={Position.Top} className="!w-1.5 !h-1.5 !bg-transparent !border-0 !-top-0.5" />
-      <Handle type="source" position={Position.Bottom} className="!w-1.5 !h-1.5 !bg-transparent !border-0 !-bottom-0.5" />
-      <Handle type="target" position={Position.Left} className="!w-1.5 !h-1.5 !bg-transparent !border-0 !-left-0.5" id="left" />
-      <Handle type="source" position={Position.Right} className="!w-1.5 !h-1.5 !bg-transparent !border-0 !-right-0.5" id="right" />
+      <Handle type="target" position={Position.Top} id="top" className="!w-1.5 !h-1.5 !bg-transparent !border-0 !-top-0.5" />
+      <Handle type="source" position={Position.Bottom} id="bottom" className="!w-1.5 !h-1.5 !bg-transparent !border-0 !-bottom-0.5" />
+      <Handle type="target" position={Position.Left} id="left" className="!w-1.5 !h-1.5 !bg-transparent !border-0 !-left-0.5" />
+      <Handle type="source" position={Position.Right} id="right" className="!w-1.5 !h-1.5 !bg-transparent !border-0 !-right-0.5" />
 
       <div
         className={`relative flex items-center gap-2.5 px-3 py-2.5 rounded-lg border min-w-[160px] bg-white dark:bg-slate-800 ${
@@ -268,10 +298,14 @@ const VpnNode = memo(({ data, selected }: NodeProps<Node<VpnNodeData>>) => {
 
   return (
     <div className="relative group">
-      <Handle type="target" position={Position.Top} className="!w-1.5 !h-1.5 !bg-transparent !border-0 !-top-0.5" />
-      <Handle type="source" position={Position.Bottom} className="!w-1.5 !h-1.5 !bg-transparent !border-0 !-bottom-0.5" />
-      <Handle type="target" position={Position.Left} className="!w-1.5 !h-1.5 !bg-transparent !border-0 !-left-0.5" id="left" />
-      <Handle type="source" position={Position.Right} className="!w-1.5 !h-1.5 !bg-transparent !border-0 !-right-0.5" id="right" />
+      <Handle type="target" position={Position.Top} id="top" className="!w-1.5 !h-1.5 !bg-transparent !border-0 !-top-0.5" />
+      <Handle type="source" position={Position.Top} id="top" className="!w-1.5 !h-1.5 !bg-transparent !border-0 !-top-0.5" />
+      <Handle type="target" position={Position.Bottom} id="bottom" className="!w-1.5 !h-1.5 !bg-transparent !border-0 !-bottom-0.5" />
+      <Handle type="source" position={Position.Bottom} id="bottom" className="!w-1.5 !h-1.5 !bg-transparent !border-0 !-bottom-0.5" />
+      <Handle type="target" position={Position.Left} id="left" className="!w-1.5 !h-1.5 !bg-transparent !border-0 !-left-0.5" />
+      <Handle type="source" position={Position.Left} id="left" className="!w-1.5 !h-1.5 !bg-transparent !border-0 !-left-0.5" />
+      <Handle type="target" position={Position.Right} id="right" className="!w-1.5 !h-1.5 !bg-transparent !border-0 !-right-0.5" />
+      <Handle type="source" position={Position.Right} id="right" className="!w-1.5 !h-1.5 !bg-transparent !border-0 !-right-0.5" />
 
       <div
         className={`relative flex flex-col px-4 py-3 rounded-lg border min-w-[180px] bg-white dark:bg-slate-800 ${
@@ -342,6 +376,75 @@ const VpnNode = memo(({ data, selected }: NodeProps<Node<VpnNodeData>>) => {
 VpnNode.displayName = 'VpnNode';
 
 // ============================================================================
+// Custom Node: TE Test (unmatched)
+// ============================================================================
+
+const TETestNode = memo(({ data, selected }: NodeProps<Node<TETestNodeData>>) => {
+  const statusColor = data.status === 'healthy' ? '#10b981'
+    : data.status === 'degraded' ? '#f59e0b'
+    : data.status === 'failing' ? '#ef4444'
+    : '#64748b';
+
+  const statusBg = data.status === 'healthy' ? 'bg-emerald-500/10 border-emerald-500/30'
+    : data.status === 'degraded' ? 'bg-amber-500/10 border-amber-500/30'
+    : data.status === 'failing' ? 'bg-red-500/10 border-red-500/30'
+    : 'bg-slate-500/10 border-slate-500/30';
+
+  return (
+    <div className="relative group">
+      <Handle type="target" position={Position.Top} className="!w-1.5 !h-1.5 !bg-transparent !border-0 !-top-0.5" />
+      <Handle type="source" position={Position.Bottom} className="!w-1.5 !h-1.5 !bg-transparent !border-0 !-bottom-0.5" />
+      <Handle type="target" position={Position.Left} className="!w-1.5 !h-1.5 !bg-transparent !border-0 !-left-0.5" id="left" />
+      <Handle type="source" position={Position.Right} className="!w-1.5 !h-1.5 !bg-transparent !border-0 !-right-0.5" id="right" />
+
+      <div
+        className={`relative flex flex-col px-4 py-3 rounded-full border-2 min-w-[180px] bg-white dark:bg-slate-800 ${statusBg} ${
+          selected ? 'ring-2 ring-purple-500/50 ring-offset-1 ring-offset-white dark:ring-offset-slate-900' : ''
+        }`}
+      >
+        {/* Header row */}
+        <div className="flex items-center gap-2 mb-1">
+          <Globe className="w-3.5 h-3.5 text-purple-500 flex-shrink-0" />
+          <span className="text-[10px] font-semibold text-slate-900 dark:text-slate-100 truncate">
+            {data.label}
+          </span>
+          <div className="w-2 h-2 rounded-full flex-shrink-0 ml-auto" style={{ backgroundColor: statusColor }} />
+        </div>
+
+        {/* Source → Target */}
+        <div className="flex items-center gap-1 text-[8px] text-slate-500 dark:text-slate-400">
+          <span className="truncate max-w-[70px]">{data.sourceName}</span>
+          <ChevronRight className="w-2.5 h-2.5 flex-shrink-0" />
+          <span className="truncate max-w-[70px]">{data.targetName}</span>
+        </div>
+
+        {/* Metrics */}
+        {(data.latency !== undefined || data.loss !== undefined) && (
+          <div className="flex items-center gap-2 mt-1 text-[9px]">
+            {data.latency !== undefined && (
+              <span className="font-mono font-bold" style={{ color: statusColor }}>
+                {data.latency.toFixed(0)}ms
+              </span>
+            )}
+            {data.loss !== undefined && data.loss > 0 && (
+              <span className="font-mono text-red-400">
+                {data.loss.toFixed(1)}% loss
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Type badge */}
+        <div className="absolute -top-2 -right-2 px-1.5 py-0.5 rounded-full bg-purple-500 text-white text-[7px] font-bold">
+          {data.testType}
+        </div>
+      </div>
+    </div>
+  );
+});
+TETestNode.displayName = 'TETestNode';
+
+// ============================================================================
 // Custom Edge: Enhanced Connection
 // ============================================================================
 
@@ -352,13 +455,14 @@ interface EnhancedEdgeData {
   teHealth?: string;
   teTestName?: string;
   vpnStatus?: string;
-  highlighted?: boolean;
-  dimmed?: boolean;
+  showTEOverlay?: boolean;
   [key: string]: unknown;
 }
 
 function EnhancedEdge({
   id,
+  source,
+  target,
   sourceX,
   sourceY,
   targetX,
@@ -369,6 +473,7 @@ function EnhancedEdge({
   style,
   markerEnd,
 }: EdgeProps<Edge<EnhancedEdgeData>>) {
+  const { hoveredNodeId } = useContext(HoverContext);
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
     sourceY,
@@ -384,18 +489,21 @@ function EnhancedEdge({
   const teHealth = data?.teHealth || 'unknown';
   const teTestName = data?.teTestName;
   const vpnStatus = data?.vpnStatus;
-  const highlighted = data?.highlighted;
-  const dimmed = data?.dimmed;
+  const showTEOverlay = data?.showTEOverlay ?? false;
+
+  // Compute highlight/dim from hover context instead of edge data
+  const isConnected = hoveredNodeId ? (source === hoveredNodeId || target === hoveredNodeId) : false;
+  const hasTE = showTEOverlay && teLatency !== undefined;
+  const highlighted = hoveredNodeId ? isConnected : false;
+  const dimmed = hoveredNodeId ? !isConnected : (showTEOverlay && !hasTE);
 
   // Edge styling: TE health takes priority, then VPN status, then link type
   let strokeColor = '#94a3b8'; // default slate-400
   let strokeWidth = 1.5;
   let dashArray: string | undefined;
-  let hasTE = false;
 
   if (teLatency !== undefined && teHealth !== 'unknown') {
     // TE-monitored link — bold orange to stand out
-    hasTE = true;
     strokeColor = '#f97316'; // orange-500 — vivid and unmistakable
     strokeWidth = 4;
     if (teHealth === 'degraded') { strokeColor = '#ea580c'; strokeWidth = 4.5; }
@@ -511,6 +619,7 @@ function EnhancedEdge({
 const nodeTypes = {
   device: DeviceNode,
   vpnNetwork: VpnNode,
+  teTest: TETestNode,
 };
 
 const edgeTypes = {
@@ -960,9 +1069,17 @@ function NetworkMapInner({ hub, networkName }: NetworkMapViewProps) {
   const [selectedNode, setSelectedNode] = useState<TopologyNode | OrgNetworkNode | null>(null);
   const [typeFilter, setTypeFilter] = useState<DeviceType | 'all'>('all');
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+  const hoverContextValue = useMemo(() => ({ hoveredNodeId, setHoveredNodeId }), [hoveredNodeId]);
   const prevNodeCountRef = useRef(0);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  const layoutDimensions = { width: 1400, height: 800 };
+  // Use large virtual canvas for layout; fitView handles actual sizing
+  const layoutDimensions = useMemo(() => {
+    const nodeCount = hub.topologyNodes.length;
+    const w = Math.max(1400, nodeCount * 100);
+    const h = Math.max(800, nodeCount * 60);
+    return { width: w, height: h };
+  }, [hub.topologyNodes.length]);
 
   // Filter topology nodes
   const filteredNodes = useMemo(() => {
@@ -1038,13 +1155,15 @@ function NetworkMapInner({ hub, networkName }: NetworkMapViewProps) {
         }
       });
 
-      // Layout: each hub is a cluster center, spokes radiate around it
-      const hubSpacing = 600;
-      const spokeRadius = 250;
+      // Layout: scale hub spacing and spoke radius based on counts
+      const hubCount = hubs.length;
+      const maxSpokesPerHub = Math.max(1, ...Array.from(hubSpokeMap.values()).map(s => s.length));
+      const hubSpacing = Math.max(400, 1400 / (hubCount + 1));
+      const spokeRadius = Math.max(150, Math.min(300, maxSpokesPerHub * 60));
       const hubY = 300;
 
-      const totalHubWidth = (hubs.length - 1) * hubSpacing;
-      const hubStartX = (layoutDimensions.width - totalHubWidth) / 2;
+      const totalHubWidth = (hubCount - 1) * hubSpacing;
+      const hubStartX = Math.max(200, (1400 - totalHubWidth) / 2);
 
       const makeNodeData = (node: typeof hub.vpnNodes[0]): VpnNodeData => {
         // Check device annotations (direct device IP match)
@@ -1145,7 +1264,7 @@ function NetworkMapInner({ hub, networkName }: NetworkMapViewProps) {
       return nodes;
     }
 
-    return positionedNodes.map(node => {
+    const deviceNodes: Node[] = positionedNodes.map(node => {
       const annotation = hub.deviceAnnotations.get(node.id);
       return {
         id: node.id,
@@ -1167,35 +1286,82 @@ function NetworkMapInner({ hub, networkName }: NetworkMapViewProps) {
         } satisfies DeviceNodeData,
       };
     });
-  }, [viewMode, positionedNodes, hub.vpnNodes, hub.deviceAnnotations, hub.linkAnnotations, layoutDimensions]);
+
+    // Add unmatched TE test nodes in a dedicated zone
+    if (showTEOverlay && hub.unmatchedTETests.length > 0) {
+      // Position TE test nodes to the right of the device layout
+      const maxX = positionedNodes.length > 0
+        ? Math.max(...positionedNodes.map(n => n.x)) + 300
+        : 200;
+      const startY = 60;
+      const teYSpacing = 100;
+
+      hub.unmatchedTETests.forEach((test, i) => {
+        deviceNodes.push({
+          id: `te-test-${test.testId}`,
+          type: 'teTest',
+          position: { x: maxX, y: startY + i * teYSpacing },
+          data: {
+            label: test.testName,
+            testType: test.testType,
+            sourceName: test.sourceName,
+            targetName: test.targetName,
+            status: test.status,
+            latency: test.latency,
+            loss: test.loss,
+          } satisfies TETestNodeData,
+        });
+      });
+    }
+
+    return deviceNodes;
+  }, [viewMode, positionedNodes, hub.vpnNodes, hub.deviceAnnotations, hub.linkAnnotations, hub.unmatchedTETests, showTEOverlay, layoutDimensions]);
+
+  // Helper: compute which handle side a source should use to reach a target
+  const getHandleSides = useCallback((srcPos: { x: number; y: number }, tgtPos: { x: number; y: number }) => {
+    const dx = tgtPos.x - srcPos.x;
+    const dy = tgtPos.y - srcPos.y;
+    let sourceHandle: string;
+    let targetHandle: string;
+    if (Math.abs(dx) > Math.abs(dy)) {
+      sourceHandle = dx > 0 ? 'right' : 'left';
+      targetHandle = dx > 0 ? 'left' : 'right';
+    } else {
+      sourceHandle = dy > 0 ? 'bottom' : 'top';
+      targetHandle = dy > 0 ? 'top' : 'bottom';
+    }
+    return { sourceHandle, targetHandle };
+  }, []);
 
   // Convert to @xyflow edges
   const flowEdges = useMemo((): Edge[] => {
+    // Build a position lookup from flowNodes for VPN handle routing
+    const nodePositions = new Map<string, { x: number; y: number }>();
+    flowNodes.forEach(n => nodePositions.set(n.id, n.position));
+
     if (viewMode === 'vpn') {
       // Build global TE annotations keyed by te-{testId} for overlay
       const teByTestId = showTEOverlay
         ? Array.from(hub.linkAnnotations.entries()).filter(([k]) => k.startsWith('te-'))
         : [];
 
-      return hub.vpnEdges.map((edge, i) => {
-        const srcId = typeof edge.source === 'string' ? edge.source : edge.source.id;
-        const tgtId = typeof edge.target === 'string' ? edge.target : edge.target.id;
+      const edges: Edge[] = [];
+      const edgeSet = new Set<string>();
 
-        // Apply TE overlay if annotations reference agents on either endpoint network
+      // Helper to look up TE annotations for an edge
+      const getTEAnnotation = (srcId: string, tgtId: string) => {
         let teLatency: number | undefined;
         let teLoss: number | undefined;
         let teHealth: string | undefined;
         let teTestName: string | undefined;
 
         if (showTEOverlay) {
-          // Direct node-level lookup (created by annotations hook for VPN network IDs)
           const srcAnn = hub.linkAnnotations.get(`node-${srcId}`);
           const tgtAnn = hub.linkAnnotations.get(`node-${tgtId}`);
           let ann = srcAnn && tgtAnn
             ? ((srcAnn.teLatency || 0) > (tgtAnn.teLatency || 0) ? srcAnn : tgtAnn)
             : srcAnn || tgtAnn;
 
-          // Fallback: search te-* entries whose _nodeIds reference either endpoint
           if (!ann && teByTestId.length > 0) {
             for (const [, teAnn] of teByTestId) {
               const nodeIds = teAnn._nodeIds;
@@ -1213,25 +1379,78 @@ function NetworkMapInner({ hub, networkName }: NetworkMapViewProps) {
             teTestName = ann.teTestName;
           }
         }
+        return { teLatency, teLoss, teHealth, teTestName };
+      };
 
-        return {
+      // Spoke-to-hub edges from VPN data
+      hub.vpnEdges.forEach((edge, i) => {
+        const srcId = typeof edge.source === 'string' ? edge.source : edge.source.id;
+        const tgtId = typeof edge.target === 'string' ? edge.target : edge.target.id;
+        const edgeKey = [srcId, tgtId].sort().join('::');
+        if (edgeSet.has(edgeKey)) return;
+        edgeSet.add(edgeKey);
+
+        const te = getTEAnnotation(srcId, tgtId);
+        const srcPos = nodePositions.get(srcId);
+        const tgtPos = nodePositions.get(tgtId);
+        const handles = srcPos && tgtPos ? getHandleSides(srcPos, tgtPos) : { sourceHandle: undefined, targetHandle: undefined };
+
+        edges.push({
           id: `vpn-${srcId}-${tgtId}-${i}`,
           source: srcId,
           target: tgtId,
+          sourceHandle: handles.sourceHandle,
+          targetHandle: handles.targetHandle,
           type: 'enhanced',
           data: {
             edgeType: 'vpn',
             vpnStatus: edge.status,
-            teLatency: showTEOverlay ? teLatency : undefined,
-            teLoss: showTEOverlay ? teLoss : undefined,
-            teHealth: showTEOverlay ? teHealth : undefined,
-            teTestName: showTEOverlay ? teTestName : undefined,
+            showTEOverlay,
+            teLatency: showTEOverlay ? te.teLatency : undefined,
+            teLoss: showTEOverlay ? te.teLoss : undefined,
+            teHealth: showTEOverlay ? te.teHealth : undefined,
+            teTestName: showTEOverlay ? te.teTestName : undefined,
           } satisfies EnhancedEdgeData,
-        };
+        });
       });
+
+      // Hub-to-hub mesh edges
+      const hubIds = hub.vpnNodes.filter(n => n.type === 'hub').map(n => n.id);
+      for (let i = 0; i < hubIds.length; i++) {
+        for (let j = i + 1; j < hubIds.length; j++) {
+          const edgeKey = [hubIds[i], hubIds[j]].sort().join('::');
+          if (edgeSet.has(edgeKey)) continue;
+          edgeSet.add(edgeKey);
+
+          const te = getTEAnnotation(hubIds[i], hubIds[j]);
+          const srcPos = nodePositions.get(hubIds[i]);
+          const tgtPos = nodePositions.get(hubIds[j]);
+          const handles = srcPos && tgtPos ? getHandleSides(srcPos, tgtPos) : { sourceHandle: undefined, targetHandle: undefined };
+
+          edges.push({
+            id: `vpn-hub-${hubIds[i]}-${hubIds[j]}`,
+            source: hubIds[i],
+            target: hubIds[j],
+            sourceHandle: handles.sourceHandle,
+            targetHandle: handles.targetHandle,
+            type: 'enhanced',
+            data: {
+              edgeType: 'vpn',
+              vpnStatus: 'reachable',
+              showTEOverlay,
+              teLatency: showTEOverlay ? te.teLatency : undefined,
+              teLoss: showTEOverlay ? te.teLoss : undefined,
+              teHealth: showTEOverlay ? te.teHealth : undefined,
+              teTestName: showTEOverlay ? te.teTestName : undefined,
+            } satisfies EnhancedEdgeData,
+          });
+        }
+      }
+
+      return edges;
     }
 
-    // Build set of node IDs that actually have TE device annotations (IP-matched agents)
+    // Network view edges
     const teAnnotatedNodeIds = showTEOverlay
       ? new Set(Array.from(hub.deviceAnnotations.keys()))
       : new Set<string>();
@@ -1246,8 +1465,6 @@ function NetworkMapInner({ hub, networkName }: NetworkMapViewProps) {
       let teTestName: string | undefined;
 
       if (showTEOverlay) {
-        // Only apply TE overlay if at least one endpoint has a REAL device annotation
-        // (i.e., the device's IP actually matches a TE agent's IP)
         const srcHasTE = teAnnotatedNodeIds.has(srcId);
         const tgtHasTE = teAnnotatedNodeIds.has(tgtId);
 
@@ -1266,12 +1483,6 @@ function NetworkMapInner({ hub, networkName }: NetworkMapViewProps) {
         }
       }
 
-      // Determine highlight/dim for hover
-      const isConnected = hoveredNodeId ? (srcId === hoveredNodeId || tgtId === hoveredNodeId) : false;
-      const hasTE = showTEOverlay && teLatency !== undefined;
-      // Dim non-TE edges when overlay is active so TE edges pop
-      const shouldDim = hoveredNodeId ? !isConnected : (showTEOverlay && !hasTE);
-
       return {
         id: `edge-${srcId}-${tgtId}-${i}`,
         source: srcId,
@@ -1279,16 +1490,15 @@ function NetworkMapInner({ hub, networkName }: NetworkMapViewProps) {
         type: 'enhanced',
         data: {
           edgeType: edge.type,
+          showTEOverlay,
           teLatency: showTEOverlay ? teLatency : undefined,
           teLoss: showTEOverlay ? teLoss : undefined,
           teHealth: showTEOverlay ? teHealth : undefined,
           teTestName: showTEOverlay ? teTestName : undefined,
-          highlighted: isConnected,
-          dimmed: shouldDim,
         } satisfies EnhancedEdgeData,
       };
     });
-  }, [viewMode, filteredEdges, hub.vpnEdges, hub.deviceAnnotations, hub.linkAnnotations, showTEOverlay, hoveredNodeId]);
+  }, [viewMode, filteredEdges, hub.vpnEdges, hub.vpnNodes, hub.deviceAnnotations, hub.linkAnnotations, showTEOverlay, flowNodes, getHandleSides]);
 
   // Handle node hover — highlight connected edges
   const onNodeMouseEnter = useCallback((_: React.MouseEvent, node: Node) => {
@@ -1371,7 +1581,8 @@ function NetworkMapInner({ hub, networkName }: NetworkMapViewProps) {
   return (
     <div className="flex gap-4 h-[calc(100vh-280px)] min-h-[500px]">
       {/* Main Canvas */}
-      <div className="flex-1 bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 overflow-hidden relative">
+      <div ref={containerRef} className="flex-1 bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 overflow-hidden relative">
+        <HoverContext.Provider value={hoverContextValue}>
         <ReactFlow
           nodes={flowNodes}
           edges={flowEdges}
@@ -1383,7 +1594,7 @@ function NetworkMapInner({ hub, networkName }: NetworkMapViewProps) {
           fitView
           fitViewOptions={{ padding: 0.15 }}
           minZoom={0.1}
-          maxZoom={4}
+          maxZoom={2}
           proOptions={{ hideAttribution: true }}
           className="bg-slate-50 dark:bg-slate-900/50"
           defaultEdgeOptions={{ type: 'enhanced' }}
@@ -1395,6 +1606,7 @@ function NetworkMapInner({ hub, networkName }: NetworkMapViewProps) {
           />
           <MiniMap
             nodeColor={(n) => {
+              if (n.type === 'teTest') return '#a855f7'; // purple-500
               if (n.type === 'vpnNetwork') {
                 const role = (n.data as VpnNodeData)?.role;
                 return role ? NETWORK_ROLE_COLORS[role]?.fill || '#64748b' : '#64748b';
@@ -1546,11 +1758,15 @@ function NetworkMapInner({ hub, networkName }: NetworkMapViewProps) {
                 }
               </span>
               {showTEOverlay && hub.teConfigured && (
-                <span className="text-orange-400">TE: {hub.linkAnnotations.size} annotations</span>
+                <span className="text-orange-400">
+                  TE: {hub.linkAnnotations.size} annotations
+                  {hub.unmatchedTETests.length > 0 && ` | ${hub.unmatchedTETests.length} standalone tests`}
+                </span>
               )}
             </div>
           </Panel>
         </ReactFlow>
+        </HoverContext.Provider>
 
         {/* Persistent TE Status Panel */}
         {hub.teConfigured && showTEOverlay && <TEStatusPanel hub={hub} />}

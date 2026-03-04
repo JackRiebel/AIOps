@@ -78,6 +78,23 @@ export function useMerakiTopology({ selectedOrg, selectedNetwork }: UseMerakiTop
       }
 
       const nodeIds = new Set(typedNodes.map(n => n.id));
+
+      // Build derivedId → node ID lookup so edges using derivedId values
+      // can resolve to actual node IDs (serials) present in nodeIds
+      const derivedIdToNodeId = new Map<string, string>();
+      for (const n of rawNodes) {
+        const nodeId = n.derivedId || n.id || n.serial || n.mac;
+        const serial = n.serial || n.device?.serial;
+        if (serial && nodeId !== serial && nodeIds.has(serial)) {
+          derivedIdToNodeId.set(nodeId, serial);
+        }
+        // Also map mac → serial if present
+        const mac = n.mac || n.device?.mac;
+        if (mac && serial && mac !== serial && nodeIds.has(serial)) {
+          derivedIdToNodeId.set(mac, serial);
+        }
+      }
+
       const typedEdges: TopologyEdge[] = [];
 
       for (const link of rawLinks) {
@@ -109,9 +126,18 @@ export function useMerakiTopology({ selectedOrg, selectedNetwork }: UseMerakiTop
           portTo = link.portTo || link.targetPort;
         }
 
-        if (!sourceId || !targetId || !nodeIds.has(sourceId) || !nodeIds.has(targetId)) {
+        if (!sourceId || !targetId) continue;
+
+        // Resolve derivedId/mac values to actual node IDs
+        const resolvedSource = derivedIdToNodeId.get(sourceId) || sourceId;
+        const resolvedTarget = derivedIdToNodeId.get(targetId) || targetId;
+
+        if (!nodeIds.has(resolvedSource) || !nodeIds.has(resolvedTarget)) {
           continue;
         }
+
+        sourceId = resolvedSource;
+        targetId = resolvedTarget;
 
         typedEdges.push({
           source: sourceId,

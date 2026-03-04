@@ -333,6 +333,12 @@ function WorldMap({
   const [tooltip, setTooltip] = useState<MapTooltip | null>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 400 });
 
+  // Zoom & pan state
+  const [zoomScale, setZoomScale] = useState(1);
+  const [panOffset, setPanOffset] = useState<[number, number]>([0, 0]);
+  const isPanningRef = useRef(false);
+  const panStartRef = useRef<{ x: number; y: number; ox: number; oy: number }>({ x: 0, y: 0, ox: 0, oy: 0 });
+
   // Load world atlas
   useEffect(() => {
     let cancelled = false;
@@ -424,6 +430,45 @@ function WorldMap({
 
   const handleMouseLeave = useCallback(() => setTooltip(null), []);
 
+  // Zoom handler (scroll wheel)
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    setZoomScale(prev => {
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      return Math.max(1, Math.min(8, prev * factor));
+    });
+  }, []);
+
+  // Pan handlers (mouse drag)
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (zoomScale <= 1) return;
+    isPanningRef.current = true;
+    panStartRef.current = { x: e.clientX, y: e.clientY, ox: panOffset[0], oy: panOffset[1] };
+    e.preventDefault();
+  }, [zoomScale, panOffset]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!isPanningRef.current) return;
+    const dx = e.clientX - panStartRef.current.x;
+    const dy = e.clientY - panStartRef.current.y;
+    setPanOffset([panStartRef.current.ox + dx, panStartRef.current.oy + dy]);
+  }, []);
+
+  const handleMouseUp = useCallback(() => {
+    isPanningRef.current = false;
+  }, []);
+
+  // Reset zoom handler
+  const handleResetZoom = useCallback(() => {
+    setZoomScale(1);
+    setPanOffset([0, 0]);
+  }, []);
+
+  // Reset pan when zoom returns to 1
+  useEffect(() => {
+    if (zoomScale <= 1) setPanOffset([0, 0]);
+  }, [zoomScale]);
+
   if (!worldData) {
     return (
       <div className="flex items-center justify-center h-[300px] bg-slate-50 dark:bg-slate-900/50 rounded-lg border border-slate-200 dark:border-slate-700/50">
@@ -433,8 +478,20 @@ function WorldMap({
     );
   }
 
+  // Compute transform origin at center of SVG, apply zoom + pan
+  const cx = dimensions.width / 2;
+  const cy = dimensions.height / 2;
+
   return (
-    <div ref={containerRef} className="relative rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700/50 bg-slate-50 dark:bg-slate-900/50">
+    <div
+      ref={containerRef}
+      className={`relative rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700/50 bg-slate-50 dark:bg-slate-900/50 ${zoomScale > 1 ? 'cursor-grab active:cursor-grabbing' : ''}`}
+      onWheel={handleWheel}
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={() => { handleMouseLeave(); isPanningRef.current = false; }}
+    >
       <svg
         ref={svgRef}
         viewBox={`0 0 ${dimensions.width} ${dimensions.height}`}
@@ -458,59 +515,65 @@ function WorldMap({
         </defs>
         <rect width={dimensions.width} height={dimensions.height} fill="url(#mapBg)" />
 
-        {/* Country outlines */}
-        <g>
-          {worldData.features.map((feat, i) => (
-            <path
-              key={i}
-              d={pathGen(feat) || ''}
-              fill="rgb(203,213,225)"
-              fillOpacity={0.3}
-              stroke="rgb(148,163,184)"
-              strokeWidth={0.5}
-              strokeOpacity={0.5}
-              className="dark:fill-slate-700/40 dark:stroke-slate-600/50"
-            />
-          ))}
-        </g>
-
-        {/* Outage markers */}
-        <g>
-          {markers.map((m) => (
-            <g
-              key={m.provider}
-              transform={`translate(${m.x},${m.y})`}
-              className="cursor-pointer"
-              onMouseEnter={(e) => handleMouseEnter(e, m.mainOutage)}
-              onMouseLeave={handleMouseLeave}
-              onClick={() => onOutageClick(m.mainOutage.id)}
-            >
-              {/* Pulse ring for active outages */}
-              {m.hasActive && (
-                <circle r={m.r} fill="none" stroke="#ef4444" strokeWidth={2} className="pulse-ring" />
-              )}
-              {/* Main circle */}
-              <circle
-                r={m.r}
-                fill={m.hasActive ? '#ef4444' : '#f59e0b'}
-                fillOpacity={0.8}
-                stroke={m.hasActive ? '#dc2626' : '#d97706'}
-                strokeWidth={1.5}
+        {/* Zoomable/pannable group */}
+        <g transform={`translate(${cx + panOffset[0]},${cy + panOffset[1]}) scale(${zoomScale}) translate(${-cx},${-cy})`}>
+          {/* Country outlines */}
+          <g>
+            {worldData.features.map((feat, i) => (
+              <path
+                key={i}
+                d={pathGen(feat) || ''}
+                fill="rgb(203,213,225)"
+                fillOpacity={0.3}
+                stroke="rgb(148,163,184)"
+                strokeWidth={0.5 / zoomScale}
+                strokeOpacity={0.5}
+                className="dark:fill-slate-700/40 dark:stroke-slate-600/50"
               />
-              {/* Count label for larger markers */}
-              {m.r > 10 && (
-                <text
-                  textAnchor="middle"
-                  dy="0.35em"
-                  fontSize={9}
-                  fontWeight="bold"
-                  fill="white"
+            ))}
+          </g>
+
+          {/* Outage markers */}
+          <g>
+            {markers.map((m) => {
+              const scaledR = m.r / zoomScale;
+              return (
+                <g
+                  key={m.provider}
+                  transform={`translate(${m.x},${m.y})`}
+                  className="cursor-pointer"
+                  onMouseEnter={(e) => handleMouseEnter(e, m.mainOutage)}
+                  onMouseLeave={handleMouseLeave}
+                  onClick={() => onOutageClick(m.mainOutage.id)}
                 >
-                  {m.totalAffected}
-                </text>
-              )}
-            </g>
-          ))}
+                  {/* Pulse ring for active outages */}
+                  {m.hasActive && (
+                    <circle r={scaledR} fill="none" stroke="#ef4444" strokeWidth={2 / zoomScale} className="pulse-ring" />
+                  )}
+                  {/* Main circle */}
+                  <circle
+                    r={scaledR}
+                    fill={m.hasActive ? '#ef4444' : '#f59e0b'}
+                    fillOpacity={0.8}
+                    stroke={m.hasActive ? '#dc2626' : '#d97706'}
+                    strokeWidth={1.5 / zoomScale}
+                  />
+                  {/* Count label for larger markers */}
+                  {m.r > 10 && (
+                    <text
+                      textAnchor="middle"
+                      dy="0.35em"
+                      fontSize={9 / zoomScale}
+                      fontWeight="bold"
+                      fill="white"
+                    >
+                      {m.totalAffected}
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+          </g>
         </g>
       </svg>
 
@@ -545,15 +608,32 @@ function WorldMap({
         </div>
       )}
 
-      {/* Legend */}
-      <div className="absolute bottom-2 right-2 flex items-center gap-3 px-2 py-1 rounded bg-white/80 dark:bg-slate-800/80 border border-slate-200/50 dark:border-slate-700/50 text-[10px] text-slate-600 dark:text-slate-400">
-        <span className="flex items-center gap-1">
-          <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500" /> Active
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="inline-block w-2.5 h-2.5 rounded-full bg-amber-500" /> Resolved
-        </span>
+      {/* Legend + Zoom controls */}
+      <div className="absolute bottom-2 right-2 flex items-center gap-2">
+        {zoomScale > 1 && (
+          <button
+            onClick={handleResetZoom}
+            className="px-2 py-1 rounded bg-white/90 dark:bg-slate-800/90 border border-slate-200/50 dark:border-slate-700/50 text-[10px] font-medium text-slate-600 dark:text-slate-400 hover:bg-white dark:hover:bg-slate-700 transition-colors"
+          >
+            {Math.round(zoomScale * 100)}% — Reset
+          </button>
+        )}
+        <div className="flex items-center gap-3 px-2 py-1 rounded bg-white/80 dark:bg-slate-800/80 border border-slate-200/50 dark:border-slate-700/50 text-[10px] text-slate-600 dark:text-slate-400">
+          <span className="flex items-center gap-1">
+            <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500" /> Active
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="inline-block w-2.5 h-2.5 rounded-full bg-amber-500" /> Resolved
+          </span>
+        </div>
       </div>
+
+      {/* Zoom hint */}
+      {zoomScale <= 1 && (
+        <div className="absolute bottom-2 left-2 text-[9px] text-slate-400 dark:text-slate-500 select-none pointer-events-none">
+          Scroll to zoom &middot; Drag to pan
+        </div>
+      )}
     </div>
   );
 }
@@ -690,6 +770,8 @@ export const InternetInsightsPanel = memo(({ onAskAI }: InternetInsightsPanelPro
   // ---- State ----
   const [outages, setOutages] = useState<InternetInsightsOutage[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const hasFetchedRef = useRef(false);
   const [filter, setFilter] = useState<OutageFilter>('all');
   const [timeWindow, setTimeWindow] = useState<TimeWindow>('1d');
   const [page, setPage] = useState(1);
@@ -751,7 +833,12 @@ export const InternetInsightsPanel = memo(({ onAskAI }: InternetInsightsPanelPro
   }, []);
 
   const fetchOutages = useCallback(async () => {
-    setLoading(true);
+    // Use loading for initial fetch, refreshing for subsequent
+    if (hasFetchedRef.current) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
     try {
       // Try Internet Insights endpoint first
       let response = await fetch(
@@ -794,6 +881,8 @@ export const InternetInsightsPanel = memo(({ onAskAI }: InternetInsightsPanelPro
       setOutages([]);
     } finally {
       setLoading(false);
+      setRefreshing(false);
+      hasFetchedRef.current = true;
     }
   }, [timeWindow, parseOutages]);
 
@@ -865,6 +954,14 @@ export const InternetInsightsPanel = memo(({ onAskAI }: InternetInsightsPanelPro
 
   return (
     <DashboardCard title="Internet Insights" icon={<Globe className="w-4 h-4" />} accent="purple">
+      {/* ---- Refresh indicator (subtle, doesn't hide content) ---- */}
+      {refreshing && (
+        <div className="flex items-center gap-1.5 mb-2 px-2 py-1 bg-purple-50 dark:bg-purple-500/10 rounded-lg border border-purple-200 dark:border-purple-500/20">
+          <Loader2 className="w-3 h-3 text-purple-500 animate-spin" />
+          <span className="text-[10px] text-purple-600 dark:text-purple-400 font-medium">Refreshing data...</span>
+        </div>
+      )}
+
       {/* ---- Stats Bar ---- */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
         <div className="bg-white dark:bg-slate-800/50 rounded-lg px-3 py-2.5 border border-slate-200 dark:border-slate-700/50 text-center">

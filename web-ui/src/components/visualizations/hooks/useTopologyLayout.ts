@@ -98,7 +98,9 @@ function applyHierarchicalLayout(
     } else {
       // Non-client levels: standard vertical distribution
       const availableHeight = height - padding * 2;
-      const minGap = 50;
+      // Scale minGap based on total node count — tighter when many nodes
+      const totalNodeCount = nodes.length;
+      const minGap = Math.max(80, 200 - totalNodeCount * 5);
 
       let verticalGap: number;
       if (nodeCount === 1) {
@@ -160,10 +162,13 @@ function applyForceLayout(
     };
   });
 
-  // Simple force simulation (10 iterations)
+  // Scale iterations and repulsion based on node count
+  const nodeCount = positionedNodes.length;
+  const iterations = Math.max(10, Math.min(30, nodeCount * 2));
+  const repulsionStrength = Math.max(3000, 5000 + nodeCount * 200);
   const nodeMap = new Map(positionedNodes.map((n) => [n.id, n]));
 
-  for (let iter = 0; iter < 10; iter++) {
+  for (let iter = 0; iter < iterations; iter++) {
     // Repulsion between all nodes
     for (let i = 0; i < positionedNodes.length; i++) {
       for (let j = i + 1; j < positionedNodes.length; j++) {
@@ -172,7 +177,7 @@ function applyForceLayout(
         const dx = nodeB.x - nodeA.x;
         const dy = nodeB.y - nodeA.y;
         const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        const force = 5000 / (dist * dist);
+        const force = repulsionStrength / (dist * dist);
         const fx = (dx / dist) * force;
         const fy = (dy / dist) * force;
         nodeA.x -= fx;

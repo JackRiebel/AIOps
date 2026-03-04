@@ -24,7 +24,7 @@ import { useMerakiOrganizations } from './hooks/useMerakiOrganizations';
 import { useMerakiTopology } from './hooks/useMerakiTopology';
 import { useMerakiVpn } from './hooks/useMerakiVpn';
 import { useMerakiPerformance } from './hooks/useMerakiPerformance';
-import { useCrossPlatformAnnotations } from './hooks/useCrossPlatformAnnotations';
+import { useCrossPlatformAnnotations, type UnmatchedTETest } from './hooks/useCrossPlatformAnnotations';
 import { usePlatformStatuses } from './hooks/usePlatformStatuses';
 
 // Re-export types used by the original interface
@@ -92,6 +92,7 @@ export interface VisualizationHubState {
   // Cross-platform
   deviceAnnotations: Map<string, DeviceAnnotation>;
   linkAnnotations: Map<string, LinkAnnotation>;
+  unmatchedTETests: UnmatchedTETest[];
   platformStatuses: PlatformStatus[];
 
   // Loading / errors
@@ -205,6 +206,7 @@ export function useVisualizationHub(): VisualizationHubState {
 
     deviceAnnotations: annotations.deviceAnnotations,
     linkAnnotations: annotations.linkAnnotations,
+    unmatchedTETests: annotations.unmatchedTETests,
     platformStatuses,
 
     loading: orgs.loading,
