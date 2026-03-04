@@ -138,9 +138,9 @@ export const apiClient = {
   },
 
   async updateSystemConfig(key: string, value: string) {
-    return request<void>('/api/admin/config', {
+    return request<void>(`/api/admin/config/${encodeURIComponent(key)}`, {
       method: 'PUT',
-      body: JSON.stringify({ key, value }),
+      body: JSON.stringify({ value }),
     });
   },
 
