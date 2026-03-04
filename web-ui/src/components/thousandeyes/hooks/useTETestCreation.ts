@@ -31,8 +31,13 @@ export function useTETestCreation({ fetchTests, setError }: UseTETestCreationPar
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         credentials: 'include', body: JSON.stringify({ prompt }),
       });
-      if (!response.ok) { const e = await response.json(); throw new Error(e.detail || `HTTP ${response.status}`); }
+      if (!response.ok) {
+        const e = await response.json().catch(() => ({}));
+        const detail = typeof e.detail === 'string' ? e.detail : e.detail ? JSON.stringify(e.detail) : `HTTP ${response.status}`;
+        throw new Error(detail);
+      }
       await fetchTests();
+      setShowCreateModal(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create test');
       throw err;
@@ -48,8 +53,13 @@ export function useTETestCreation({ fetchTests, setError }: UseTETestCreationPar
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         credentials: 'include', body: JSON.stringify(config),
       });
-      if (!response.ok) { const e = await response.json(); throw new Error(e.detail || `HTTP ${response.status}`); }
+      if (!response.ok) {
+        const e = await response.json().catch(() => ({}));
+        const detail = typeof e.detail === 'string' ? e.detail : e.detail ? JSON.stringify(e.detail) : `HTTP ${response.status}`;
+        throw new Error(detail);
+      }
       await fetchTests();
+      setShowCreateModal(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create test');
       throw err;
@@ -64,7 +74,11 @@ export function useTETestCreation({ fetchTests, setError }: UseTETestCreationPar
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         credentials: 'include', body: JSON.stringify(testConfig),
       });
-      if (!response.ok) { const e = await response.json(); throw new Error(e.detail || `HTTP ${response.status}`); }
+      if (!response.ok) {
+        const e = await response.json().catch(() => ({}));
+        const detail = typeof e.detail === 'string' ? e.detail : e.detail ? JSON.stringify(e.detail) : `HTTP ${response.status}`;
+        throw new Error(detail);
+      }
       return await response.json();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to run instant test');

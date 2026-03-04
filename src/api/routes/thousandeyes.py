@@ -879,6 +879,50 @@ async def _build_infrastructure_context(max_networks: int = 30, max_devices_per_
         return ""
 
 
+async def _get_te_agents_context() -> tuple[str, list[dict]]:
+    """Fetch ThousandEyes agents and build context string for AI prompt.
+
+    Returns:
+        Tuple of (context_string, raw_agents_list)
+    """
+    try:
+        data = await make_api_request("GET", "agents")
+        agents_raw = data.get("agents", [])
+        if not agents_raw:
+            return "", []
+
+        agents = []
+        lines = ["AVAILABLE THOUSANDEYES AGENTS:"]
+        for a in agents_raw:
+            agent_id = a.get("agentId")
+            name = a.get("agentName", "Unknown")
+            agent_type = a.get("agentType", "unknown")  # cloud or enterprise or enterprise-cluster
+            location = a.get("location", "")
+            country = a.get("countryId", "")
+            ip_addresses = a.get("ipAddresses", [])
+            public_ips = a.get("publicIpAddresses", [])
+            enabled = a.get("enabled", True)
+
+            if not enabled:
+                continue
+
+            agents.append({
+                "agentId": agent_id,
+                "agentName": name,
+                "agentType": agent_type,
+                "location": location,
+            })
+
+            ip_str = ", ".join(public_ips or ip_addresses or [])
+            loc_str = f" in {location}" if location else ""
+            lines.append(f"  agentId={agent_id}: {name} ({agent_type}{loc_str}) [{ip_str}]")
+
+        return "\n".join(lines), agents
+    except Exception as e:
+        te_logger.warning(f"Failed to fetch TE agents for AI context: {e}")
+        return "", []
+
+
 @router.post("/tests/ai")
 async def te_create_test_from_ai(
     organization: str = Query(...),
@@ -912,54 +956,65 @@ async def te_create_test_from_ai(
     if infra_context and len(infra_context) > 3000:
         infra_context = await _build_infrastructure_context(max_networks=10, max_devices_per_net=2)
 
-    infra_block = f"\n\n{infra_context}\n" if infra_context else ""
+    # Fetch available ThousandEyes agents
+    agents_context, available_agents = await _get_te_agents_context()
+
+    infra_block = ""
+    if infra_context:
+        infra_block += f"\n\n{infra_context}\n"
+    if agents_context:
+        infra_block += f"\n{agents_context}\n"
 
     # Build the AI prompt to generate test configuration
-    ai_prompt = f"""You are a ThousandEyes test configuration expert. Based on the user's request, generate a valid ThousandEyes test configuration JSON.
+    ai_prompt = f"""You are a ThousandEyes test configuration expert. Based on the user's request, generate a valid ThousandEyes API v7 test configuration JSON.
 {infra_block}
 USER REQUEST: {prompt}
 
 Generate a JSON object for ONE of these test types based on the request:
 1. **HTTP Server Test** (for website/API monitoring):
-   {{"testName": "...", "type": "http-server", "url": "https://...", "interval": 300, "alertsEnabled": true}}
+   {{"testName": "...", "type": "http-server", "url": "https://...", "interval": 300, "alertsEnabled": true, "agents": [{{"agentId": "..."}}]}}
 
 2. **Page Load Test** (for full page performance):
-   {{"testName": "...", "type": "page-load", "url": "https://...", "interval": 300, "alertsEnabled": true}}
+   {{"testName": "...", "type": "page-load", "url": "https://...", "interval": 300, "alertsEnabled": true, "agents": [{{"agentId": "..."}}]}}
 
-3. **Network Test** (for connectivity/latency):
-   {{"testName": "...", "type": "agent-to-server", "server": "hostname or IP", "port": 443, "protocol": "TCP", "interval": 300, "alertsEnabled": true}}
+3. **Network Test** (for connectivity/latency between sites):
+   {{"testName": "...", "type": "agent-to-server", "server": "IP or hostname", "port": 443, "protocol": "TCP", "interval": 300, "alertsEnabled": true, "agents": [{{"agentId": "..."}}]}}
 
 4. **DNS Test** (for DNS resolution):
-   {{"testName": "...", "type": "dns-server", "domain": "example.com", "dnsServers": ["8.8.8.8"], "interval": 300, "alertsEnabled": true}}
+   {{"testName": "...", "type": "dns-server", "domain": "example.com", "dnsServers": [{{"serverName": "8.8.8.8"}}], "interval": 300, "alertsEnabled": true, "agents": [{{"agentId": "..."}}]}}
 
 Rules:
-- Use interval of 300 (5 minutes) unless user specifies otherwise
-- Always enable alerts
-- Generate a descriptive testName
-- If user references a network or device from the infrastructure context above, use the corresponding IP address
-- For connectivity tests between sites, use agent-to-server with the target site's public/WAN IP
-- Only return the JSON object, no explanation
+- REQUIRED: Include "agents" array with at least one agent from the AVAILABLE THOUSANDEYES AGENTS list above. Each agent entry must be {{"agentId": "<id>"}}.
+- For connectivity between two sites, place the agent at the SOURCE site and set "server" to the TARGET site's IP.
+- If user references a network or device from the infrastructure context, use the corresponding IP address as the server/target.
+- Pick enterprise agents over cloud agents when they are at or near the relevant site.
+- Use interval of 300 (5 minutes) unless user specifies otherwise.
+- Always enable alerts.
+- Generate a descriptive testName.
+- Only return the JSON object, no explanation.
 
 JSON:"""
 
     # Final prompt length guard
-    if len(ai_prompt) > 6000:
+    if len(ai_prompt) > 8000:
         infra_context = await _build_infrastructure_context(max_networks=10, max_devices_per_net=2)
         infra_block = f"\n\n{infra_context}\n" if infra_context else ""
+        if agents_context:
+            infra_block += f"\n{agents_context}\n"
         ai_prompt = ai_prompt[:ai_prompt.index("USER REQUEST")] + f"USER REQUEST: {prompt}" + ai_prompt[ai_prompt.rindex("\n\nJSON:"):]
 
     try:
         # Generate test configuration using AI
-        result = await generate_text(ai_prompt, max_tokens=500)
+        result = await generate_text(ai_prompt, max_tokens=800)
 
         if not result:
             raise HTTPException(status_code=503, detail="AI provider returned no response")
 
         ai_response = result.get("text", "")
+        te_logger.info(f"AI test creation response: {ai_response[:500]}")
 
         # Parse the JSON from AI response
         import json
-        import re
 
         # Extract JSON from response (handle markdown code blocks, nested objects)
         # Try to find outermost { ... } pair with brace matching
@@ -984,6 +1039,20 @@ JSON:"""
         if "testName" not in test_config or "type" not in test_config:
             raise HTTPException(status_code=500, detail="AI generated incomplete test configuration")
 
+        # Ensure agents are present — ThousandEyes API requires at least one agent
+        if "agents" not in test_config or not test_config["agents"]:
+            if available_agents:
+                # Prefer enterprise agents, fall back to first available
+                enterprise = [a for a in available_agents if a["agentType"] == "enterprise"]
+                chosen = enterprise[:3] if enterprise else available_agents[:3]
+                test_config["agents"] = [{"agentId": str(a["agentId"])} for a in chosen]
+                te_logger.info(f"Auto-assigned agents: {[a['agentName'] for a in chosen]}")
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail="No ThousandEyes agents available. Please ensure you have at least one active agent."
+                )
+
         # TE v7 API requires type-specific endpoints
         test_type = test_config.pop("type", "http-server")
         type_map = {
@@ -1000,23 +1069,33 @@ JSON:"""
         }
         endpoint_type = type_map.get(test_type, test_type)
 
+        te_logger.info(f"Creating {endpoint_type} test: {test_config.get('testName')} with {len(test_config.get('agents', []))} agents")
+
         # Create the test via ThousandEyes API
         data = await make_api_request("POST", f"tests/{endpoint_type}", data=test_config)
         if "error" in data:
-            raise HTTPException(status_code=500, detail=data["error"])
+            error_detail = data["error"]
+            if isinstance(error_detail, dict):
+                # Extract meaningful message from TE API error
+                msg = error_detail.get("message") or error_detail.get("detail") or json.dumps(error_detail)
+            else:
+                msg = str(error_detail)
+            raise HTTPException(status_code=500, detail=f"ThousandEyes API error: {msg}")
 
         return {
             "success": True,
-            "message": f"Created test: {test_config.get('testName')}",
+            "message": f"Created {endpoint_type} test: {test_config.get('testName')}",
             "test": data,
-            "ai_config": test_config
+            "ai_config": {**test_config, "type": test_type}
         }
 
     except json.JSONDecodeError as e:
-        te_logger.error(f"Failed to parse AI response as JSON: {e}")
+        te_logger.error(f"Failed to parse AI response as JSON: {e}\nRaw: {ai_response[:500]}")
         raise HTTPException(status_code=500, detail="AI generated invalid JSON configuration")
+    except HTTPException:
+        raise
     except Exception as e:
-        te_logger.error(f"AI test creation error: {e}")
+        te_logger.error(f"AI test creation error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to create test: {str(e)}")
 
 @router.put("/tests/{test_id}")
