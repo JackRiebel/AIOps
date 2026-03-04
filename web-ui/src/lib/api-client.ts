@@ -289,7 +289,12 @@ export const apiClient = {
   },
 
   async getAPIKeyStatus() {
-    return request<Record<string, { user_key_set: boolean; admin_key_available: boolean }>>('/api/ai/key-status');
+    return request<{
+      anthropic: { user_key_set: boolean; admin_key_available: boolean };
+      openai: { user_key_set: boolean; admin_key_available: boolean };
+      google: { user_key_set: boolean; admin_key_available: boolean };
+      cisco: { user_key_set: boolean; admin_key_available: boolean };
+    }>('/api/ai/key-status');
   },
 
   // Setup
