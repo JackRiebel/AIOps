@@ -149,27 +149,53 @@ async function proxyRequest(
       const location = response.headers.get('Location');
       if (location) {
         console.log(`[API Proxy] Redirect ${response.status} to: ${location}`);
-        // Build redirect response with proper cookie forwarding
-        const headers = new Headers({ 'Location': location });
-        // Use getSetCookie() for reliable multi-cookie handling (Node 18+)
-        const cookies = (response.headers as any).getSetCookie?.() as string[] | undefined;
-        if (cookies && cookies.length > 0) {
-          console.log(`[API Proxy] Forwarding ${cookies.length} Set-Cookie header(s) on redirect`);
-          for (const cookie of cookies) {
-            headers.append('Set-Cookie', cookie);
-          }
+
+        // Use NextResponse.redirect() for proper redirect handling, then
+        // explicitly set cookies via the cookies API for reliability.
+        // Using new NextResponse(null, {headers}) can drop Set-Cookie in some
+        // Next.js versions, so we parse and re-set cookies explicitly.
+        const redirectUrl = location.startsWith('http')
+          ? new URL(location)
+          : new URL(location, request.nextUrl.origin);
+        const redirectResponse = NextResponse.redirect(redirectUrl, response.status);
+
+        // Collect Set-Cookie headers from backend response
+        const rawCookies: string[] = [];
+        const setCookieArray = (response.headers as any).getSetCookie?.() as string[] | undefined;
+        if (setCookieArray && setCookieArray.length > 0) {
+          rawCookies.push(...setCookieArray);
         } else {
-          // Fallback for older runtimes
-          const setCookieHeader = response.headers.get('Set-Cookie');
-          if (setCookieHeader) {
-            console.log(`[API Proxy] Forwarding Set-Cookie on redirect (fallback)`);
-            headers.set('Set-Cookie', setCookieHeader);
-          }
+          const fallback = response.headers.get('Set-Cookie');
+          if (fallback) rawCookies.push(fallback);
         }
-        return new NextResponse(null, {
-          status: response.status,
-          headers,
-        });
+
+        // Parse and set each cookie using NextResponse's cookies API
+        for (const raw of rawCookies) {
+          console.log(`[API Proxy] Forwarding cookie on redirect: ${raw.split('=')[0]}...`);
+          const parts = raw.split(';').map(s => s.trim());
+          const [nameValue, ...attrs] = parts;
+          const eqIdx = nameValue.indexOf('=');
+          if (eqIdx === -1) continue;
+          const name = nameValue.slice(0, eqIdx).trim();
+          const value = nameValue.slice(eqIdx + 1);
+
+          const options: Record<string, any> = {};
+          for (const attr of attrs) {
+            const aEq = attr.indexOf('=');
+            const key = (aEq === -1 ? attr : attr.slice(0, aEq)).toLowerCase().trim();
+            const val = aEq === -1 ? '' : attr.slice(aEq + 1).trim();
+            if (key === 'httponly') options.httpOnly = true;
+            else if (key === 'secure') options.secure = true;
+            else if (key === 'path') options.path = val;
+            else if (key === 'max-age') options.maxAge = parseInt(val) || 0;
+            else if (key === 'samesite') options.sameSite = val.toLowerCase() as 'lax' | 'strict' | 'none';
+            else if (key === 'domain') options.domain = val;
+          }
+
+          redirectResponse.cookies.set(name, value, options);
+        }
+
+        return redirectResponse;
       }
     }
 
