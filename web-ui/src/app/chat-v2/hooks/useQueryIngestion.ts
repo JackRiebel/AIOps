@@ -70,7 +70,7 @@ export function useQueryIngestion({
   // Detect ?q= param and start flow
   useEffect(() => {
     if (query && state === 'idle' && !isSendingRef.current) {
-      const decoded = decodeURIComponent(query).replace(/\+/g, ' ');
+      const decoded = query.replace(/\+/g, ' ');
       if (decoded.trim()) {
         setStoredQuery(decoded.trim());
         setError(null);
