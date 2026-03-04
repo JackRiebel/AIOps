@@ -18,7 +18,7 @@
  */
 
 import { useCallback, useMemo, useState, useEffect, useRef, Suspense } from 'react';
-import { useSession, useStreaming, useOrganizationContext, useIncidentIngestion, usePathAnalysisIngestion, useTestDataPointIngestion } from './hooks';
+import { useSession, useStreaming, useOrganizationContext, useIncidentIngestion, usePathAnalysisIngestion, useTestDataPointIngestion, useTEAnalysisIngestion, useQueryIngestion } from './hooks';
 import { useAISession } from '@/contexts/AISessionContext';
 import { ChatPanel } from './components/ChatPanel';
 import { MasonryCanvas } from './components/MasonryCanvas';
@@ -127,6 +127,33 @@ function ChatV2PageContent() {
     sessionLoading,
     isStreaming,
     newSession,
+    addMessage,
+    addCard,
+    stream,
+    orgDisplayNames,
+    isAISessionActive,
+    logAIQuery,
+  });
+
+  // Generic ThousandEyes analysis ingestion from URL params
+  useTEAnalysisIngestion({
+    session,
+    sessionLoading,
+    isStreaming,
+    newSession,
+    addMessage,
+    addCard,
+    stream,
+    orgDisplayNames,
+    isAISessionActive,
+    logAIQuery,
+  });
+
+  // Generic ?q= query ingestion from URL params (used by Splunk, NetworkMapView, etc.)
+  useQueryIngestion({
+    session,
+    sessionLoading,
+    isStreaming,
     addMessage,
     addCard,
     stream,

@@ -35,17 +35,24 @@ export interface TestResult {
 }
 
 export interface Alert {
-  alertId: number;
+  alertId: string | number;
   testName: string;
   active: number | boolean;
+  state?: string; // TE v7: "active", "cleared"
+  alertState?: 'clear' | 'trigger'; // TE v7 alertState field
+  alertSeverity?: string; // TE v7 alertSeverity
   ruleExpression: string;
+  ruleName?: string; // TE v7 alert rule name
+  alertRuleId?: string; // TE v7 alertRuleId
+  alertType?: string; // TE v7 alert type (27+ values)
   dateStart: string;
   dateEnd?: string;
   violationCount: number;
   severity: string;
-  testId?: number;
+  testId?: number | string;
   type?: string;
-  agents?: { agentId: number; agentName: string }[];
+  agents?: { agentId: number; agentName: string; metricsAtStart?: string; metricsAtEnd?: string }[];
+  apiLinks?: { rel: string; href: string }[];
 }
 
 export interface Agent {
@@ -82,7 +89,8 @@ export interface TEEvent {
   startDate: string;
   endDate?: string;
   agents?: { agentId: number; agentName: string }[];
-  severity: string;
+  severity: 'high' | 'medium' | 'low' | string;
+  state?: 'active' | 'resolved' | string; // TE v7 event state
   groupBy?: string;
   affectedTargets?: number;
 }
@@ -138,6 +146,102 @@ export interface Anomaly {
 }
 
 // ============================================================================
+// Alert Rule Types (TE v7: /alerts/rules)
+// ============================================================================
+
+export interface AlertRule {
+  ruleId: string;
+  ruleName: string;
+  expression: string;
+  direction?: 'to-target' | 'from-target' | 'bidirectional';
+  notifyOnClear?: boolean;
+  default?: boolean;
+  alertType: string;
+  minimumSources?: number;
+  minimumSourcesPct?: number;
+  roundsViolatingMode?: 'any' | 'exact';
+  roundsViolatingOutOf?: number;
+  roundsViolatingRequired?: number;
+  severity?: 'info' | 'minor' | 'major' | 'critical';
+  testIds?: number[];
+  notifications?: {
+    email?: { message?: string; recipients: string[] };
+    webhook?: { integrationId: string; integrationName?: string }[];
+  };
+}
+
+// ============================================================================
+// Alert Suppression Window Types (TE v7: /alerts/suppression-windows)
+// ============================================================================
+
+export interface AlertSuppressionWindow {
+  windowId: string;
+  name: string;
+  status: 'active' | 'ended' | 'scheduled';
+  startDate: string;
+  endDate: string;
+  repeat?: { type: 'day' | 'week' | 'month'; interval: number };
+  testIds?: number[];
+  alertRuleIds?: string[];
+}
+
+// ============================================================================
+// Tag Types (TE v7: /tags)
+// ============================================================================
+
+export interface TETag {
+  id: string;
+  name: string;
+  color?: string;
+  objectType?: 'test' | 'agent';
+  assignments?: { type: string; id: string }[];
+}
+
+// ============================================================================
+// BGP Monitor Types (TE v7: /monitors)
+// ============================================================================
+
+export interface BGPMonitor {
+  monitorId: number;
+  monitorName: string;
+  monitorType: string;
+  ipAddress: string;
+  network: string;
+  countryId?: string;
+}
+
+// ============================================================================
+// Credential Types (TE v7: /credentials)
+// ============================================================================
+
+export interface TECredential {
+  credentialId: string;
+  name: string;
+  type: 'basic' | 'ntlm' | 'kerberos';
+  username: string;
+  domain?: string;
+}
+
+// ============================================================================
+// Usage / Quota Types (TE v7: /usage)
+// ============================================================================
+
+export interface TEUsage {
+  cloudUnitsUsed?: number;
+  cloudUnitsProjected?: number;
+  cloudUnitsNextBillingPeriod?: number;
+  enterpriseUnitsUsed?: number;
+  enterpriseUnitsProjected?: number;
+  enterpriseAgentUsed?: number;
+  endpointAgentsUsed?: number;
+  quota?: {
+    cloudUnitsMonthly?: number;
+    enterpriseAgentsIncluded?: number;
+    endpointAgentsIncluded?: number;
+  };
+}
+
+// ============================================================================
 // Endpoint Agent Detail Types
 // ============================================================================
 
@@ -161,19 +265,74 @@ export interface EndpointScheduledTest {
 }
 
 // ============================================================================
-// Internet Insights Types
+// Internet Insights Types (TE v7 Internet Insights API)
 // ============================================================================
 
+/** Matches ApiOutage from POST /internet-insights/outages/filter */
 export interface InternetInsightsOutage {
   id: string;
+  /** TE API returns "app" for application, "network" for network outages */
   type: 'application' | 'network';
   providerName: string;
-  asNumber?: number;
+  /** Provider category: IAAS, SAAS, CDN, DNS, ISP, etc. */
+  providerType?: string;
+  /** Application/network name associated with the outage */
+  name?: string;
+  asn?: number;
   startDate: string;
   endDate?: string;
-  affectedTests: number;
-  affectedInterfaces?: number;
-  severity?: string;
+  /** Duration of the outage in seconds (from API) */
+  duration?: number;
+  affectedTestsCount: number;
+  affectedServersCount?: number;
+  affectedLocationsCount?: number;
+  affectedInterfacesCount?: number;
+}
+
+/** Detailed network outage from GET /internet-insights/outages/net/{outageId} */
+export interface InternetInsightsNetworkOutageDetail {
+  id: string;
+  providerName: string;
+  providerType?: string;
+  networkName?: string;
+  asn?: number;
+  startDate: string;
+  endDate?: string;
+  duration?: number;
+  affectedTests: { id: number; name: string }[];
+  affectedDomains: string[];
+  affectedAgents: { id: number; name: string }[];
+  affectedLocations: { location: string; affectedInterfaces: string[] }[];
+}
+
+/** Detailed application outage from GET /internet-insights/outages/app/{outageId} */
+export interface InternetInsightsAppOutageDetail {
+  id: string;
+  providerName: string;
+  providerType?: string;
+  applicationName?: string;
+  startDate: string;
+  endDate?: string;
+  duration?: number;
+  affectedTests: { id: number; name: string }[];
+  affectedDomains: string[];
+  affectedAgents: { id: number; name: string }[];
+  errors: string[];
+  affectedLocations: { location: string; affectedServers: { domain: string; prefix: string }[] }[];
+}
+
+/** Catalog provider from POST /internet-insights/catalog/providers/filter */
+export interface InternetInsightsCatalogProvider {
+  id: string;
+  providerName: string;
+  providerType: string;
+  region?: string;
+  dataType?: string;
+  asnsCount?: number;
+  countriesCount?: number;
+  locationsCount?: number;
+  interfacesCount?: number;
+  included?: boolean;
 }
 
 export type TabType = 'tests' | 'alerts' | 'agents' | 'events' | 'outages' | 'endpoint-agents' | 'path-analysis' | 'bgp';

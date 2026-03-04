@@ -16,6 +16,7 @@ from src.services.splunk_driven_correlation_service import SplunkDrivenCorrelati
 from src.services.post_ingestion_hooks import get_post_ingestion_hooks
 from src.tasks.meraki_tasks import ingest_meraki_traffic
 from src.services.network_service import sync_all_organizations
+from src.services.infrastructure_snapshot import refresh_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -229,6 +230,14 @@ class BackgroundJobScheduler:
         except Exception as e:
             logger.error(f"Error in TE metrics cleanup: {e}", exc_info=True)
 
+    async def run_infrastructure_snapshot(self):
+        """Refresh the infrastructure snapshot JSON file."""
+        try:
+            snapshot = await refresh_snapshot()
+            logger.info(f"Infrastructure snapshot refreshed: {len(snapshot.get('networks', []))} networks, {len(snapshot.get('agents', []))} agents")
+        except Exception as e:
+            logger.error(f"Error refreshing infrastructure snapshot: {e}", exc_info=True)
+
     async def run_network_cache_sync(self):
         """Sync network and device data from all configured integrations."""
         try:
@@ -325,8 +334,26 @@ class BackgroundJobScheduler:
             name="Network cache sync (startup)",
         )
 
+        # Refresh infrastructure snapshot every 15 minutes (after network sync)
+        self.scheduler.add_job(
+            self.run_infrastructure_snapshot,
+            trigger=IntervalTrigger(minutes=15),
+            id="infrastructure_snapshot",
+            name="Infrastructure snapshot refresh",
+            replace_existing=True,
+            max_instances=1,
+        )
+
+        # Also build snapshot on startup (after 20 seconds, giving network sync time)
+        self.scheduler.add_job(
+            self.run_infrastructure_snapshot,
+            trigger=DateTrigger(run_date=datetime.now() + timedelta(seconds=20)),
+            id="infrastructure_snapshot_startup",
+            name="Infrastructure snapshot (startup)",
+        )
+
         self.scheduler.start()
-        logger.info("Background job scheduler started - network sync every 15 min, KB hygiene every 6 hours, Meraki traffic every 5 min, TE metrics every 5 min")
+        logger.info("Background job scheduler started - network sync every 15 min, snapshot every 15 min, KB hygiene every 6 hours, Meraki traffic every 5 min, TE metrics every 5 min")
 
     async def start_async(self):
         """Async initialization that loads settings from database.

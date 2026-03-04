@@ -22,10 +22,16 @@ import {
   EventsPanel,
   OutagesPanel,
   CreateTestModal,
+  EditTestModal,
   InternetInsightsPanel,
+  AlertRulesPanel,
+  TagsPanel,
+  UsageCard,
   TEAICostImpactCard,
+  TEDashboardsPanel,
   type TEDashboardView,
   type TimelineItem,
+  type Test,
 } from '@/components/thousandeyes';
 import { MCPSection } from '@/components/ai-journey/MCPSection';
 
@@ -33,7 +39,7 @@ import { MCPSection } from '@/components/ai-journey/MCPSection';
 // Sub-nav pill types
 // ============================================================================
 
-type InvestigateSubView = 'tests-alerts' | 'agents' | 'path-analysis' | 'internet';
+type InvestigateSubView = 'tests-alerts' | 'agents' | 'path-analysis' | 'internet' | 'alert-rules' | 'tags-usage' | 'dashboards';
 type PlatformSubView = 'ai-journey' | 'mcp-servers';
 
 // ============================================================================
@@ -108,9 +114,12 @@ export default function ThousandEyesPageWrapper() {
 
 const INVESTIGATE_PILLS: { id: InvestigateSubView; label: string }[] = [
   { id: 'tests-alerts', label: 'Tests & Alerts' },
+  { id: 'alert-rules', label: 'Alert Rules' },
   { id: 'path-analysis', label: 'Path Analysis' },
-  { id: 'internet', label: 'Internet' },
+  { id: 'internet', label: 'Internet Insights' },
   { id: 'agents', label: 'Agents' },
+  { id: 'dashboards', label: 'Dashboards' },
+  { id: 'tags-usage', label: 'Tags & Usage' },
 ];
 
 const PLATFORM_PILLS: { id: PlatformSubView; label: string }[] = [
@@ -135,6 +144,7 @@ function ThousandEyesPage() {
   const [aiQuery, setAiQuery] = useState<string | null>(null);
   const [investigateSubView, setInvestigateSubView] = useState<InvestigateSubView>('tests-alerts');
   const [platformSubView, setPlatformSubView] = useState<PlatformSubView>('ai-journey');
+  const [editingTest, setEditingTest] = useState<Test | null>(null);
 
   // ============================================================================
   // Handlers
@@ -164,8 +174,83 @@ function ThousandEyesPage() {
   }, []);
 
   const handleAskAI = useCallback((context: string) => {
-    setAiQuery(context);
-  }, []);
+    // Parse the context string to extract category, title, and details
+    type TECategory = 'test' | 'event' | 'agent' | 'alert-rule' | 'outage' | 'path' | 'tag' | 'general';
+    let category: TECategory = 'general';
+    let title = 'ThousandEyes Analysis';
+    const details: Record<string, string | number | undefined> = {};
+
+    const lower = context.toLowerCase();
+    if (lower.includes('test "') || lower.includes('test \'')) {
+      category = 'test';
+      const nameMatch = context.match(/test ["']([^"']+)["']/i);
+      title = nameMatch ? nameMatch[1] : 'Test Analysis';
+      const idMatch = context.match(/ID:\s*(\d+)/i);
+      if (idMatch) details['Test ID'] = idMatch[1];
+      const typeMatch = context.match(/type:\s*([^,)]+)/i);
+      if (typeMatch) details['Type'] = typeMatch[1].trim();
+    } else if (lower.includes('event') && (lower.includes('summary:') || lower.includes('severity:'))) {
+      category = 'event';
+      const summaryMatch = context.match(/Summary:\s*(.+?)(?:\n|$)/i);
+      title = summaryMatch ? summaryMatch[1].trim() : 'Event Analysis';
+      const typeMatch = context.match(/Type:\s*(.+?)(?:\n|$)/i);
+      if (typeMatch) details['Type'] = typeMatch[1].trim();
+      const sevMatch = context.match(/Severity:\s*(.+?)(?:\n|$)/i);
+      if (sevMatch) details['Severity'] = sevMatch[1].trim();
+      const agentMatch = context.match(/Agents affected:\s*(\d+)/i);
+      if (agentMatch) details['Agents'] = agentMatch[1];
+    } else if (lower.includes('agents') && (lower.includes('enabled:') || lower.includes('total agents'))) {
+      category = 'agent';
+      title = 'Agent Fleet Analysis';
+      const totalMatch = context.match(/Total agents:\s*(\d+)/i);
+      if (totalMatch) details['Total'] = totalMatch[1];
+      const enabledMatch = context.match(/Enabled:\s*(\d+)/i);
+      if (enabledMatch) details['Enabled'] = enabledMatch[1];
+      const disabledMatch = context.match(/Disabled:\s*(\d+)/i);
+      if (disabledMatch) details['Disabled'] = disabledMatch[1];
+    } else if (lower.includes('alert rule')) {
+      category = 'alert-rule';
+      const nameMatch = context.match(/alert rule ["']([^"']+)["']/i);
+      title = nameMatch ? nameMatch[1] : 'Alert Rule Analysis';
+      const exprMatch = context.match(/expression:\s*(.+?)(?:\.|$)/i);
+      if (exprMatch) details['Expression'] = exprMatch[1].trim();
+    } else if (lower.includes('outage') || lower.includes('internet insight')) {
+      category = 'outage';
+      const providerMatch = context.match(/Provider\s*["']([^"']+)["']/i) || context.match(/provider[:\s]+["']?([^"'\n,(]+)/i);
+      title = providerMatch ? providerMatch[1].trim() : 'Outage Analysis';
+      const typeMatch = context.match(/\((application|network)/i);
+      if (typeMatch) details['Type'] = typeMatch[1];
+      const affectedMatch = context.match(/(\d+)\s*affected tests/i);
+      if (affectedMatch) details['Affected Tests'] = affectedMatch[1];
+      if (lower.includes('still active')) details['Status'] = 'Active';
+      else if (lower.includes('ended')) details['Status'] = 'Resolved';
+    } else if (lower.includes('path') && (lower.includes('hops') || lower.includes('latency'))) {
+      category = 'path';
+      const testMatch = context.match(/test ["']([^"']+)["']/i);
+      title = testMatch ? `Path: ${testMatch[1]}` : 'Path Analysis';
+      const hopMatch = context.match(/hops:\s*(\d+)/i);
+      if (hopMatch) details['Hops'] = hopMatch[1];
+      const latMatch = context.match(/latency:\s*([^\n,]+)/i);
+      if (latMatch) details['Max Latency'] = latMatch[1].trim();
+    } else if (lower.includes('tag organization') || lower.includes('tag')) {
+      category = 'tag';
+      title = 'Tag Organization Analysis';
+      const countMatch = context.match(/(\d+)\s+tags/i);
+      if (countMatch) details['Tags'] = countMatch[1];
+      const assignMatch = context.match(/(\d+)\s+total assignments/i);
+      if (assignMatch) details['Assignments'] = assignMatch[1];
+    }
+
+    const payload = {
+      message: context,
+      context: {
+        type: 'te_analysis' as const,
+        data: { category, title, details, message: context },
+      },
+    };
+    const encoded = btoa(encodeURIComponent(JSON.stringify(payload)));
+    router.push(`/chat-v2?new_session=true&te_analysis=${encodeURIComponent(encoded)}`);
+  }, [router]);
 
   const handleViewChange = useCallback((newView: TEDashboardView) => {
     router.replace(`/thousandeyes?tab=${newView}`, { scroll: false });
@@ -325,6 +410,10 @@ function ThousandEyesPage() {
                   onCreateTest={() => state.setShowCreateModal(true)}
                   onToggleResults={state.fetchTestResults}
                   onAskAI={handleAskAI}
+                  onRunInstantTest={state.runInstantTest}
+                  onEditTest={setEditingTest}
+                  onDeleteTest={state.deleteTest}
+                  onUpdateTest={state.updateTest}
                 />
                 <AlertsTable alerts={state.alerts} loading={state.loadingAlerts} />
                 <EventsPanel events={state.events} loading={state.loadingEvents} onAskAI={handleAskAI} />
@@ -353,8 +442,29 @@ function ThousandEyesPage() {
               />
             )}
 
+            {investigateSubView === 'alert-rules' && (
+              <AlertRulesPanel onAskAI={handleAskAI} />
+            )}
+
             {investigateSubView === 'internet' && (
               <InternetInsightsPanel onAskAI={handleAskAI} />
+            )}
+
+            {investigateSubView === 'dashboards' && (
+              <TEDashboardsPanel
+                dashboards={state.dashboards}
+                widgets={state.dashboardWidgets}
+                loading={state.loadingDashboards}
+                mcpAvailable={state.mcpAvailable}
+                onFetchWidgets={state.fetchDashboardWidgets}
+              />
+            )}
+
+            {investigateSubView === 'tags-usage' && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                <TagsPanel onAskAI={handleAskAI} />
+                <UsageCard />
+              </div>
             )}
           </div>
         )}
@@ -384,6 +494,16 @@ function ThousandEyesPage() {
         onCreateManual={state.createTestManual}
         loading={state.loadingTests}
         aiProcessing={state.aiProcessing}
+        error={state.error}
+      />
+
+      {/* Edit Test Modal */}
+      <EditTestModal
+        isOpen={!!editingTest}
+        test={editingTest}
+        onClose={() => setEditingTest(null)}
+        onSave={state.updateTest}
+        loading={state.loadingTests}
         error={state.error}
       />
     </div>

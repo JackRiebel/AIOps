@@ -395,7 +395,7 @@ Keep it under 200 words. Be specific, not generic.`;
         {/* AI Content */}
         {content && (
           <div className="relative">
-            <div className="te-insights-prose text-[13px] leading-relaxed text-slate-700 dark:text-slate-200 space-y-2 [&_ul]:space-y-1 [&_ul]:pl-4 [&_ul]:list-disc [&_ul]:marker:text-purple-400 [&_ol]:space-y-1 [&_ol]:pl-4 [&_ol]:list-decimal [&_li]:text-[13px] [&_li]:leading-snug [&_p]:text-[13px] [&_p]:leading-relaxed [&_strong]:text-slate-900 [&_strong]:dark:text-white [&_strong]:font-semibold [&_h1]:text-sm [&_h1]:font-semibold [&_h1]:text-slate-900 [&_h1]:dark:text-white [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:text-slate-900 [&_h2]:dark:text-white [&_h3]:text-[13px] [&_h3]:font-semibold [&_h3]:text-slate-800 [&_h3]:dark:text-slate-100">
+            <div className="te-insights-prose max-w-full overflow-hidden text-[13px] leading-relaxed text-slate-700 dark:text-slate-200 space-y-2 [&_ul]:space-y-1 [&_ul]:pl-4 [&_ul]:list-disc [&_ul]:marker:text-purple-400 [&_ol]:space-y-1 [&_ol]:pl-4 [&_ol]:list-decimal [&_li]:text-[13px] [&_li]:leading-snug [&_p]:text-[13px] [&_p]:leading-relaxed [&_p]:break-words [&_strong]:text-slate-900 [&_strong]:dark:text-white [&_strong]:font-semibold [&_h1]:text-sm [&_h1]:font-semibold [&_h1]:text-slate-900 [&_h1]:dark:text-white [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:text-slate-900 [&_h2]:dark:text-white [&_h3]:text-[13px] [&_h3]:font-semibold [&_h3]:text-slate-800 [&_h3]:dark:text-slate-100 [&_pre]:overflow-x-auto [&_code]:break-all [&_a]:break-all [&_table]:w-full [&_table]:overflow-x-auto">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
             </div>
             {streaming && (

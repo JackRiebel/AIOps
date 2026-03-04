@@ -18,6 +18,7 @@ import HighlightContext from '../contexts/HighlightContext';
 import { IncidentContextCard, hasIncidentContext } from './IncidentContextCard';
 import { PathAnalysisContextCard, hasPathAnalysisContext } from './PathAnalysisContextCard';
 import { TestDataPointContextCard, hasTestDataPointContext } from './TestDataPointContextCard';
+import { TEAnalysisContextCard, hasTEAnalysisContext } from './TEAnalysisContextCard';
 import PendingActionsBar from '@/components/cards/PendingActionsBar';
 
 // =============================================================================
@@ -233,7 +234,7 @@ const MarkdownContent = memo(({ content }: { content: string }) => {
 
     // Paragraphs
     p({ children }: { children?: React.ReactNode }) {
-      return <p className="text-slate-700 dark:text-slate-300 leading-relaxed my-2 first:mt-0 last:mb-0">{children}</p>;
+      return <p className="text-slate-700 dark:text-slate-300 leading-relaxed my-2 first:mt-0 last:mb-0 break-words">{children}</p>;
     },
 
     // Strong/Bold
@@ -249,7 +250,7 @@ const MarkdownContent = memo(({ content }: { content: string }) => {
     // Links
     a({ href, children }: { href?: string; children?: React.ReactNode }) {
       return (
-        <a href={href} className="text-cyan-400 hover:text-cyan-300 underline underline-offset-2" target="_blank" rel="noopener noreferrer">
+        <a href={href} className="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 break-all" target="_blank" rel="noopener noreferrer">
           {children}
         </a>
       );
@@ -271,7 +272,7 @@ const MarkdownContent = memo(({ content }: { content: string }) => {
   };
 
   return (
-    <div className="text-sm max-w-full break-words overflow-hidden">
+    <div className="text-sm max-w-full min-w-0 break-words overflow-hidden">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
         {content}
       </ReactMarkdown>
@@ -298,9 +299,11 @@ const Message = memo(({ message, isHighlighted, onMouseEnter, onMouseLeave, isLa
   const showPathAnalysisCard = isUser && hasPathAnalysisContext(message.metadata);
   // Check if this message has test data point context (from "Ask AI" on ThousandEyes tests page)
   const showTestDataPointCard = isUser && hasTestDataPointContext(message.metadata);
+  // Check if this message has generic TE analysis context (from any ThousandEyes "Ask AI" button)
+  const showTEAnalysisCard = isUser && hasTEAnalysisContext(message.metadata);
 
   // Show analyzing state only if this is the last user message and AI is still responding
-  const isAnalyzing = (showIncidentCard || showPathAnalysisCard || showTestDataPointCard) && isLastMessage && isStreaming;
+  const isAnalyzing = (showIncidentCard || showPathAnalysisCard || showTestDataPointCard || showTEAnalysisCard) && isLastMessage && isStreaming;
 
   return (
     <div
@@ -308,7 +311,7 @@ const Message = memo(({ message, isHighlighted, onMouseEnter, onMouseLeave, isLa
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >
-      <div className={`flex flex-col gap-3 ${isUser ? 'items-end' : 'items-start'} max-w-full`}>
+      <div className={`flex flex-col gap-3 ${isUser ? 'items-end' : 'items-start'} max-w-full min-w-0`}>
         {/* Incident Context Card - shown above user message when navigating from incidents page */}
         {showIncidentCard && (
           <IncidentContextCard
@@ -329,6 +332,14 @@ const Message = memo(({ message, isHighlighted, onMouseEnter, onMouseLeave, isLa
         {showTestDataPointCard && (
           <TestDataPointContextCard
             data={message.metadata!.testDataPointContext!.data}
+            isAnalyzing={isAnalyzing}
+          />
+        )}
+
+        {/* TE Analysis Context Card - shown above user message from any ThousandEyes "Ask AI" button */}
+        {showTEAnalysisCard && (
+          <TEAnalysisContextCard
+            data={message.metadata!.teAnalysisContext!.data}
             isAnalyzing={isAnalyzing}
           />
         )}
@@ -355,6 +366,10 @@ const Message = memo(({ message, isHighlighted, onMouseEnter, onMouseLeave, isLa
             ) : showTestDataPointCard ? (
               <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">
                 {message.metadata!.testDataPointContext!.data.userQuestion || 'Analyze this test data point.'}
+              </p>
+            ) : showTEAnalysisCard ? (
+              <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">
+                Analyze this {message.metadata!.teAnalysisContext!.data.category.replace('-', ' ')} and provide insights.
               </p>
             ) : (
               <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{message.content}</p>

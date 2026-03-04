@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useState } from 'react';
+import { memo, useState, useRef, useEffect } from 'react';
 import { X, Zap, ChevronRight, Loader2 } from 'lucide-react';
 
 // ============================================================================
@@ -71,6 +71,14 @@ export const CreateTestModal = memo(({
   const [testUrl, setTestUrl] = useState('');
   const [testType, setTestType] = useState('http-server');
   const [testInterval, setTestInterval] = useState(300);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Autofocus the textarea when modal opens
+  useEffect(() => {
+    if (isOpen && !showAdvanced) {
+      setTimeout(() => textareaRef.current?.focus(), 100);
+    }
+  }, [isOpen, showAdvanced]);
 
   const handleClose = () => {
     setAiPrompt('');
@@ -84,19 +92,27 @@ export const CreateTestModal = memo(({
 
   const handleCreateAI = async () => {
     if (!aiPrompt.trim()) return;
-    await onCreateAI(aiPrompt);
-    handleClose();
+    try {
+      await onCreateAI(aiPrompt);
+      handleClose();
+    } catch {
+      // Error is displayed in the modal via error prop — don't close
+    }
   };
 
   const handleCreateManual = async () => {
     if (!testName || !testUrl) return;
-    await onCreateManual({
-      testName,
-      url: testUrl,
-      testType,
-      interval: testInterval,
-    });
-    handleClose();
+    try {
+      await onCreateManual({
+        testName,
+        url: testUrl,
+        testType,
+        interval: testInterval,
+      });
+      handleClose();
+    } catch {
+      // Error is displayed in the modal via error prop — don't close
+    }
   };
 
   if (!isOpen) return null;
@@ -128,8 +144,15 @@ export const CreateTestModal = memo(({
               </span>
             </label>
             <textarea
+              ref={textareaRef}
               value={aiPrompt}
               onChange={(e) => setAiPrompt(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey && aiPrompt.trim() && !aiProcessing) {
+                  e.preventDefault();
+                  handleCreateAI();
+                }
+              }}
               placeholder="Example: Monitor the homepage of example.com every 5 minutes for availability and performance"
               rows={4}
               className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-600/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 text-sm resize-none"

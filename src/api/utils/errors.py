@@ -340,9 +340,10 @@ async def generic_exception_handler(request: Request, exc: Exception) -> JSONRes
         }
     )
 
-    # Don't expose internal error details to clients
+    # Include error type and message for easier debugging
+    error_msg = f"{type(exc).__name__}: {str(exc)}" if str(exc) else "An internal error occurred."
     response = ErrorResponse(
-        error="An internal error occurred. Please try again later.",
+        error=error_msg,
         code=ErrorCode.INTERNAL_ERROR.value,
         request_id=request_id
     )

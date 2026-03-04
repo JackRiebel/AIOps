@@ -56,3 +56,9 @@ export { EndpointHealthFlow } from './EndpointHealthFlow';
 
 // AI Cost Impact
 export { TEAICostImpactCard } from './TEAICostImpactCard';
+
+// CRUD & Management components
+export { EditTestModal } from './EditTestModal';
+export { AlertRulesPanel } from './AlertRulesPanel';
+export { TagsPanel } from './TagsPanel';
+export { UsageCard } from './UsageCard';

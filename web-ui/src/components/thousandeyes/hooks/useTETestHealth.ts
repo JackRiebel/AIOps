@@ -42,9 +42,12 @@ export function useTETestHealth({ tests, alerts, events, outages, testResults }:
     const alertsByTestId = new Map<number, Alert[]>();
     alerts.forEach(a => {
       if (a.testId) {
-        const existing = alertsByTestId.get(a.testId) || [];
-        existing.push(a);
-        alertsByTestId.set(a.testId, existing);
+        const tid = typeof a.testId === 'string' ? parseInt(a.testId, 10) : a.testId;
+        if (!isNaN(tid)) {
+          const existing = alertsByTestId.get(tid) || [];
+          existing.push(a);
+          alertsByTestId.set(tid, existing);
+        }
       }
     });
 

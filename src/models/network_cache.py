@@ -124,6 +124,8 @@ class CachedDevice(Base):
         Returns:
             Dictionary representation of device
         """
+        # Extract WAN IPs from raw_data (full Meraki API response)
+        raw = self.raw_data if isinstance(self.raw_data, dict) else {}
         return {
             "serial": self.serial,
             "name": self.device_name,
@@ -131,6 +133,8 @@ class CachedDevice(Base):
             "networkId": self.network_id,
             "status": self.status,
             "lanIp": self.lan_ip,
+            "wan1Ip": raw.get("wan1Ip", ""),
+            "wan2Ip": raw.get("wan2Ip", ""),
             "publicIp": self.public_ip,
             "mac": self.mac,
             "firmware": self.firmware,

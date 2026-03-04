@@ -8,6 +8,8 @@ export { useOrganizationContext } from './useOrganizationContext';
 export { useIncidentIngestion } from './useIncidentIngestion';
 export { usePathAnalysisIngestion } from './usePathAnalysisIngestion';
 export { useTestDataPointIngestion } from './useTestDataPointIngestion';
+export { useTEAnalysisIngestion } from './useTEAnalysisIngestion';
+export { useQueryIngestion } from './useQueryIngestion';
 export { useCardTemplates } from './useCardTemplates';
 
 export type { UseSessionReturn } from './useSession';
@@ -33,6 +35,15 @@ export type {
   TestDataPointState,
   TestDataPointPayload,
 } from './useTestDataPointIngestion';
+export type {
+  UseTEAnalysisIngestionReturn,
+  TEAnalysisState,
+  TEAnalysisPayload,
+} from './useTEAnalysisIngestion';
+export type {
+  UseQueryIngestionReturn,
+  QueryIngestionState,
+} from './useQueryIngestion';
 export type {
   UseCardTemplatesReturn,
   CardScope,

@@ -281,9 +281,12 @@ export const TEEnterpriseMonitoring = memo(({
     const map = new Map<number, Alert[]>();
     alerts.forEach(a => {
       if (a.testId) {
-        const existing = map.get(a.testId) || [];
-        existing.push(a);
-        map.set(a.testId, existing);
+        const tid = typeof a.testId === 'string' ? parseInt(a.testId, 10) : a.testId;
+        if (!isNaN(tid)) {
+          const existing = map.get(tid) || [];
+          existing.push(a);
+          map.set(tid, existing);
+        }
       }
     });
     return map;

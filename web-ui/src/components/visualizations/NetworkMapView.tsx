@@ -42,8 +42,18 @@ import {
   Globe,
   AlertTriangle,
   Activity,
+  ChevronRight,
+  ChevronDown,
+  CheckCircle,
+  XCircle,
+  Clock,
+  Zap,
+  BarChart3,
+  Info,
 } from 'lucide-react';
 import type { VisualizationHubState } from './useVisualizationHub';
+import { isAgentOnline } from '@/components/thousandeyes/types';
+import type { Alert, TestHealthCell } from '@/components/thousandeyes/types';
 import {
   DEVICE_COLORS,
   STATUS_COLORS,
@@ -68,6 +78,7 @@ interface NetworkMapViewProps {
 }
 
 type ViewMode = 'network' | 'vpn';
+type DetailTab = 'overview' | 'te' | 'peers';
 
 interface DeviceNodeData {
   label: string;
@@ -181,10 +192,15 @@ const DeviceNode = memo(({ data, selected }: NodeProps<Node<DeviceNodeData>>) =>
 
         {/* TE badge */}
         {data.hasTEAgent && (
-          <div className="absolute -top-2.5 -right-2.5 flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-orange-500 text-white text-[8px] font-bold shadow-lg shadow-orange-500/40 ring-2 ring-orange-400/50">
+          <div className={`absolute -top-2.5 -right-2.5 flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-orange-500 text-white text-[8px] font-bold shadow-lg shadow-orange-500/40 ring-2 ring-orange-400/50 ${data.teAlertCount > 0 ? 'animate-pulse' : ''}`}>
             <Globe className="w-3 h-3" />
             {data.teTestCount}
           </div>
+        )}
+
+        {/* Micro TE quality bar */}
+        {data.hasTEAgent && (
+          <div className="absolute -bottom-1 left-3 right-3 h-0.5 rounded-full bg-orange-400/60" />
         )}
 
         {/* Alert badge */}
@@ -221,9 +237,12 @@ const DeviceNode = memo(({ data, selected }: NodeProps<Node<DeviceNodeData>>) =>
             </span>
           </div>
           {data.hasTEAgent && (
-            <div className="mt-1.5 pt-1.5 border-t border-slate-700">
-              <span className="text-orange-400 font-medium">TE:</span>
-              <span className="text-slate-400 ml-1.5">{data.teTestCount} tests</span>
+            <div className="mt-1.5 pt-1.5 bg-orange-500/5 border border-orange-500/20 rounded px-2 py-1.5">
+              <div className="flex items-center gap-1 mb-0.5">
+                <Globe className="w-2.5 h-2.5 text-orange-400" />
+                <span className="text-orange-400 font-medium">ThousandEyes</span>
+              </div>
+              <span className="text-slate-400">{data.teTestCount} tests</span>
               {data.teAlertCount > 0 && <span className="text-red-400 ml-1.5">{data.teAlertCount} alerts</span>}
             </div>
           )}
@@ -310,6 +329,9 @@ const VpnNode = memo(({ data, selected }: NodeProps<Node<VpnNodeData>>) => {
             </span>
           </div>
         )}
+
+        {/* Role-colored bottom border accent */}
+        <div className="absolute inset-x-0 bottom-0 h-0.5 rounded-b-lg" style={{ backgroundColor: roleColors.fill }} />
 
         {/* Offline stripe */}
         {isOffline && <div className="absolute inset-x-0 top-0 h-0.5 bg-red-500 rounded-t-lg" />}
@@ -438,7 +460,9 @@ function EnhancedEdge({
             }}
             className="nodrag nopan"
           >
-            <div className={`flex flex-col items-center px-2.5 py-1 rounded-md border-2 shadow-lg ${
+            <div
+              title={teTestName || undefined}
+              className={`flex flex-col items-center px-2.5 py-1 rounded-md border-2 shadow-lg cursor-pointer ${
               teHealth === 'failing' ? 'bg-red-500 text-white border-red-600'
               : teHealth === 'degraded' ? 'bg-orange-500 text-white border-orange-600'
               : 'bg-orange-500 text-white border-orange-600'
@@ -492,6 +516,435 @@ const nodeTypes = {
 const edgeTypes = {
   enhanced: EnhancedEdge,
 };
+
+// ============================================================================
+// Persistent TE Status Panel
+// ============================================================================
+
+const TEStatusPanel = memo(({ hub }: { hub: VisualizationHubState }) => {
+  const [expanded, setExpanded] = useState(false);
+
+  const activeAlerts = useMemo(() => hub.teAlerts.filter(a => a.active), [hub.teAlerts]);
+  const onlineAgents = useMemo(() => hub.teAgents.filter(a => isAgentOnline(a)).length, [hub.teAgents]);
+
+  const healthCounts = useMemo(() => {
+    const counts = { healthy: 0, degraded: 0, failing: 0, disabled: 0 };
+    hub.teTestHealth.forEach(t => { counts[t.health] = (counts[t.health] || 0) + 1; });
+    return counts;
+  }, [hub.teTestHealth]);
+
+  const scoreColor = hub.teHealthScore >= 80 ? 'text-emerald-500' : hub.teHealthScore >= 60 ? 'text-amber-500' : 'text-red-500';
+  const barColor = hub.teHealthScore >= 80 ? 'bg-emerald-500' : hub.teHealthScore >= 60 ? 'bg-amber-500' : 'bg-red-500';
+
+  if (!hub.teConfigured) return null;
+
+  return (
+    <div className="absolute bottom-16 right-4 z-10">
+      <motion.div
+        layout
+        className="bg-white/95 dark:bg-slate-800/95 backdrop-blur-sm rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 border-l-4 border-l-orange-500 overflow-hidden"
+        style={{ width: expanded ? 260 : 'auto' }}
+      >
+        {/* Collapsed bar */}
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="flex items-center gap-2 px-3 py-2 w-full hover:bg-slate-50 dark:hover:bg-slate-700/50 transition"
+        >
+          <Globe className="w-4 h-4 text-orange-500 flex-shrink-0" />
+          <span className={`text-sm font-bold ${scoreColor}`}>{hub.teHealthScore}%</span>
+          {activeAlerts.length > 0 && (
+            <span className="px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[8px] font-bold">
+              {activeAlerts.length}
+            </span>
+          )}
+          <span className="ml-auto">
+            {expanded ? <ChevronDown className="w-3.5 h-3.5 text-slate-400" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400" />}
+          </span>
+        </button>
+
+        {/* Expanded panel */}
+        <AnimatePresence>
+          {expanded && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="overflow-hidden"
+            >
+              <div className="px-3 pb-3 space-y-3">
+                {/* Health score bar */}
+                <div>
+                  <div className="flex items-baseline justify-between mb-1">
+                    <span className="text-[9px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Health Score</span>
+                    <span className={`text-lg font-bold ${scoreColor}`}>{hub.teHealthScore}%</span>
+                  </div>
+                  <div className="h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                    <div className={`h-full ${barColor} rounded-full transition-all`} style={{ width: `${hub.teHealthScore}%` }} />
+                  </div>
+                </div>
+
+                {/* Quick stats 2x2 */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="bg-slate-50 dark:bg-slate-700/30 rounded-lg p-2">
+                    <div className="text-[8px] text-slate-500 uppercase tracking-wider">Tests</div>
+                    <div className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                      <span className="text-emerald-500">{healthCounts.healthy}</span>
+                      {healthCounts.degraded > 0 && <span className="text-amber-500 ml-1">/{healthCounts.degraded}</span>}
+                      {healthCounts.failing > 0 && <span className="text-red-500 ml-1">/{healthCounts.failing}</span>}
+                    </div>
+                  </div>
+                  <div className="bg-slate-50 dark:bg-slate-700/30 rounded-lg p-2">
+                    <div className="text-[8px] text-slate-500 uppercase tracking-wider">Agents</div>
+                    <div className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                      {onlineAgents}<span className="text-slate-400 font-normal">/{hub.teAgents.length}</span>
+                    </div>
+                  </div>
+                  <div className="bg-slate-50 dark:bg-slate-700/30 rounded-lg p-2">
+                    <div className="text-[8px] text-slate-500 uppercase tracking-wider">Alerts</div>
+                    <div className={`text-xs font-bold ${activeAlerts.length > 0 ? 'text-red-500' : 'text-slate-800 dark:text-slate-200'}`}>
+                      {activeAlerts.length}
+                    </div>
+                  </div>
+                  <div className="bg-slate-50 dark:bg-slate-700/30 rounded-lg p-2">
+                    <div className="text-[8px] text-slate-500 uppercase tracking-wider">Outages</div>
+                    <div className={`text-xs font-bold ${hub.teActiveOutageCount > 0 ? 'text-red-500' : 'text-slate-800 dark:text-slate-200'}`}>
+                      {hub.teActiveOutageCount}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Active alerts list */}
+                {activeAlerts.length > 0 && (
+                  <div>
+                    <div className="text-[8px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Active Alerts</div>
+                    <div className="space-y-1 max-h-[90px] overflow-y-auto">
+                      {activeAlerts.slice(0, 3).map(alert => (
+                        <div key={alert.alertId} className="flex items-start gap-1.5 text-[9px] p-1.5 bg-red-500/5 border border-red-500/15 rounded">
+                          <div className={`w-1.5 h-1.5 rounded-full mt-0.5 flex-shrink-0 ${
+                            alert.severity === 'critical' ? 'bg-red-500' : alert.severity === 'major' ? 'bg-orange-500' : 'bg-amber-500'
+                          }`} />
+                          <div className="min-w-0">
+                            <div className="text-slate-700 dark:text-slate-300 font-medium truncate">{alert.testName}</div>
+                            <div className="text-slate-400 truncate">{alert.ruleExpression}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Test health breakdown */}
+                <div>
+                  <div className="text-[8px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Test Health</div>
+                  <div className="flex items-center gap-3 text-[10px]">
+                    {healthCounts.healthy > 0 && (
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />{healthCounts.healthy}</span>
+                    )}
+                    {healthCounts.degraded > 0 && (
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" />{healthCounts.degraded}</span>
+                    )}
+                    {healthCounts.failing > 0 && (
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500" />{healthCounts.failing}</span>
+                    )}
+                    {healthCounts.disabled > 0 && (
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-400" />{healthCounts.disabled}</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </motion.div>
+    </div>
+  );
+});
+TEStatusPanel.displayName = 'TEStatusPanel';
+
+// ============================================================================
+// Detail Sidebar
+// ============================================================================
+
+interface DetailSidebarProps {
+  selectedNode: TopologyNode | OrgNetworkNode;
+  hub: VisualizationHubState;
+  onClose: () => void;
+  onAnalyzeDevice: (node: TopologyNode) => void;
+  onAnalyzeNetwork: (node: OrgNetworkNode) => void;
+}
+
+const DetailSidebar = memo(({ selectedNode, hub, onClose, onAnalyzeDevice, onAnalyzeNetwork }: DetailSidebarProps) => {
+  const isDevice = 'serial' in selectedNode;
+  const isVpn = 'peerCount' in selectedNode && !isDevice;
+  const annotation = isDevice ? hub.deviceAnnotations.get(selectedNode.id) : null;
+  const hasTE = !!annotation;
+
+  const [activeTab, setActiveTab] = useState<DetailTab>('overview');
+
+  // Reset tab when node changes
+  useEffect(() => { setActiveTab('overview'); }, [selectedNode.id]);
+
+  // Device-specific data
+  const matchedAgents = useMemo(() => {
+    if (!annotation) return [];
+    return hub.teAgents.filter(a => annotation.teAgentIds.includes(a.agentId));
+  }, [hub.teAgents, annotation]);
+
+  const deviceTests = useMemo(() => {
+    if (!annotation) return [];
+    return hub.teTests.filter(t => t.agents?.some(a => annotation.teAgentIds.includes(a.agentId)));
+  }, [hub.teTests, annotation]);
+
+  const deviceAlerts = useMemo(() => {
+    if (!annotation) return [];
+    return hub.teAlerts.filter(a => a.active && a.agents?.some((ag: any) => annotation.teAgentIds.includes(ag.agentId)));
+  }, [hub.teAlerts, annotation]);
+
+  return (
+    <motion.div
+      initial={{ width: 0, opacity: 0 }}
+      animate={{ width: 340, opacity: 1 }}
+      exit={{ width: 0, opacity: 0 }}
+      transition={{ duration: 0.2 }}
+      className="bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 overflow-hidden flex-shrink-0"
+    >
+      <div className="h-full overflow-y-auto p-4">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-slate-900 dark:text-white truncate">{selectedNode.name}</h3>
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 transition">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Device node content */}
+        {isDevice && (
+          <div className="space-y-3">
+            {/* Tab bar */}
+            {hasTE && (
+              <div className="flex gap-1 p-0.5 bg-slate-100 dark:bg-slate-700/50 rounded-lg">
+                {(['overview', 'te'] as DetailTab[]).map(tab => (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab(tab)}
+                    className={`flex-1 px-2 py-1.5 text-[10px] font-semibold rounded-md transition-all ${
+                      activeTab === tab
+                        ? 'bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm'
+                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                    }`}
+                  >
+                    {tab === 'overview' ? 'Overview' : 'ThousandEyes'}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Overview tab */}
+            {activeTab === 'overview' && (
+              <>
+                <div className="flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: STATUS_COLORS[(selectedNode as TopologyNode).status]?.border || '#64748b' }} />
+                  <span className="text-xs font-medium text-slate-700 dark:text-slate-300 capitalize">{(selectedNode as TopologyNode).status}</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full" style={{
+                    backgroundColor: `${DEVICE_COLORS[(selectedNode as TopologyNode).type]?.fill}15`,
+                    color: DEVICE_COLORS[(selectedNode as TopologyNode).type]?.fill,
+                  }}>
+                    {DEVICE_COLORS[(selectedNode as TopologyNode).type]?.label}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { label: 'Model', value: (selectedNode as TopologyNode).model },
+                    { label: 'Serial', value: (selectedNode as TopologyNode).serial },
+                    { label: 'LAN IP', value: (selectedNode as TopologyNode).lanIp },
+                    { label: 'WAN IP', value: (selectedNode as TopologyNode).wan1Ip },
+                    { label: 'Firmware', value: (selectedNode as TopologyNode).firmware },
+                  ].filter(item => item.value).map(item => (
+                    <div key={item.label} className="bg-slate-50 dark:bg-slate-700/30 rounded-lg p-2">
+                      <div className="text-[9px] text-slate-500 dark:text-slate-400 uppercase tracking-wider">{item.label}</div>
+                      <div className="text-[11px] font-medium text-slate-700 dark:text-slate-300 truncate font-mono">{item.value}</div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {/* TE tab */}
+            {activeTab === 'te' && annotation && (
+              <div className="space-y-2">
+                {/* Summary card */}
+                <div className="p-3 bg-orange-500/5 border border-orange-500/20 rounded-lg">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Globe className="w-3.5 h-3.5 text-orange-500" />
+                    <span className="text-xs font-semibold text-orange-400">ThousandEyes</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-xs">
+                    <div>
+                      <span className="text-slate-500 dark:text-slate-400">Agents:</span>{' '}
+                      <span className="text-slate-700 dark:text-slate-300 font-semibold">{matchedAgents.length}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 dark:text-slate-400">Tests:</span>{' '}
+                      <span className="text-slate-700 dark:text-slate-300 font-semibold">{annotation.teTestCount}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 dark:text-slate-400">Alerts:</span>{' '}
+                      <span className={annotation.teAlertCount > 0 ? 'text-red-400 font-semibold' : 'text-slate-700 dark:text-slate-300'}>
+                        {annotation.teAlertCount}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Matched agents with online status */}
+                {matchedAgents.length > 0 && (
+                  <div className="space-y-1">
+                    <div className="text-[9px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Agents</div>
+                    {matchedAgents.map(agent => {
+                      const online = isAgentOnline(agent);
+                      return (
+                        <div key={agent.agentId} className="flex items-center gap-1.5 text-[10px] py-0.5">
+                          <div className={`w-1.5 h-1.5 rounded-full ${online ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                          <span className="text-slate-700 dark:text-slate-300 truncate">{agent.agentName}</span>
+                          <span className="text-slate-400 text-[8px] ml-auto">{agent.agentType}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Test results with health coloring */}
+                {deviceTests.length > 0 && (
+                  <div className="space-y-1">
+                    <div className="text-[9px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Tests</div>
+                    {deviceTests.slice(0, 5).map(test => {
+                      const health = hub.teTestHealth.find(h => h.testId === test.testId);
+                      const results = hub.teTestResults[test.testId];
+                      const latest = results && results.length > 0 ? results[results.length - 1] : null;
+                      const healthColor = health?.health === 'healthy' ? 'text-emerald-500'
+                        : health?.health === 'degraded' ? 'text-amber-500'
+                        : health?.health === 'failing' ? 'text-red-500'
+                        : 'text-slate-400';
+                      return (
+                        <div key={test.testId} className="text-[10px] py-0.5 flex items-center justify-between">
+                          <span className={`truncate mr-2 font-medium ${healthColor}`}>{test.testName}</span>
+                          <span className="text-slate-400 flex-shrink-0">
+                            {latest?.latency ? `${latest.latency.toFixed(0)}ms` : ''}
+                            {latest?.loss && latest.loss > 0 ? ` ${latest.loss.toFixed(1)}%` : ''}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Active alerts with severity and duration */}
+                {deviceAlerts.length > 0 && (
+                  <div className="space-y-1">
+                    <div className="text-[9px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Active Alerts</div>
+                    {deviceAlerts.slice(0, 3).map(alert => (
+                      <div key={alert.alertId} className="p-2 bg-red-500/5 border border-red-500/20 rounded-lg">
+                        <div className="flex items-center gap-1.5 text-[10px]">
+                          <AlertTriangle className="w-2.5 h-2.5 text-red-400 flex-shrink-0" />
+                          <span className="text-red-400 font-medium truncate">{alert.testName}</span>
+                          <span className="ml-auto text-[8px] text-slate-400 flex-shrink-0">
+                            {alert.severity}
+                          </span>
+                        </div>
+                        <div className="text-[9px] text-slate-400 mt-0.5 truncate">{alert.ruleExpression}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* AI analysis button */}
+            <button
+              onClick={() => onAnalyzeDevice(selectedNode as TopologyNode)}
+              className="flex items-center gap-2 w-full px-3 py-2 text-xs font-medium text-purple-400 bg-purple-500/10 border border-purple-500/30 rounded-lg hover:bg-purple-500/20 transition"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              Analyze with AI
+            </button>
+          </div>
+        )}
+
+        {/* VPN node content */}
+        {isVpn && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <div
+                className="px-2 py-0.5 rounded-full text-[9px] font-semibold text-white"
+                style={{ backgroundColor: NETWORK_ROLE_COLORS[(selectedNode as OrgNetworkNode).type]?.fill }}
+              >
+                {(selectedNode as OrgNetworkNode).type.toUpperCase()}
+              </div>
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                {(selectedNode as OrgNetworkNode).peerCount} VPN peers
+              </span>
+            </div>
+
+            {/* Subnets */}
+            {(selectedNode as OrgNetworkNode).subnets?.length > 0 && (
+              <div>
+                <div className="text-[9px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Subnets</div>
+                {(selectedNode as OrgNetworkNode).subnets.slice(0, 5).map((subnet, i) => (
+                  <div key={i} className="text-[10px] font-mono text-slate-600 dark:text-slate-400 py-0.5">
+                    {subnet.localSubnet} {subnet.useVpn && <span className="text-cyan-400 ml-1">VPN</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* VPN peers grouped by reachability */}
+            <div>
+              <div className="text-[9px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">VPN Peers</div>
+              {(() => {
+                const peers = (selectedNode as OrgNetworkNode).merakiVpnPeers;
+                const reachable = peers.filter(p => p.reachability === 'reachable');
+                const unreachable = peers.filter(p => p.reachability !== 'reachable');
+                const sorted = [...reachable, ...unreachable];
+                return (
+                  <>
+                    <div className="text-[8px] text-slate-400 mb-1">
+                      {reachable.length} reachable, {unreachable.length} unreachable
+                    </div>
+                    {sorted.slice(0, 10).map((peer, i) => (
+                      <div key={i} className="flex items-center justify-between text-xs py-1 px-2 bg-slate-50 dark:bg-slate-700/30 rounded mb-0.5">
+                        <span className="text-slate-700 dark:text-slate-300 truncate">{peer.networkName}</span>
+                        <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: VPN_TUNNEL_COLORS[peer.reachability] }} />
+                          <span className="text-[8px] text-slate-500">{peer.reachability}</span>
+                        </div>
+                      </div>
+                    ))}
+                    {peers.length > 10 && (
+                      <div className="text-[9px] text-slate-500 dark:text-slate-400 text-center py-1">
+                        +{peers.length - 10} more
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+
+            {/* AI analysis button for VPN */}
+            <button
+              onClick={() => onAnalyzeNetwork(selectedNode as OrgNetworkNode)}
+              className="flex items-center gap-2 w-full px-3 py-2 text-xs font-medium text-purple-400 bg-purple-500/10 border border-purple-500/30 rounded-lg hover:bg-purple-500/20 transition"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              Analyze with AI
+            </button>
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
+});
+DetailSidebar.displayName = 'DetailSidebar';
 
 // ============================================================================
 // Inner component (needs ReactFlowProvider parent)
@@ -887,6 +1340,13 @@ function NetworkMapInner({ hub, networkName }: NetworkMapViewProps) {
     router.push(`/chat-v2?q=${encodeURIComponent(prompt)}`);
   }, [hub.deviceAnnotations, router]);
 
+  const analyzeVpnNetwork = useCallback((node: OrgNetworkNode) => {
+    const reachable = node.merakiVpnPeers.filter(p => p.reachability === 'reachable').length;
+    const unreachable = node.merakiVpnPeers.filter(p => p.reachability !== 'reachable').length;
+    const prompt = `Analyze VPN network "${node.name}" (${node.type}). ${node.peerCount} peers: ${reachable} reachable, ${unreachable} unreachable. ${node.subnets?.length || 0} subnets. Assess VPN health and recommend optimizations.`;
+    router.push(`/chat-v2?q=${encodeURIComponent(prompt)}`);
+  }, [router]);
+
   // Empty states
   if (!hub.selectedOrg) {
     return (
@@ -1028,6 +1488,7 @@ function NetworkMapInner({ hub, networkName }: NetworkMapViewProps) {
                   </button>
                 )}
                 {/* TE Overlay — available for both network AND vpn */}
+                <div className="text-[9px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mt-1">Monitoring</div>
                 <button
                   onClick={() => setShowTEOverlay(!showTEOverlay)}
                   className={`flex items-center gap-2 w-full px-2 py-1.5 text-[10px] font-medium rounded-md transition ${
@@ -1090,221 +1551,21 @@ function NetworkMapInner({ hub, networkName }: NetworkMapViewProps) {
             </div>
           </Panel>
         </ReactFlow>
+
+        {/* Persistent TE Status Panel */}
+        {hub.teConfigured && showTEOverlay && <TEStatusPanel hub={hub} />}
       </div>
 
       {/* Detail Sidebar */}
       <AnimatePresence>
         {selectedNode && (
-          <motion.div
-            initial={{ width: 0, opacity: 0 }}
-            animate={{ width: 320, opacity: 1 }}
-            exit={{ width: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 overflow-hidden flex-shrink-0"
-          >
-            <div className="h-full overflow-y-auto p-4">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-semibold text-slate-900 dark:text-white truncate">
-                  {selectedNode.name}
-                </h3>
-                <button
-                  onClick={() => setSelectedNode(null)}
-                  className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 transition"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              {'serial' in selectedNode && (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <div
-                      className="w-2.5 h-2.5 rounded-full"
-                      style={{ backgroundColor: STATUS_COLORS[selectedNode.status]?.border || '#64748b' }}
-                    />
-                    <span className="text-xs font-medium text-slate-700 dark:text-slate-300 capitalize">
-                      {selectedNode.status}
-                    </span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full" style={{
-                      backgroundColor: `${DEVICE_COLORS[(selectedNode as TopologyNode).type]?.fill}15`,
-                      color: DEVICE_COLORS[(selectedNode as TopologyNode).type]?.fill,
-                    }}>
-                      {DEVICE_COLORS[(selectedNode as TopologyNode).type]?.label}
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    {[
-                      { label: 'Model', value: (selectedNode as TopologyNode).model },
-                      { label: 'Serial', value: (selectedNode as TopologyNode).serial },
-                      { label: 'LAN IP', value: (selectedNode as TopologyNode).lanIp },
-                      { label: 'WAN IP', value: (selectedNode as TopologyNode).wan1Ip },
-                      { label: 'Firmware', value: (selectedNode as TopologyNode).firmware },
-                    ].filter(item => item.value).map(item => (
-                      <div key={item.label} className="bg-slate-50 dark:bg-slate-700/30 rounded-lg p-2">
-                        <div className="text-[9px] text-slate-500 dark:text-slate-400 uppercase tracking-wider">{item.label}</div>
-                        <div className="text-[11px] font-medium text-slate-700 dark:text-slate-300 truncate font-mono">{item.value}</div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {(() => {
-                    const annotation = hub.deviceAnnotations.get(selectedNode.id);
-                    if (!annotation) return null;
-
-                    // Find the matched TE agents
-                    const matchedAgents = hub.teAgents.filter(a => annotation.teAgentIds.includes(a.agentId));
-                    // Find tests running through this device
-                    const deviceTests = hub.teTests.filter(t =>
-                      t.agents?.some(a => annotation.teAgentIds.includes(a.agentId))
-                    );
-                    // Find active alerts for this device
-                    const deviceAlerts = hub.teAlerts.filter(a =>
-                      a.active && a.agents?.some((ag: any) => annotation.teAgentIds.includes(ag.agentId))
-                    );
-
-                    return (
-                      <div className="space-y-2">
-                        <div className="p-3 bg-orange-500/5 border border-orange-500/20 rounded-lg">
-                          <div className="flex items-center gap-2 mb-2">
-                            <Globe className="w-3.5 h-3.5 text-orange-500" />
-                            <span className="text-xs font-semibold text-orange-400">ThousandEyes</span>
-                          </div>
-                          <div className="grid grid-cols-3 gap-2 text-xs mb-2">
-                            <div>
-                              <span className="text-slate-500 dark:text-slate-400">Agents:</span>{' '}
-                              <span className="text-slate-700 dark:text-slate-300 font-semibold">{matchedAgents.length}</span>
-                            </div>
-                            <div>
-                              <span className="text-slate-500 dark:text-slate-400">Tests:</span>{' '}
-                              <span className="text-slate-700 dark:text-slate-300 font-semibold">{annotation.teTestCount}</span>
-                            </div>
-                            <div>
-                              <span className="text-slate-500 dark:text-slate-400">Alerts:</span>{' '}
-                              <span className={annotation.teAlertCount > 0 ? 'text-red-400 font-semibold' : 'text-slate-700 dark:text-slate-300'}>
-                                {annotation.teAlertCount}
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* Matched agents */}
-                          {matchedAgents.length > 0 && (
-                            <div className="space-y-1 mb-2">
-                              <div className="text-[9px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Agents</div>
-                              {matchedAgents.map(agent => {
-                                const online = agent.agentState?.toLowerCase() === 'online';
-                                return (
-                                  <div key={agent.agentId} className="flex items-center gap-1.5 text-[10px] py-0.5">
-                                    <div className={`w-1.5 h-1.5 rounded-full ${online ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                                    <span className="text-slate-700 dark:text-slate-300 truncate">{agent.agentName}</span>
-                                    <span className="text-slate-400 text-[8px]">{agent.agentType}</span>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-
-                          {/* Test results for this device */}
-                          {deviceTests.length > 0 && (
-                            <div className="space-y-1">
-                              <div className="text-[9px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Tests</div>
-                              {deviceTests.slice(0, 5).map(test => {
-                                const health = hub.teTestHealth.find(h => h.testId === test.testId);
-                                const results = hub.teTestResults[test.testId];
-                                const latest = results && results.length > 0 ? results[results.length - 1] : null;
-                                const healthColor = health?.health === 'healthy' ? 'text-emerald-500'
-                                  : health?.health === 'degraded' ? 'text-amber-500'
-                                  : health?.health === 'failing' ? 'text-red-500'
-                                  : 'text-slate-400';
-                                return (
-                                  <div key={test.testId} className="text-[10px] py-0.5 flex items-center justify-between">
-                                    <span className={`truncate mr-2 font-medium ${healthColor}`}>{test.testName}</span>
-                                    <span className="text-slate-400 flex-shrink-0">
-                                      {latest?.latency ? `${latest.latency.toFixed(0)}ms` : ''}
-                                      {latest?.loss && latest.loss > 0 ? ` ${latest.loss.toFixed(1)}%` : ''}
-                                    </span>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Active alerts for this device */}
-                        {deviceAlerts.length > 0 && (
-                          <div className="space-y-1">
-                            {deviceAlerts.slice(0, 3).map(alert => (
-                              <div key={alert.alertId} className="p-2 bg-red-500/5 border border-red-500/20 rounded-lg">
-                                <div className="flex items-center gap-1.5 text-[10px]">
-                                  <AlertTriangle className="w-2.5 h-2.5 text-red-400 flex-shrink-0" />
-                                  <span className="text-red-400 font-medium truncate">{alert.testName}</span>
-                                </div>
-                                <div className="text-[9px] text-slate-400 mt-0.5 truncate">{alert.ruleExpression}</div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-
-                  <button
-                    onClick={() => analyzeDevice(selectedNode as TopologyNode)}
-                    className="flex items-center gap-2 w-full px-3 py-2 text-xs font-medium text-purple-400 bg-purple-500/10 border border-purple-500/30 rounded-lg hover:bg-purple-500/20 transition"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    Analyze with AI
-                  </button>
-                </div>
-              )}
-
-              {'peerCount' in selectedNode && !('serial' in selectedNode) && (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <div
-                      className="px-2 py-0.5 rounded-full text-[9px] font-semibold text-white"
-                      style={{ backgroundColor: NETWORK_ROLE_COLORS[(selectedNode as OrgNetworkNode).type]?.fill }}
-                    >
-                      {(selectedNode as OrgNetworkNode).type.toUpperCase()}
-                    </div>
-                    <span className="text-xs text-slate-500 dark:text-slate-400">
-                      {(selectedNode as OrgNetworkNode).peerCount} VPN peers
-                    </span>
-                  </div>
-
-                  {/* Subnets */}
-                  {(selectedNode as OrgNetworkNode).subnets?.length > 0 && (
-                    <div>
-                      <div className="text-[9px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Subnets</div>
-                      {(selectedNode as OrgNetworkNode).subnets.slice(0, 5).map((subnet, i) => (
-                        <div key={i} className="text-[10px] font-mono text-slate-600 dark:text-slate-400 py-0.5">
-                          {subnet.localSubnet} {subnet.useVpn && <span className="text-cyan-400 ml-1">VPN</span>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  <div>
-                    <div className="text-[9px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">VPN Peers</div>
-                    {(selectedNode as OrgNetworkNode).merakiVpnPeers.slice(0, 10).map((peer, i) => (
-                      <div key={i} className="flex items-center justify-between text-xs py-1 px-2 bg-slate-50 dark:bg-slate-700/30 rounded mb-0.5">
-                        <span className="text-slate-700 dark:text-slate-300 truncate">{peer.networkName}</span>
-                        <div className="flex items-center gap-1 flex-shrink-0 ml-2">
-                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: VPN_TUNNEL_COLORS[peer.reachability] }} />
-                          <span className="text-[8px] text-slate-500">{peer.reachability}</span>
-                        </div>
-                      </div>
-                    ))}
-                    {(selectedNode as OrgNetworkNode).merakiVpnPeers.length > 10 && (
-                      <div className="text-[9px] text-slate-500 dark:text-slate-400 text-center py-1">
-                        +{(selectedNode as OrgNetworkNode).merakiVpnPeers.length - 10} more
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          </motion.div>
+          <DetailSidebar
+            selectedNode={selectedNode}
+            hub={hub}
+            onClose={() => setSelectedNode(null)}
+            onAnalyzeDevice={analyzeDevice}
+            onAnalyzeNetwork={analyzeVpnNetwork}
+          />
         )}
       </AnimatePresence>
     </div>

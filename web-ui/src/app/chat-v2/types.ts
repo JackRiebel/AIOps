@@ -62,6 +62,11 @@ export interface ChatMessage {
       type: 'test_data_point';
       data: import('./components/TestDataPointContextCard').TestDataPointContextData;
     };
+    // Generic TE analysis context from any ThousandEyes "Ask AI" button
+    teAnalysisContext?: {
+      type: 'te_analysis';
+      data: import('./components/TEAnalysisContextCard').TEAnalysisContextData;
+    };
   };
 }
 

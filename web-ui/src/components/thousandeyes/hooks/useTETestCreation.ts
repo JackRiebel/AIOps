@@ -15,6 +15,8 @@ export interface UseTETestCreationReturn {
   createTestFromAI: (prompt: string) => Promise<void>;
   createTestManual: (config: { testName: string; url: string; testType: string; interval: number }) => Promise<void>;
   runInstantTest: (config: any) => Promise<any>;
+  updateTest: (testId: number, data: Record<string, any>) => Promise<void>;
+  deleteTest: (testId: number) => Promise<void>;
 }
 
 export function useTETestCreation({ fetchTests, setError }: UseTETestCreationParams): UseTETestCreationReturn {
@@ -32,8 +34,17 @@ export function useTETestCreation({ fetchTests, setError }: UseTETestCreationPar
         credentials: 'include', body: JSON.stringify({ prompt }),
       });
       if (!response.ok) {
-        const e = await response.json().catch(() => ({}));
-        const detail = typeof e.detail === 'string' ? e.detail : e.detail ? JSON.stringify(e.detail) : `HTTP ${response.status}`;
+        const text = await response.text().catch(() => '');
+        let detail = `HTTP ${response.status}`;
+        try {
+          const e = JSON.parse(text);
+          if (typeof e.detail === 'string') detail = e.detail;
+          else if (e.detail) detail = JSON.stringify(e.detail);
+          else if (typeof e.error === 'string') detail = e.error;
+          else if (typeof e.message === 'string') detail = e.message;
+        } catch {
+          if (text && text.length < 500) detail = text;
+        }
         throw new Error(detail);
       }
       await fetchTests();
@@ -54,8 +65,17 @@ export function useTETestCreation({ fetchTests, setError }: UseTETestCreationPar
         credentials: 'include', body: JSON.stringify(config),
       });
       if (!response.ok) {
-        const e = await response.json().catch(() => ({}));
-        const detail = typeof e.detail === 'string' ? e.detail : e.detail ? JSON.stringify(e.detail) : `HTTP ${response.status}`;
+        const text = await response.text().catch(() => '');
+        let detail = `HTTP ${response.status}`;
+        try {
+          const e = JSON.parse(text);
+          if (typeof e.detail === 'string') detail = e.detail;
+          else if (e.detail) detail = JSON.stringify(e.detail);
+          else if (typeof e.error === 'string') detail = e.error;
+          else if (typeof e.message === 'string') detail = e.message;
+        } catch {
+          if (text && text.length < 500) detail = text;
+        }
         throw new Error(detail);
       }
       await fetchTests();
@@ -86,6 +106,54 @@ export function useTETestCreation({ fetchTests, setError }: UseTETestCreationPar
     } finally { setLoadingTestCreation(false); }
   }, [setError]);
 
+  const updateTest = useCallback(async (testId: number, data: Record<string, any>) => {
+    try {
+      setLoadingTestCreation(true);
+      setError(null);
+      const response = await fetch(`/api/thousandeyes/tests/${testId}?organization=default`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        credentials: 'include', body: JSON.stringify(data),
+      });
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        let detail = `HTTP ${response.status}`;
+        try {
+          const e = JSON.parse(text);
+          detail = typeof e.detail === 'string' ? e.detail : e.detail ? JSON.stringify(e.detail) : detail;
+        } catch { if (text && text.length < 500) detail = text; }
+        throw new Error(detail);
+      }
+      await fetchTests();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update test');
+      throw err;
+    } finally { setLoadingTestCreation(false); }
+  }, [fetchTests, setError]);
+
+  const deleteTest = useCallback(async (testId: number) => {
+    try {
+      setLoadingTestCreation(true);
+      setError(null);
+      const response = await fetch(`/api/thousandeyes/tests/${testId}?organization=default`, {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        let detail = `HTTP ${response.status}`;
+        try {
+          const e = JSON.parse(text);
+          detail = typeof e.detail === 'string' ? e.detail : e.detail ? JSON.stringify(e.detail) : detail;
+        } catch { if (text && text.length < 500) detail = text; }
+        throw new Error(detail);
+      }
+      await fetchTests();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete test');
+      throw err;
+    } finally { setLoadingTestCreation(false); }
+  }, [fetchTests, setError]);
+
   return {
     showCreateModal,
     setShowCreateModal,
@@ -94,5 +162,7 @@ export function useTETestCreation({ fetchTests, setError }: UseTETestCreationPar
     createTestFromAI,
     createTestManual,
     runInstantTest,
+    updateTest,
+    deleteTest,
   };
 }

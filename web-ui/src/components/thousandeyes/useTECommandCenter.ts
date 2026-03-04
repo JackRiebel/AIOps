@@ -103,6 +103,8 @@ export interface TECommandCenterState {
   createTestFromAI: (prompt: string) => Promise<void>;
   createTestManual: (config: { testName: string; url: string; testType: string; interval: number }) => Promise<void>;
   runInstantTest: (config: any) => Promise<any>;
+  updateTest: (testId: number, data: Record<string, any>) => Promise<void>;
+  deleteTest: (testId: number) => Promise<void>;
   fetchDashboardWidgets: (dashboardId: string) => Promise<void>;
 }
 
@@ -245,6 +247,8 @@ export function useTECommandCenter(): TECommandCenterState {
     createTestFromAI: testCreation.createTestFromAI,
     createTestManual: testCreation.createTestManual,
     runInstantTest: testCreation.runInstantTest,
+    updateTest: testCreation.updateTest,
+    deleteTest: testCreation.deleteTest,
     fetchDashboardWidgets: dashboardsHook.fetchDashboardWidgets,
   };
 }
