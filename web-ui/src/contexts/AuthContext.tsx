@@ -32,13 +32,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [router]);
 
   async function checkAuth() {
-    try {
-      const currentUser = await apiClient.getCurrentUser();
-      setUser(currentUser);
-    } catch (error) {
-      setUser(null);
-    } finally {
-      setLoading(false);
+    const maxRetries = 2;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const currentUser = await apiClient.getCurrentUser();
+        setUser(currentUser);
+        setLoading(false);
+        return;
+      } catch (error: any) {
+        // On 401, immediately clear user (session truly invalid)
+        if (error?.status === 401 || error?.response?.status === 401) {
+          setUser(null);
+          setLoading(false);
+          return;
+        }
+        // Transient error — retry before giving up
+        if (attempt < maxRetries) {
+          await new Promise((r) => setTimeout(r, 1500));
+        } else {
+          setUser(null);
+          setLoading(false);
+        }
+      }
     }
   }
 

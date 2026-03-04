@@ -4,13 +4,6 @@ import { memo } from 'react';
 import { Plus } from 'lucide-react';
 import type { WorkflowStats } from './types';
 
-/**
- * WorkflowHero - Header section for the workflows page
- *
- * Simplified to have a single "Create Workflow" button that opens
- * the CreateWorkflowModal with all creation options.
- */
-
 export interface WorkflowHeroProps {
   stats?: WorkflowStats | null;
   onCreateWorkflow: () => void;
@@ -23,30 +16,19 @@ export const WorkflowHero = memo(({
   canCreate = true,
 }: WorkflowHeroProps) => {
   return (
-    <header className="flex items-center justify-between mb-6">
+    <header className="flex items-center justify-between mb-5">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
-          AI Workflows
+        <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-500 bg-clip-text text-transparent">
+          Workflow Automation
         </h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-          Automate network operations with AI assistance
-          {stats && stats.workflows.active > 0 && (
-            <span className="ml-2 text-slate-400 dark:text-slate-500">
-              · {stats.workflows.active} active
-              {stats.pending_approvals > 0 && (
-                <span className="text-amber-600 dark:text-amber-400 ml-1">
-                  · {stats.pending_approvals} pending approval
-                </span>
-              )}
-            </span>
-          )}
+        <p className="text-[13px] text-slate-500 dark:text-slate-400 mt-1 font-light">
+          AI-powered network operations with approval workflows and execution tracking
         </p>
       </div>
-
       {canCreate && (
         <button
           onClick={onCreateWorkflow}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-sm text-white font-medium transition-colors shadow-sm"
+          className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-sm text-white font-medium transition-all shadow-sm hover:shadow-md"
         >
           <Plus className="w-4 h-4" />
           Create Workflow

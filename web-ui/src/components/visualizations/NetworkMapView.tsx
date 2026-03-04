@@ -181,8 +181,8 @@ const DeviceNode = memo(({ data, selected }: NodeProps<Node<DeviceNodeData>>) =>
 
         {/* TE badge */}
         {data.hasTEAgent && (
-          <div className="absolute -top-2 -right-2 flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-orange-500 text-white text-[7px] font-bold">
-            <Globe className="w-2.5 h-2.5" />
+          <div className="absolute -top-2.5 -right-2.5 flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-orange-500 text-white text-[8px] font-bold shadow-lg shadow-orange-500/40 ring-2 ring-orange-400/50">
+            <Globe className="w-3 h-3" />
             {data.teTestCount}
           </div>
         )}
@@ -369,12 +369,15 @@ function EnhancedEdge({
   let strokeColor = '#94a3b8'; // default slate-400
   let strokeWidth = 1.5;
   let dashArray: string | undefined;
+  let hasTE = false;
 
   if (teLatency !== undefined && teHealth !== 'unknown') {
-    // TE-monitored link — orange-themed by health severity
-    if (teHealth === 'healthy') { strokeColor = '#ff6b35'; strokeWidth = 2.5; }       // TE orange
-    else if (teHealth === 'degraded') { strokeColor = '#ea580c'; strokeWidth = 3; }   // darker orange
-    else if (teHealth === 'failing') { strokeColor = '#ef4444'; strokeWidth = 3; }    // red for failing
+    // TE-monitored link — bold orange to stand out
+    hasTE = true;
+    strokeColor = '#f97316'; // orange-500 — vivid and unmistakable
+    strokeWidth = 4;
+    if (teHealth === 'degraded') { strokeColor = '#ea580c'; strokeWidth = 4.5; }
+    else if (teHealth === 'failing') { strokeColor = '#ef4444'; strokeWidth = 5; }
   } else if (vpnStatus) {
     strokeColor = VPN_TUNNEL_COLORS[vpnStatus as keyof typeof VPN_TUNNEL_COLORS] || '#64748b';
     strokeWidth = 2;
@@ -397,6 +400,20 @@ function EnhancedEdge({
 
   return (
     <>
+      {/* TE glow layer — thicker translucent stroke behind the main edge */}
+      {hasTE && (
+        <BaseEdge
+          id={`${id}-glow`}
+          path={edgePath}
+          style={{
+            stroke: strokeColor,
+            strokeWidth: strokeWidth + 6,
+            strokeDasharray: dashArray,
+            opacity: 0.25,
+            filter: 'blur(3px)',
+          }}
+        />
+      )}
       <BaseEdge
         id={id}
         path={edgePath}
@@ -410,7 +427,7 @@ function EnhancedEdge({
         }}
         markerEnd={markerEnd}
       />
-      {/* TE metrics label — clearly visible on the edge */}
+      {/* TE metrics label — bold orange badge on the edge */}
       {teLatency !== undefined && (
         <EdgeLabelRenderer>
           <div
@@ -421,19 +438,19 @@ function EnhancedEdge({
             }}
             className="nodrag nopan"
           >
-            <div className={`flex flex-col items-center px-2 py-1 rounded border shadow-sm ${
-              teHealth === 'failing' ? 'bg-red-50 dark:bg-red-900/80 text-red-700 dark:text-red-300 border-red-300 dark:border-red-700'
-              : teHealth === 'degraded' ? 'bg-orange-50 dark:bg-orange-900/80 text-orange-700 dark:text-orange-300 border-orange-300 dark:border-orange-700'
-              : 'bg-orange-50 dark:bg-orange-900/80 text-orange-700 dark:text-orange-300 border-orange-300 dark:border-orange-700'
+            <div className={`flex flex-col items-center px-2.5 py-1 rounded-md border-2 shadow-lg ${
+              teHealth === 'failing' ? 'bg-red-500 text-white border-red-600'
+              : teHealth === 'degraded' ? 'bg-orange-500 text-white border-orange-600'
+              : 'bg-orange-500 text-white border-orange-600'
             }`}>
               <span className="text-[10px] font-bold leading-tight">
                 {teLatency.toFixed(0)}ms
                 {teLoss !== undefined && teLoss > 0 && (
-                  <span className="ml-1 text-red-600 dark:text-red-400">{teLoss.toFixed(1)}%</span>
+                  <span className="ml-1 text-orange-100">{teLoss.toFixed(1)}%</span>
                 )}
               </span>
               {teTestName && (
-                <span className="text-[7px] opacity-70 leading-tight truncate max-w-[80px]">{teTestName}</span>
+                <span className="text-[7px] text-orange-100 leading-tight truncate max-w-[100px]">{teTestName}</span>
               )}
             </div>
           </div>
@@ -577,7 +594,11 @@ function NetworkMapInner({ hub, networkName }: NetworkMapViewProps) {
       const hubStartX = (layoutDimensions.width - totalHubWidth) / 2;
 
       const makeNodeData = (node: typeof hub.vpnNodes[0]): VpnNodeData => {
-        const ann = hub.deviceAnnotations.get(node.id);
+        // Check device annotations (direct device IP match)
+        const deviceAnn = hub.deviceAnnotations.get(node.id);
+        // Also check link annotations for network-level TE coverage
+        const linkAnn = hub.linkAnnotations.get(`node-${node.id}`);
+        const hasCoverage = !!deviceAnn || !!linkAnn;
         return {
           label: node.name,
           role: node.type,
@@ -585,8 +606,8 @@ function NetworkMapInner({ hub, networkName }: NetworkMapViewProps) {
           peerCount: node.peerCount,
           productTypes: node.productTypes,
           subnetCount: node.subnets?.length || 0,
-          hasTECoverage: !!ann,
-          teTestCount: ann?.teTestCount || 0,
+          hasTECoverage: hasCoverage,
+          teTestCount: deviceAnn?.teTestCount || (linkAnn ? 1 : 0),
         };
       };
 
@@ -693,7 +714,7 @@ function NetworkMapInner({ hub, networkName }: NetworkMapViewProps) {
         } satisfies DeviceNodeData,
       };
     });
-  }, [viewMode, positionedNodes, hub.vpnNodes, hub.deviceAnnotations, layoutDimensions]);
+  }, [viewMode, positionedNodes, hub.vpnNodes, hub.deviceAnnotations, hub.linkAnnotations, layoutDimensions]);
 
   // Convert to @xyflow edges
   const flowEdges = useMemo((): Edge[] => {
@@ -713,12 +734,25 @@ function NetworkMapInner({ hub, networkName }: NetworkMapViewProps) {
         let teHealth: string | undefined;
         let teTestName: string | undefined;
 
-        if (showTEOverlay && teByTestId.length > 0) {
+        if (showTEOverlay) {
+          // Direct node-level lookup (created by annotations hook for VPN network IDs)
           const srcAnn = hub.linkAnnotations.get(`node-${srcId}`);
           const tgtAnn = hub.linkAnnotations.get(`node-${tgtId}`);
-          const ann = srcAnn && tgtAnn
+          let ann = srcAnn && tgtAnn
             ? ((srcAnn.teLatency || 0) > (tgtAnn.teLatency || 0) ? srcAnn : tgtAnn)
             : srcAnn || tgtAnn;
+
+          // Fallback: search te-* entries whose _nodeIds reference either endpoint
+          if (!ann && teByTestId.length > 0) {
+            for (const [, teAnn] of teByTestId) {
+              const nodeIds = teAnn._nodeIds;
+              if (nodeIds && (nodeIds.includes(srcId) || nodeIds.includes(tgtId))) {
+                ann = teAnn;
+                break;
+              }
+            }
+          }
+
           if (ann) {
             teLatency = ann.teLatency;
             teLoss = ann.teLoss;
@@ -781,7 +815,9 @@ function NetworkMapInner({ hub, networkName }: NetworkMapViewProps) {
 
       // Determine highlight/dim for hover
       const isConnected = hoveredNodeId ? (srcId === hoveredNodeId || tgtId === hoveredNodeId) : false;
-      const shouldDim = hoveredNodeId ? !isConnected : false;
+      const hasTE = showTEOverlay && teLatency !== undefined;
+      // Dim non-TE edges when overlay is active so TE edges pop
+      const shouldDim = hoveredNodeId ? !isConnected : (showTEOverlay && !hasTE);
 
       return {
         id: `edge-${srcId}-${tgtId}-${i}`,

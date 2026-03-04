@@ -2,21 +2,37 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { RefreshCw, CheckCircle, Clock, AlertTriangle, ShieldAlert, Workflow as WorkflowIcon, Target, History } from 'lucide-react';
+import {
+  Plus,
+  RefreshCw,
+  CheckCircle,
+  Clock,
+  AlertTriangle,
+  ShieldAlert,
+  Workflow as WorkflowIcon,
+  Target,
+  History,
+  Activity,
+  Zap,
+  Search,
+  LayoutGrid,
+  List,
+  Loader2,
+  TrendingUp,
+  Sparkles,
+  Play,
+} from 'lucide-react';
 import { usePermissions, PERMISSIONS } from '@/contexts/PermissionContext';
-import { ErrorAlert, EmptyState } from '@/components/common';
+import { ErrorAlert } from '@/components/common';
 import {
   WorkflowListItem,
   WorkflowDetailPanel,
   TemplateSelector,
   ApprovalPanel,
-  WorkflowHero,
   WorkflowCardGrid,
-  ViewToggle,
   WorkflowOnboarding,
   shouldShowOnboarding,
   OutcomeRecorder,
-  AIWorkflowROI,
   EnterpriseCanvas,
   ExecutionMonitor,
   WorkflowTestModal,
@@ -26,13 +42,12 @@ import {
   type WorkflowStats,
   type WorkflowTemplate,
   type WorkflowTab,
-  type CreateWorkflowRequest,
   type ViewMode,
   type WorkflowOutcome,
 } from '@/components/workflows';
 
 // ============================================================================
-// API Functions
+// API Functions (unchanged)
 // ============================================================================
 
 const API_BASE = '/api/workflows';
@@ -41,7 +56,6 @@ async function fetchWorkflows(params?: { status?: string; organization?: string 
   const searchParams = new URLSearchParams();
   if (params?.status) searchParams.set('status', params.status);
   if (params?.organization) searchParams.set('organization', params.organization);
-
   const url = `${API_BASE}${searchParams.toString() ? `?${searchParams}` : ''}`;
   const res = await fetch(url, { credentials: 'include' });
   if (!res.ok) throw new Error('Failed to fetch workflows');
@@ -71,27 +85,18 @@ async function fetchPendingApprovals(organization?: string): Promise<WorkflowExe
 }
 
 async function toggleWorkflow(id: number): Promise<Workflow> {
-  const res = await fetch(`${API_BASE}/${id}/toggle`, {
-    method: 'POST',
-    credentials: 'include',
-  });
+  const res = await fetch(`${API_BASE}/${id}/toggle`, { method: 'POST', credentials: 'include' });
   if (!res.ok) throw new Error('Failed to toggle workflow');
   return res.json();
 }
 
 async function deleteWorkflow(id: number): Promise<void> {
-  const res = await fetch(`${API_BASE}/${id}`, {
-    method: 'DELETE',
-    credentials: 'include',
-  });
+  const res = await fetch(`${API_BASE}/${id}`, { method: 'DELETE', credentials: 'include' });
   if (!res.ok) throw new Error('Failed to delete workflow');
 }
 
 async function approveExecution(executionId: number): Promise<WorkflowExecution> {
-  const res = await fetch(`${API_BASE}/executions/${executionId}/approve`, {
-    method: 'POST',
-    credentials: 'include',
-  });
+  const res = await fetch(`${API_BASE}/executions/${executionId}/approve`, { method: 'POST', credentials: 'include' });
   if (!res.ok) throw new Error('Failed to approve execution');
   return res.json();
 }
@@ -108,9 +113,7 @@ async function rejectExecution(executionId: number, reason?: string): Promise<Wo
 }
 
 async function fetchExecutionOutcome(executionId: number): Promise<WorkflowOutcome | null> {
-  const res = await fetch(`/api/executions/${executionId}/outcome`, {
-    credentials: 'include',
-  });
+  const res = await fetch(`/api/executions/${executionId}/outcome`, { credentials: 'include' });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error('Failed to fetch outcome');
   return res.json();
@@ -137,6 +140,31 @@ async function fetchCompletedExecutions(workflowId?: number): Promise<WorkflowEx
   const res = await fetch(url, { credentials: 'include' });
   if (!res.ok) throw new Error('Failed to fetch completed executions');
   return res.json();
+}
+
+// ============================================================================
+// Stat Card
+// ============================================================================
+
+function StatCard({ icon: Icon, label, value, sub, accent }: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: string | number;
+  sub?: string;
+  accent: string;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200/60 dark:border-slate-700/40 bg-white/80 dark:bg-slate-800/60 p-4">
+      <div className="flex items-center gap-2.5 mb-2">
+        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${accent}`}>
+          <Icon className="w-4 h-4 text-white" />
+        </div>
+        <span className="text-[12px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">{label}</span>
+      </div>
+      <p className="text-2xl font-bold text-slate-900 dark:text-white">{value}</p>
+      {sub && <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">{sub}</p>}
+    </div>
+  );
 }
 
 // ============================================================================
@@ -172,14 +200,15 @@ export default function WorkflowsPage() {
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('card');
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
-  // Canvas states (canvas is now the only creation method)
+  // Canvas states
   const [showFlowCanvas, setShowFlowCanvas] = useState(false);
   const [canvasWorkflow, setCanvasWorkflow] = useState<Workflow | null>(null);
   const [monitoringExecutionId, setMonitoringExecutionId] = useState<number | null>(null);
   const [monitoringWorkflowId, setMonitoringWorkflowId] = useState<number | null>(null);
 
-  // Workflow test modal state
+  // Test modal state
   const [showTestModal, setShowTestModal] = useState(false);
   const [testWorkflowId, setTestWorkflowId] = useState<number | null>(null);
   const [testWorkflowName, setTestWorkflowName] = useState<string>('');
@@ -190,11 +219,8 @@ export default function WorkflowsPage() {
   const [existingOutcome, setExistingOutcome] = useState<WorkflowOutcome | null>(null);
   const [completedExecutions, setCompletedExecutions] = useState<WorkflowExecution[]>([]);
 
-  // Check if onboarding should be shown on first render
   useEffect(() => {
-    if (shouldShowOnboarding()) {
-      setShowOnboarding(true);
-    }
+    if (shouldShowOnboarding()) setShowOnboarding(true);
   }, []);
 
   // ============================================================================
@@ -209,9 +235,8 @@ export default function WorkflowsPage() {
         fetchStats(),
         fetchTemplates(),
         fetchPendingApprovals(),
-        fetchCompletedExecutions().catch(() => []), // Don't fail if this endpoint doesn't exist yet
+        fetchCompletedExecutions().catch(() => []),
       ]);
-
       setWorkflows(workflowsData);
       setStats(statsData);
       setTemplates(templatesData);
@@ -224,9 +249,7 @@ export default function WorkflowsPage() {
     }
   }, []);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  useEffect(() => { loadData(); }, [loadData]);
 
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
@@ -239,46 +262,48 @@ export default function WorkflowsPage() {
   // ============================================================================
 
   const filteredWorkflows = useMemo(() => {
+    let list = workflows;
     switch (activeTab) {
       case 'active':
-        return workflows.filter(w => w.status === 'active');
+        list = workflows.filter(w => w.status === 'active');
+        break;
       case 'pending':
-        return []; // Pending tab shows executions, not workflows
+        return [];
       case 'history':
-        return workflows; // Show all with execution history
+        break;
       default:
-        return workflows;
+        break;
     }
-  }, [workflows, activeTab]);
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(w =>
+        w.name.toLowerCase().includes(q) ||
+        w.description?.toLowerCase().includes(q) ||
+        w.trigger_type.toLowerCase().includes(q)
+      );
+    }
+    return list;
+  }, [workflows, activeTab, searchQuery]);
 
   // ============================================================================
-  // Actions
+  // Handlers (all preserved exactly)
   // ============================================================================
 
   const handleToggleWorkflow = useCallback(async (workflow: Workflow) => {
     try {
       const updated = await toggleWorkflow(workflow.id);
       setWorkflows(prev => prev.map(w => w.id === updated.id ? updated : w));
-      if (selectedWorkflow?.id === updated.id) {
-        setSelectedWorkflow(updated);
-      }
-    } catch {
-      // Toggle failed silently
-    }
+      if (selectedWorkflow?.id === updated.id) setSelectedWorkflow(updated);
+    } catch { /* silent */ }
   }, [selectedWorkflow]);
 
   const handleDeleteWorkflow = useCallback(async (workflow: Workflow) => {
     if (!confirm(`Are you sure you want to delete "${workflow.name}"?`)) return;
-
     try {
       await deleteWorkflow(workflow.id);
       setWorkflows(prev => prev.filter(w => w.id !== workflow.id));
-      if (selectedWorkflow?.id === workflow.id) {
-        setSelectedWorkflow(null);
-      }
-    } catch {
-      // Delete failed silently
-    }
+      if (selectedWorkflow?.id === workflow.id) setSelectedWorkflow(null);
+    } catch { /* silent */ }
   }, [selectedWorkflow]);
 
   const handleApprove = useCallback(async (execution: WorkflowExecution) => {
@@ -288,9 +313,7 @@ export default function WorkflowsPage() {
       setShowApprovalModal(false);
       setSelectedExecution(null);
       await loadData();
-    } catch {
-      // Approve failed silently
-    }
+    } catch { /* silent */ }
   }, [loadData]);
 
   const handleReject = useCallback(async (execution: WorkflowExecution, reason?: string) => {
@@ -299,20 +322,15 @@ export default function WorkflowsPage() {
       setPendingApprovals(prev => prev.filter(e => e.id !== execution.id));
       setShowApprovalModal(false);
       setSelectedExecution(null);
-    } catch {
-      // Reject failed silently
-    }
+    } catch { /* silent */ }
   }, []);
 
-  // Outcome recording handlers
   const handleOpenOutcomeRecorder = useCallback(async (execution: WorkflowExecution) => {
     setOutcomeExecution(execution);
     try {
       const outcome = await fetchExecutionOutcome(execution.id);
       setExistingOutcome(outcome);
-    } catch {
-      setExistingOutcome(null);
-    }
+    } catch { setExistingOutcome(null); }
     setShowOutcomeRecorder(true);
   }, []);
 
@@ -324,13 +342,11 @@ export default function WorkflowsPage() {
     setShowOutcomeRecorder(false);
     setOutcomeExecution(null);
     setExistingOutcome(null);
-    // Refresh data after saving outcome
     await loadData();
   }, [outcomeExecution, loadData]);
 
   const handleCreateFromTemplate = useCallback((template: WorkflowTemplate) => {
     setShowTemplates(false);
-    // Navigate to wizard with template
     router.push(`/workflows/new?template=${template.id}`);
   }, [router]);
 
@@ -341,39 +357,28 @@ export default function WorkflowsPage() {
     setSelectedWorkflow(workflow);
   }, []);
 
-  // Handle workflow run - now opens execution monitor
   const handleRun = useCallback(async (workflow: Workflow) => {
     try {
-      const res = await fetch(`${API_BASE}/${workflow.id}/run`, {
-        method: 'POST',
-        credentials: 'include',
-      });
+      const res = await fetch(`${API_BASE}/${workflow.id}/run`, { method: 'POST', credentials: 'include' });
       if (!res.ok) throw new Error('Failed to run workflow');
       const data = await res.json();
-      // Open execution monitor with the new execution
       if (data.execution_id) {
         setMonitoringWorkflowId(workflow.id);
         setMonitoringExecutionId(data.execution_id);
       }
       await loadData();
-    } catch {
-      // Run failed silently
-    }
+    } catch { /* silent */ }
   }, [loadData]);
 
-  // Handle opening flow canvas (now the primary creation method)
   const handleOpenCanvas = useCallback((workflow?: Workflow) => {
     setCanvasWorkflow(workflow || null);
     setShowFlowCanvas(true);
   }, []);
 
-  // Handle saving from flow canvas
   const handleCanvasSave = useCallback((workflow: Workflow) => {
     setWorkflows(prev => {
       const exists = prev.find(w => w.id === workflow.id);
-      if (exists) {
-        return prev.map(w => w.id === workflow.id ? workflow : w);
-      }
+      if (exists) return prev.map(w => w.id === workflow.id ? workflow : w);
       return [workflow, ...prev];
     });
     setShowFlowCanvas(false);
@@ -381,7 +386,6 @@ export default function WorkflowsPage() {
     setSelectedWorkflow(workflow);
   }, []);
 
-  // Handle workflow duplicate
   const handleDuplicate = useCallback(async (workflow: Workflow) => {
     try {
       const res = await fetch(`${API_BASE}/${workflow.id}/duplicate`, {
@@ -396,23 +400,17 @@ export default function WorkflowsPage() {
       const newWorkflow = await res.json();
       setWorkflows(prev => [newWorkflow, ...prev]);
       setSelectedWorkflow(newWorkflow);
-      // Switch to list view to show the new workflow's detail panel
       setViewMode('list');
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Failed to duplicate workflow');
     }
   }, []);
 
-  // Handle workflow export
   const handleExport = useCallback(async (workflow: Workflow) => {
     try {
-      const res = await fetch(`${API_BASE}/${workflow.id}/export`, {
-        credentials: 'include',
-      });
+      const res = await fetch(`${API_BASE}/${workflow.id}/export`, { credentials: 'include' });
       if (!res.ok) throw new Error('Failed to export workflow');
       const data = await res.json();
-
-      // Download as JSON file
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -422,51 +420,52 @@ export default function WorkflowsPage() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    } catch {
-      // Export failed silently
-    }
+    } catch { /* silent */ }
   }, []);
 
-  // Handle view history
   const handleViewHistory = useCallback((workflow: Workflow) => {
     setSelectedWorkflow(workflow);
     setActiveTab('history');
   }, []);
 
-  // Handle test workflow - opens test modal with time simulation
   const handleTestWorkflow = useCallback((workflow: Workflow) => {
     setTestWorkflowId(workflow.id);
     setTestWorkflowName(workflow.name);
     setShowTestModal(true);
   }, []);
 
-  // Handle edit workflow - switch to list view and select the workflow
   const handleEditWorkflow = useCallback((workflow: Workflow) => {
     setSelectedWorkflow(workflow);
     setViewMode('list');
-    // Switch to all tab if we're on a different tab
-    if (activeTab !== 'all' && activeTab !== 'active') {
-      setActiveTab('all');
-    }
+    if (activeTab !== 'all' && activeTab !== 'active') setActiveTab('all');
   }, [activeTab]);
+
+  // ============================================================================
+  // Tab Config
+  // ============================================================================
+
+  const tabs = useMemo(() => [
+    { id: 'all' as const, label: 'All', icon: WorkflowIcon, count: workflows.length },
+    { id: 'active' as const, label: 'Active', icon: Activity, count: stats?.workflows.active ?? 0 },
+    { id: 'pending' as const, label: 'Pending', icon: AlertTriangle, count: pendingApprovals.length },
+    { id: 'history' as const, label: 'History', icon: History, count: completedExecutions.length },
+  ], [workflows.length, stats, pendingApprovals.length, completedExecutions.length]);
 
   // ============================================================================
   // Render
   // ============================================================================
 
-  // Show loading while permissions are being fetched
   if (permissionsLoading || loading) {
     return (
       <div className="flex items-center justify-center h-[calc(100vh-4rem)]">
         <div className="text-center">
-          <div className="w-8 h-8 border-2 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-slate-500 dark:text-slate-400">Loading workflows...</p>
+          <Loader2 className="w-8 h-8 text-cyan-500 animate-spin mx-auto mb-4" />
+          <p className="text-sm text-slate-500 dark:text-slate-400">Loading workflows...</p>
         </div>
       </div>
     );
   }
 
-  // Access denied if no view permission
   if (!canView) {
     return (
       <div className="flex items-center justify-center h-[calc(100vh-4rem)]">
@@ -474,25 +473,50 @@ export default function WorkflowsPage() {
           <ShieldAlert className="w-16 h-16 text-red-400 dark:text-red-500 mx-auto mb-4" />
           <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">Access Denied</h2>
           <p className="text-slate-500 dark:text-slate-400 max-w-md">
-            You don&apos;t have permission to view workflows. Please contact your administrator to request access.
+            You don&apos;t have permission to view workflows. Contact your administrator.
           </p>
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="h-full flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-900/50">
-      {/* Page Container */}
-      <div className="px-6 py-6">
-        {/* Hero Section */}
-        <WorkflowHero
-          stats={stats}
-          onCreateWorkflow={() => handleOpenCanvas()}
-          canCreate={canCreate}
-        />
+  const successRate = stats ? stats.success_rate : 0;
 
-        {/* Error Alert */}
+  return (
+    <div className="h-full flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-900">
+      {/* ── Header ── */}
+      <div className="px-6 pt-5 pb-0">
+        <div className="flex items-start justify-between mb-5">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-500 bg-clip-text text-transparent">
+              Workflow Automation
+            </h1>
+            <p className="text-[13px] text-slate-500 dark:text-slate-400 mt-1 font-light">
+              AI-powered network operations with approval workflows and execution tracking
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="p-2.5 rounded-lg bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/60 text-slate-500 hover:text-cyan-500 dark:hover:text-cyan-400 transition-all shadow-sm hover:shadow-md disabled:opacity-40 group"
+              title="Refresh"
+            >
+              <RefreshCw className={`w-4 h-4 transition-transform group-hover:rotate-45 ${isRefreshing ? 'animate-spin' : ''}`} />
+            </button>
+            {canCreate && (
+              <button
+                onClick={() => handleOpenCanvas()}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-sm font-medium transition-all shadow-sm hover:shadow-md"
+              >
+                <Plus className="w-4 h-4" />
+                Create Workflow
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Error */}
         {error && (
           <ErrorAlert
             title="Connection Error"
@@ -503,101 +527,141 @@ export default function WorkflowsPage() {
           />
         )}
 
-        {/* AI Workflow ROI - Show when there are workflow stats with AI data */}
-        <AIWorkflowROI stats={stats} className="mb-4" />
+        {/* ── Stats Row ── */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+          <StatCard
+            icon={WorkflowIcon}
+            label="Total"
+            value={stats?.workflows.total ?? workflows.length}
+            sub={`${stats?.workflows.draft ?? 0} drafts`}
+            accent="bg-gradient-to-br from-slate-500 to-slate-600"
+          />
+          <StatCard
+            icon={Activity}
+            label="Active"
+            value={stats?.workflows.active ?? 0}
+            sub={`${stats?.workflows.paused ?? 0} paused`}
+            accent="bg-gradient-to-br from-emerald-500 to-emerald-600"
+          />
+          <StatCard
+            icon={AlertTriangle}
+            label="Pending"
+            value={pendingApprovals.length}
+            sub={pendingApprovals.length > 0 ? 'Needs review' : 'All clear'}
+            accent={`bg-gradient-to-br ${pendingApprovals.length > 0 ? 'from-amber-500 to-amber-600' : 'from-slate-400 to-slate-500'}`}
+          />
+          <StatCard
+            icon={TrendingUp}
+            label="Success Rate"
+            value={stats && stats.total_triggers > 0 ? `${Math.round(successRate)}%` : '--'}
+            sub={stats ? `${stats.total_triggers} total runs` : 'No data'}
+            accent={`bg-gradient-to-br ${successRate >= 90 ? 'from-emerald-500 to-emerald-600' : successRate >= 70 ? 'from-amber-500 to-amber-600' : 'from-slate-400 to-slate-500'}`}
+          />
+        </div>
 
-        {/* Onboarding Card - Show when no workflows exist */}
-        {canCreate && workflows.length === 0 && (
-          <div className="bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 p-6 mb-4">
-            <div className="flex items-center gap-4">
-              <div className="w-14 h-14 flex-shrink-0 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg">
-                <WorkflowIcon className="w-7 h-7 text-white" />
+        {/* ── Empty state CTA ── */}
+        {canCreate && workflows.length === 0 && !error && (
+          <div className="rounded-xl border border-dashed border-cyan-300 dark:border-cyan-700/50 bg-gradient-to-r from-cyan-50/50 to-blue-50/50 dark:from-cyan-900/10 dark:to-blue-900/10 p-6 mb-5">
+            <div className="flex items-center gap-5">
+              <div className="w-14 h-14 flex-shrink-0 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-cyan-500/20">
+                <Sparkles className="w-7 h-7 text-white" />
               </div>
               <div className="flex-1 min-w-0">
-                <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
+                <h3 className="text-base font-semibold text-slate-900 dark:text-white">
                   Get Started with AI Workflows
                 </h3>
                 <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                  Create automated responses to network events with AI-powered analysis. Choose from templates, use AI to generate workflows, or build your own.
+                  Create automated responses to network events with AI-powered analysis and approval workflows.
                 </p>
               </div>
               <button
                 onClick={() => handleOpenCanvas()}
-                className="flex-shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-medium transition-colors shadow-sm"
+                className="flex-shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-medium text-sm transition-all shadow-sm"
               >
-                <WorkflowIcon className="w-5 h-5" />
-                Create Your First Workflow
+                <Plus className="w-4 h-4" />
+                Create First Workflow
               </button>
             </div>
           </div>
         )}
-      </div>
 
-      {/* Refresh Button - Float in corner */}
-      <button
-        onClick={handleRefresh}
-        disabled={isRefreshing}
-        className="absolute top-4 right-4 p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 transition-colors z-10"
-        title="Refresh"
-      >
-        <RefreshCw className={`w-5 h-5 ${isRefreshing ? 'animate-spin' : ''}`} />
-      </button>
-
-      {/* Tabs */}
-      <div className="flex items-center justify-between px-6 pt-4 border-b border-slate-200 dark:border-slate-700">
-        <div className="flex items-center gap-1" role="tablist" aria-label="Workflow filters">
-          {[
-            { id: 'all' as const, label: 'All Workflows', count: workflows.length },
-            { id: 'active' as const, label: 'Active', count: stats?.workflows.active ?? 0 },
-            { id: 'pending' as const, label: 'Pending Approval', count: pendingApprovals.length },
-            { id: 'history' as const, label: 'Execution History', count: null },
-          ].map(tab => (
-            <button
-              key={tab.id}
-              role="tab"
-              aria-selected={activeTab === tab.id}
-              aria-controls={`tabpanel-${tab.id}`}
-              onClick={() => setActiveTab(tab.id)}
-              className={`
-                px-4 py-2 text-sm font-medium rounded-t-lg transition-colors relative
-                focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:ring-offset-1
-                ${activeTab === tab.id
-                  ? 'bg-white dark:bg-slate-800 text-cyan-600 dark:text-cyan-400 border-t border-x border-slate-200 dark:border-slate-700'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-700/50'
-                }
-              `}
-            >
-              {tab.label}
-              {tab.count !== null && tab.count > 0 && (
-                <span className={`
-                  ml-2 px-1.5 py-0.5 text-xs rounded-full
-                  ${tab.id === 'pending' && tab.count > 0
-                    ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
-                    : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400'
-                  }
-                `}>
-                  {tab.count}
-                </span>
-              )}
-              {activeTab === tab.id && (
-                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-cyan-500" aria-hidden="true" />
-              )}
-            </button>
-          ))}
-        </div>
-        {/* View Toggle - only show for workflow tabs */}
-        {(activeTab === 'all' || activeTab === 'active') && (
-          <div className="pb-2">
-            <ViewToggle viewMode={viewMode} onChange={setViewMode} />
+        {/* ── Tab Bar + Controls ── */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-0.5 p-1 bg-slate-100/80 dark:bg-slate-800/60 rounded-xl backdrop-blur-sm border border-slate-200/50 dark:border-slate-700/30">
+            {tabs.map(tab => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              const isPending = tab.id === 'pending' && tab.count > 0;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`relative flex items-center gap-1.5 px-3.5 py-2 text-[13px] font-medium rounded-lg transition-all duration-200 ${
+                    isActive
+                      ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-white/50 dark:hover:bg-slate-700/30'
+                  }`}
+                >
+                  <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-cyan-500' : ''}`} />
+                  {tab.label}
+                  {tab.count > 0 && (
+                    <span className={`ml-1 px-1.5 py-0.5 text-[10px] font-semibold rounded-full ${
+                      isPending
+                        ? 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400'
+                        : isActive
+                          ? 'bg-cyan-100 dark:bg-cyan-500/20 text-cyan-700 dark:text-cyan-400'
+                          : 'bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-400'
+                    }`}>
+                      {tab.count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
-        )}
+
+          {/* Controls */}
+          {(activeTab === 'all' || activeTab === 'active') && (
+            <div className="flex items-center gap-2">
+              {/* Search */}
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search workflows..."
+                  className="w-52 pl-8 pr-3 py-2 bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/60 rounded-lg text-[13px] text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40 shadow-sm"
+                />
+              </div>
+
+              {/* View toggle */}
+              <div className="flex items-center bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/60 rounded-lg p-0.5 shadow-sm">
+                <button
+                  onClick={() => setViewMode('card')}
+                  className={`p-2 rounded-md transition-all ${viewMode === 'card' ? 'bg-slate-100 dark:bg-slate-700 text-slate-900 dark:text-white' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
+                  title="Card view"
+                >
+                  <LayoutGrid className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setViewMode('list')}
+                  className={`p-2 rounded-md transition-all ${viewMode === 'list' ? 'bg-slate-100 dark:bg-slate-700 text-slate-900 dark:text-white' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
+                  title="List view"
+                >
+                  <List className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Card View Mode - Full width grid */}
+      {/* ── Content ── */}
+      <div className="flex-1 flex overflow-hidden mt-4">
+        {/* Card View */}
         {viewMode === 'card' && (activeTab === 'all' || activeTab === 'active') ? (
-          <div className="flex-1 overflow-y-auto bg-slate-50 dark:bg-slate-900/50">
+          <div className="flex-1 overflow-y-auto">
             <WorkflowCardGrid
               workflows={filteredWorkflows}
               selectedWorkflowId={selectedWorkflow?.id}
@@ -608,7 +672,7 @@ export default function WorkflowsPage() {
               onExport={handleExport}
               onViewHistory={handleViewHistory}
               onEdit={handleEditWorkflow}
-              onDelete={(workflow) => handleDeleteWorkflow(workflow)}
+              onDelete={handleDeleteWorkflow}
               onToggle={handleToggleWorkflow}
               onCreateNew={() => handleOpenCanvas()}
               canExecute={canExecute}
@@ -620,117 +684,123 @@ export default function WorkflowsPage() {
         ) : (
           <>
             {/* List Panel */}
-            <div className="w-1/3 min-w-[320px] max-w-[480px] border-r border-slate-200 dark:border-slate-700 overflow-y-auto">
+            <div className="w-[380px] min-w-[340px] border-r border-slate-200 dark:border-slate-700/60 overflow-y-auto bg-white dark:bg-slate-800/40">
               {activeTab === 'pending' ? (
-                // Pending Approvals List
                 pendingApprovals.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-full text-slate-400 dark:text-slate-500">
-                    <CheckCircle className="w-12 h-12 mb-3" />
-                    <p className="font-medium">No pending approvals</p>
-                    <p className="text-sm">All caught up!</p>
+                  <div className="flex flex-col items-center justify-center h-full text-center px-6">
+                    <div className="w-14 h-14 rounded-full bg-emerald-50 dark:bg-emerald-500/10 flex items-center justify-center mb-4">
+                      <CheckCircle className="w-7 h-7 text-emerald-500" />
+                    </div>
+                    <p className="text-sm font-medium text-slate-900 dark:text-white">No pending approvals</p>
+                    <p className="text-[13px] text-slate-500 dark:text-slate-400 mt-1">All caught up!</p>
                   </div>
                 ) : (
-                  <div className="divide-y divide-slate-100 dark:divide-slate-700">
+                  <div className="divide-y divide-slate-100 dark:divide-slate-700/50">
                     {pendingApprovals.map(execution => (
-                      <div
+                      <button
                         key={execution.id}
+                        type="button"
                         onClick={() => {
                           if (canApprove) {
                             setSelectedExecution(execution);
                             setShowApprovalModal(true);
                           }
                         }}
-                        className={`
-                          p-4 transition-colors
-                          ${canApprove ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50' : 'cursor-not-allowed opacity-75'}
-                          ${selectedExecution?.id === execution.id ? 'bg-cyan-50 dark:bg-cyan-900/20' : ''}
-                        `}
+                        className={`w-full text-left p-4 transition-colors ${
+                          canApprove ? 'hover:bg-slate-50 dark:hover:bg-slate-700/30 cursor-pointer' : 'cursor-not-allowed opacity-75'
+                        } ${selectedExecution?.id === execution.id ? 'bg-cyan-50/50 dark:bg-cyan-900/10 border-l-2 border-l-cyan-500' : ''}`}
                       >
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <h3 className="font-medium text-slate-900 dark:text-white">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <h3 className="text-[13px] font-semibold text-slate-900 dark:text-white truncate">
                               {execution.workflow?.name || `Workflow #${execution.workflow_id}`}
                             </h3>
-                            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
+                            <p className="text-[12px] text-slate-500 dark:text-slate-400 mt-1 line-clamp-2 leading-relaxed">
                               {execution.ai_analysis || 'AI analysis pending...'}
                             </p>
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
                             {typeof execution.ai_confidence === 'number' && (
-                              <span className={`
-                                text-xs px-2 py-0.5 rounded-full
-                                ${execution.ai_confidence >= 0.8
-                                  ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+                              <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
+                                execution.ai_confidence >= 0.8
+                                  ? 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
                                   : execution.ai_confidence >= 0.6
-                                  ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
-                                  : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
-                                }
-                              `}>
+                                    ? 'bg-amber-100 dark:bg-amber-500/15 text-amber-700 dark:text-amber-400'
+                                    : 'bg-red-100 dark:bg-red-500/15 text-red-700 dark:text-red-400'
+                              }`}>
                                 {(execution.ai_confidence * 100).toFixed(0)}%
                               </span>
                             )}
-                            <AlertTriangle className="w-4 h-4 text-amber-500" />
+                            {execution.ai_risk_level && (
+                              <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                                execution.ai_risk_level === 'low'
+                                  ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                                  : execution.ai_risk_level === 'medium'
+                                    ? 'bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                                    : 'bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-400'
+                              }`}>
+                                {execution.ai_risk_level} risk
+                              </span>
+                            )}
                           </div>
                         </div>
-                        <div className="flex items-center gap-2 mt-2 text-xs text-slate-500 dark:text-slate-400">
-                          <span>{execution.trigger_event_count} events</span>
-                          <span>·</span>
-                          <span>{new Date(execution.created_at?.endsWith?.('Z') ? execution.created_at : execution.created_at + 'Z').toLocaleString()}</span>
+                        <div className="flex items-center gap-3 mt-2.5 text-[11px] text-slate-400 dark:text-slate-500">
+                          <span className="flex items-center gap-1">
+                            <Zap className="w-3 h-3" />
+                            {execution.trigger_event_count} events
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            {new Date(execution.created_at?.endsWith?.('Z') ? execution.created_at : execution.created_at + 'Z').toLocaleString()}
+                          </span>
                         </div>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 )
               ) : activeTab === 'history' ? (
-                // Execution History List with Outcome Recording
                 completedExecutions.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-full text-slate-400 dark:text-slate-500">
-                    <History className="w-12 h-12 mb-3" />
-                    <p className="font-medium">No execution history</p>
-                    <p className="text-sm">Completed executions will appear here</p>
+                  <div className="flex flex-col items-center justify-center h-full text-center px-6">
+                    <div className="w-14 h-14 rounded-full bg-slate-100 dark:bg-slate-700/50 flex items-center justify-center mb-4">
+                      <History className="w-7 h-7 text-slate-400" />
+                    </div>
+                    <p className="text-sm font-medium text-slate-900 dark:text-white">No execution history</p>
+                    <p className="text-[13px] text-slate-500 dark:text-slate-400 mt-1">Completed executions will appear here</p>
                   </div>
                 ) : (
-                  <div className="divide-y divide-slate-100 dark:divide-slate-700">
+                  <div className="divide-y divide-slate-100 dark:divide-slate-700/50">
                     {completedExecutions.map(execution => (
-                      <div
-                        key={execution.id}
-                        className="p-4 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
-                      >
-                        <div className="flex items-start justify-between">
+                      <div key={execution.id} className="p-4 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+                        <div className="flex items-start justify-between gap-3">
                           <div className="flex-1 min-w-0">
-                            <h3 className="font-medium text-slate-900 dark:text-white truncate">
+                            <h3 className="text-[13px] font-semibold text-slate-900 dark:text-white truncate">
                               {execution.workflow?.name || `Workflow #${execution.workflow_id}`}
                             </h3>
-                            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
+                            <p className="text-[12px] text-slate-500 dark:text-slate-400 mt-1 line-clamp-2 leading-relaxed">
                               {execution.ai_analysis || 'Execution completed'}
                             </p>
                           </div>
-                          <div className="flex items-center gap-2 ml-2">
-                            {execution.status === 'completed' && (
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
-                                Completed
-                              </span>
-                            )}
-                            {execution.status === 'failed' && (
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400">
-                                Failed
-                              </span>
-                            )}
-                          </div>
+                          <span className={`flex-shrink-0 text-[11px] font-medium px-2 py-0.5 rounded-full ${
+                            execution.status === 'completed'
+                              ? 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+                              : 'bg-red-100 dark:bg-red-500/15 text-red-700 dark:text-red-400'
+                          }`}>
+                            {execution.status === 'completed' ? 'Completed' : 'Failed'}
+                          </span>
                         </div>
                         <div className="flex items-center justify-between mt-3">
-                          <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                            <Clock className="w-3.5 h-3.5" />
-                            <span>{execution.completed_at
+                          <span className="flex items-center gap-1 text-[11px] text-slate-400 dark:text-slate-500">
+                            <Clock className="w-3 h-3" />
+                            {execution.completed_at
                               ? new Date(execution.completed_at?.endsWith?.('Z') ? execution.completed_at : execution.completed_at + 'Z').toLocaleString()
-                              : new Date(execution.created_at?.endsWith?.('Z') ? execution.created_at : execution.created_at + 'Z').toLocaleString()}</span>
-                          </div>
+                              : new Date(execution.created_at?.endsWith?.('Z') ? execution.created_at : execution.created_at + 'Z').toLocaleString()}
+                          </span>
                           {canRecordOutcome && (
                             <button
                               onClick={() => handleOpenOutcomeRecorder(execution)}
-                              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors"
+                              className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg bg-purple-50 dark:bg-purple-500/10 text-purple-600 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-500/20 transition-colors border border-purple-200/60 dark:border-purple-500/20"
                             >
-                              <Target className="w-3.5 h-3.5" />
+                              <Target className="w-3 h-3" />
                               Record Outcome
                             </button>
                           )}
@@ -740,19 +810,31 @@ export default function WorkflowsPage() {
                   </div>
                 )
               ) : (
-                // Workflows List
                 filteredWorkflows.length === 0 ? (
-                  <EmptyState
-                    variant="workflows"
-                    title="No workflows yet"
-                    description={canCreate ? 'Create your first workflow to automate network tasks' : 'No workflows have been created yet'}
-                    action={canCreate ? {
-                      label: 'Create Workflow',
-                      onClick: () => handleOpenCanvas()
-                    } : undefined}
-                  />
+                  <div className="flex flex-col items-center justify-center h-full text-center px-6">
+                    <div className="w-14 h-14 rounded-full bg-slate-100 dark:bg-slate-700/50 flex items-center justify-center mb-4">
+                      <WorkflowIcon className="w-7 h-7 text-slate-400" />
+                    </div>
+                    <p className="text-sm font-medium text-slate-900 dark:text-white">
+                      {searchQuery ? 'No matching workflows' : 'No workflows yet'}
+                    </p>
+                    <p className="text-[13px] text-slate-500 dark:text-slate-400 mt-1">
+                      {searchQuery
+                        ? `No workflows match "${searchQuery}"`
+                        : canCreate ? 'Create your first workflow to get started' : 'No workflows have been created yet'}
+                    </p>
+                    {canCreate && !searchQuery && (
+                      <button
+                        onClick={() => handleOpenCanvas()}
+                        className="mt-4 flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-medium transition-colors"
+                      >
+                        <Plus className="w-4 h-4" />
+                        Create Workflow
+                      </button>
+                    )}
+                  </div>
                 ) : (
-                  <div className="divide-y divide-slate-100 dark:divide-slate-700">
+                  <div className="divide-y divide-slate-100 dark:divide-slate-700/50">
                     {filteredWorkflows.map(workflow => (
                       <WorkflowListItem
                         key={workflow.id}
@@ -784,12 +866,12 @@ export default function WorkflowsPage() {
                   }}
                 />
               ) : (
-                <div className="flex flex-col items-center justify-center h-full text-slate-400 dark:text-slate-500">
-                  <svg className="w-16 h-16 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
-                  </svg>
-                  <p className="text-lg font-medium">Select a workflow</p>
-                  <p className="text-sm">Choose a workflow from the list to view details</p>
+                <div className="flex flex-col items-center justify-center h-full text-center">
+                  <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
+                    <WorkflowIcon className="w-8 h-8 text-slate-300 dark:text-slate-600" />
+                  </div>
+                  <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Select a workflow</p>
+                  <p className="text-[13px] text-slate-400 dark:text-slate-500 mt-1">Choose from the list to view details</p>
                 </div>
               )}
             </div>
@@ -797,7 +879,7 @@ export default function WorkflowsPage() {
         )}
       </div>
 
-      {/* Modals */}
+      {/* ── Modals (all preserved) ── */}
       {showTemplates && (
         <TemplateSelector
           templates={templates}
@@ -811,10 +893,7 @@ export default function WorkflowsPage() {
           execution={selectedExecution}
           onApprove={() => handleApprove(selectedExecution)}
           onReject={(reason) => handleReject(selectedExecution, reason)}
-          onClose={() => {
-            setShowApprovalModal(false);
-            setSelectedExecution(null);
-          }}
+          onClose={() => { setShowApprovalModal(false); setSelectedExecution(null); }}
         />
       )}
 
@@ -830,22 +909,14 @@ export default function WorkflowsPage() {
           execution={outcomeExecution}
           existingOutcome={existingOutcome}
           onSave={handleSaveOutcome}
-          onClose={() => {
-            setShowOutcomeRecorder(false);
-            setOutcomeExecution(null);
-            setExistingOutcome(null);
-          }}
+          onClose={() => { setShowOutcomeRecorder(false); setOutcomeExecution(null); setExistingOutcome(null); }}
         />
       )}
 
-      {/* Canvas - Primary Workflow Creation Method */}
       {showFlowCanvas && (
         <WorkflowModeProvider>
           <EnterpriseCanvas
-            onClose={() => {
-              setShowFlowCanvas(false);
-              setCanvasWorkflow(null);
-            }}
+            onClose={() => { setShowFlowCanvas(false); setCanvasWorkflow(null); }}
             onSave={handleCanvasSave}
             initialFlow={canvasWorkflow?.flow_data}
             workflowId={canvasWorkflow?.id}
@@ -857,25 +928,16 @@ export default function WorkflowsPage() {
       {monitoringExecutionId && (
         <ExecutionMonitor
           executionId={monitoringExecutionId}
-          onClose={() => {
-            setMonitoringExecutionId(null);
-            setMonitoringWorkflowId(null);
-          }}
+          onClose={() => { setMonitoringExecutionId(null); setMonitoringWorkflowId(null); }}
           onEdit={(workflowId) => {
-            // Find the workflow and open it in the canvas editor
-            // Use Number() to handle potential string/number type mismatch from API
             const workflow = workflows.find(w => Number(w.id) === Number(workflowId));
-            console.log('[ExecutionMonitor] onEdit called:', { workflowId, found: !!workflow, workflows: workflows.map(w => ({ id: w.id, name: w.name })) });
             if (workflow) {
               setMonitoringExecutionId(null);
               setMonitoringWorkflowId(null);
               handleOpenCanvas(workflow);
-            } else {
-              console.error('[ExecutionMonitor] Workflow not found for ID:', workflowId);
             }
           }}
           onRetry={async () => {
-            // Re-run the workflow
             if (monitoringWorkflowId) {
               const workflow = workflows.find(w => w.id === monitoringWorkflowId);
               if (workflow) {
@@ -890,15 +952,10 @@ export default function WorkflowsPage() {
         />
       )}
 
-      {/* Workflow Test Modal - Time Machine simulation */}
       {showTestModal && testWorkflowId && (
         <WorkflowTestModal
           isOpen={showTestModal}
-          onClose={() => {
-            setShowTestModal(false);
-            setTestWorkflowId(null);
-            setTestWorkflowName('');
-          }}
+          onClose={() => { setShowTestModal(false); setTestWorkflowId(null); setTestWorkflowName(''); }}
           workflowId={testWorkflowId}
           workflowName={testWorkflowName}
         />

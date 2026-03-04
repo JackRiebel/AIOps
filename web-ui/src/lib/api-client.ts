@@ -71,7 +71,7 @@ export const apiClient = {
   },
 
   async getNetworkPlatformOrgs() {
-    return request<any[]>('/api/network/platform-orgs');
+    return request<any[]>('/api/organizations/network-platforms');
   },
 
   async listNetworks(organizationName: string) {
@@ -95,13 +95,13 @@ export const apiClient = {
   // Network Topology & Visualization
   async getNetworkTopology(organizationName: string, networkId: string, includeClients = false) {
     return request<any>(
-      `/api/network/topology?organization=${encodeURIComponent(organizationName)}&network_id=${encodeURIComponent(networkId)}&include_clients=${includeClients}`
+      `/api/topology/graph?organization=${encodeURIComponent(organizationName)}&network_id=${encodeURIComponent(networkId)}&include_clients=${includeClients}`
     );
   },
 
   async getNetworkPerformance(organizationName: string, networkId: string, timespan: number) {
     return request<any>(
-      `/api/network/performance?organization=${encodeURIComponent(organizationName)}&network_id=${encodeURIComponent(networkId)}&timespan=${timespan}`
+      `/api/meraki/networks/${encodeURIComponent(networkId)}/performance?organization=${encodeURIComponent(organizationName)}&time_span=${timespan}`
     );
   },
 
@@ -113,7 +113,7 @@ export const apiClient = {
 
   async getOrgVpnTopology(organizationName: string, organizationId: string) {
     return request<any>(
-      `/api/network/vpn-topology?organization=${encodeURIComponent(organizationName)}&organization_id=${encodeURIComponent(organizationId)}`
+      `/api/meraki/organizations/${encodeURIComponent(organizationId)}/vpn/topology?organization=${encodeURIComponent(organizationName)}`
     );
   },
 
@@ -150,8 +150,8 @@ export const apiClient = {
     });
   },
 
-  async testIntegration(integration: 'anthropic' | 'openai' | 'google' | 'meraki' | 'catalyst' | 'thousandeyes' | 'splunk' | 'slack' | 'teams' | 'email') {
-    return request<{ success: boolean; message: string }>(`/api/admin/test/${integration}`, {
+  async testIntegration(integration: 'anthropic' | 'openai' | 'google' | 'meraki' | 'catalyst' | 'thousandeyes' | 'splunk' | 'splunk-api' | 'cisco' | 'slack' | 'teams' | 'email') {
+    return request<{ success: boolean; message: string }>(`/api/admin/config/test/${integration}`, {
       method: 'POST',
     });
   },

@@ -1,11 +1,12 @@
 'use client';
 
 import { useMemo } from 'react';
-import type { TopologyNode, DeviceAnnotation, LinkAnnotation } from '@/types/visualization';
+import type { TopologyNode, DeviceAnnotation, LinkAnnotation, OrgNetworkNode } from '@/types/visualization';
 import type { Agent, Test, Alert, TestHealthCell, TestResult } from '@/components/thousandeyes/types';
 
 export interface UseCrossPlatformAnnotationsParams {
   topologyNodes: TopologyNode[];
+  vpnNodes?: OrgNetworkNode[];
   teAgents: Agent[];
   teTests: Test[];
   teAlerts: Alert[];
@@ -20,6 +21,7 @@ export interface UseCrossPlatformAnnotationsReturn {
 
 export function useCrossPlatformAnnotations({
   topologyNodes,
+  vpnNodes,
   teAgents,
   teTests,
   teAlerts,
@@ -96,6 +98,20 @@ export function useCrossPlatformAnnotations({
       });
     });
 
+    // Also build agentId -> Set of networkIds (for VPN overlay)
+    const agentToNetworkIds = new Map<number, Set<string>>();
+    topologyNodes.forEach(node => {
+      const netId = node.networkId;
+      if (!netId) return;
+      const ann = deviceAnnotations.get(node.id);
+      if (ann) {
+        ann.teAgentIds.forEach(agentId => {
+          if (!agentToNetworkIds.has(agentId)) agentToNetworkIds.set(agentId, new Set());
+          agentToNetworkIds.get(agentId)!.add(netId);
+        });
+      }
+    });
+
     // Helper to add annotation for a test
     type HealthStatus = 'healthy' | 'degraded' | 'failing' | 'unknown';
     const addAnnotation = (
@@ -103,12 +119,18 @@ export function useCrossPlatformAnnotations({
       latency: number | undefined, loss: number | undefined,
       testAgentIds: number[]
     ) => {
+      // Collect device node IDs and network IDs touched by this test
       const nodeIds = new Set<string>();
+      const networkIds = new Set<string>();
       testAgentIds.forEach(agentId => {
         agentToNodeIds.get(agentId)?.forEach(nodeId => nodeIds.add(nodeId));
+        agentToNetworkIds.get(agentId)?.forEach(netId => networkIds.add(netId));
       });
-      if (nodeIds.size === 0 && latency === undefined) return;
 
+      // Always create te-{testId} entry even if no matching devices
+      // (test may be cloud-to-cloud, still useful for VPN overlay)
+      // Include both device node IDs and network IDs so VPN edge lookup can find them
+      const allIds = new Set([...nodeIds, ...networkIds]);
       const key = `te-${testId}`;
       map.set(key, {
         edgeKey: key,
@@ -118,11 +140,29 @@ export function useCrossPlatformAnnotations({
         teTestName: testName,
         teHealth: health,
         splunkEvents: 0,
-        _nodeIds: Array.from(nodeIds),
+        _nodeIds: Array.from(allIds),
       });
 
+      // Create node-{deviceId} entries for device-level topology overlay
       nodeIds.forEach(nodeId => {
         const nodeKey = `node-${nodeId}`;
+        const existing = map.get(nodeKey);
+        if (!existing || (latency && (!existing.teLatency || latency > existing.teLatency))) {
+          map.set(nodeKey, {
+            edgeKey: nodeKey,
+            teLatency: latency,
+            teLoss: loss,
+            teTestId: testId,
+            teTestName: testName,
+            teHealth: health,
+            splunkEvents: 0,
+          });
+        }
+      });
+
+      // Create node-{networkId} entries for VPN topology overlay
+      networkIds.forEach(netId => {
+        const nodeKey = `node-${netId}`;
         const existing = map.get(nodeKey);
         if (!existing || (latency && (!existing.teLatency || latency > existing.teLatency))) {
           map.set(nodeKey, {
@@ -169,7 +209,6 @@ export function useCrossPlatformAnnotations({
         if (latency === undefined) return;
 
         const testAgentIds = (test.agents || []).map(a => a.agentId);
-        // Derive health from latency/loss thresholds
         const loss = last.loss ?? 0;
         const health: HealthStatus = loss > 2 || (latency > 200) ? 'failing'
           : loss > 0.5 || (latency > 100) ? 'degraded'
@@ -179,8 +218,30 @@ export function useCrossPlatformAnnotations({
       });
     }
 
+    // Final pass: for tests that didn't match ANY device (cloud agents etc.),
+    // still create annotations from metrics so they appear in VPN overlay.
+    // Also build VPN network-level device annotations for hasTECoverage.
+    teTests.forEach(test => {
+      if (annotatedTestIds.has(test.testId)) return;
+      // Check if this test already has an annotation from testResults above
+      if (map.has(`te-${test.testId}`)) return;
+
+      // Get latest metrics from _latestMetrics if available
+      const metrics = test._latestMetrics;
+      if (!metrics) return;
+
+      const latency = metrics.latency ?? metrics.responseTime;
+      const loss = metrics.loss ?? 0;
+      const health: HealthStatus = (loss !== undefined && loss > 2) || (latency !== undefined && latency > 200) ? 'failing'
+        : (loss !== undefined && loss > 0.5) || (latency !== undefined && latency > 100) ? 'degraded'
+        : 'healthy';
+
+      const testAgentIds = (test.agents || []).map(a => a.agentId);
+      addAnnotation(test.testId, test.testName, health, latency, loss, testAgentIds);
+    });
+
     return map;
-  }, [teTestHealthMap, teTests, teTestResults, deviceAnnotations]);
+  }, [teTestHealthMap, teTests, teTestResults, deviceAnnotations, topologyNodes]);
 
   return { deviceAnnotations, linkAnnotations };
 }

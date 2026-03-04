@@ -17,71 +17,124 @@ async def get_network_topology(
     """Get network topology graph for visualization."""
     async with (await get_async_dashboard(organization)) as aiomeraki:
         try:
-            # 1. Fetch L2 topology from Meraki (Links)
-            # This endpoint provides LLDP/CDP neighbor information
+            # 1. Fetch L2 topology (links + discovered nodes)
             l2_topology = await aiomeraki.networks.getNetworkTopologyLinkLayer(network_id)
-            
-            # 2. Fetch Devices (Nodes) with status
+
+            # 2. Fetch managed devices
             devices = await aiomeraki.networks.getNetworkDevices(network_id)
-            
-            # 3. Fetch Statuses for coloring
-            # Finding the org ID from one device or network lookup usually needed first if not passed
-            # Optimistically use what we have or do a quick lookup
-            # For brevity/speed in this robust implementation, we might skip status if expensive,
-            # but let's try to get it if we can derive org_id.
-            
+
+            # 3. Fetch device statuses for the org
+            device_statuses: Dict[str, str] = {}
+            try:
+                network_info = await aiomeraki.networks.getNetwork(network_id)
+                org_id = network_info.get("organizationId")
+                if org_id:
+                    statuses = await aiomeraki.organizations.getOrganizationDevicesStatuses(
+                        org_id, networkIds=[network_id], total_pages=-1
+                    )
+                    for s in statuses:
+                        device_statuses[s["serial"]] = s.get("status", "online")
+            except Exception:
+                pass  # Fall back to default "online"
+
+            # 4. Build derivedId→serial mapping from L2 topology nodes
+            derived_to_serial: Dict[str, str] = {}
+            if l2_topology and "nodes" in l2_topology:
+                for topo_node in l2_topology["nodes"]:
+                    derived_id = topo_node.get("derivedId")
+                    dev_info = topo_node.get("device")
+                    if derived_id and dev_info and dev_info.get("serial"):
+                        derived_to_serial[derived_id] = dev_info["serial"]
+
+            def _resolve_id(raw_id: str) -> str:
+                """Resolve a derivedId to serial if possible."""
+                return derived_to_serial.get(raw_id, raw_id)
+
+            # 5. Process managed device nodes
             nodes = []
-            links = []
-            
-            # Process Nodes
-            device_map = {}
+            device_map: Dict[str, dict] = {}
             for dev in devices:
                 serial = dev["serial"]
                 model = dev.get("model", "")
-                
-                # Determine group
-                group = 'switch' 
-                if model.startswith('MX') or model.startswith('Z'): group = 'hub'
-                elif model.startswith('MR'): group = 'ap'
+
+                group = 'switch'
+                if model.startswith(('MX', 'Z')): group = 'hub'
+                elif model.startswith('MR') or model.startswith('CW'): group = 'ap'
                 elif model.startswith('MV'): group = 'camera'
                 elif model.startswith('MT'): group = 'sensor'
-                
+                elif model.startswith('MG'): group = 'gateway'
+
                 node = {
                     "id": serial,
+                    "serial": serial,
                     "name": dev.get("name") or model,
                     "group": group,
                     "model": model,
-                    "ip": dev.get("lanIp") or dev.get("wan1Ip") or "",
-                    "status": "online",  # Placeholder, needs status call
-                    "val": 20 if group == 'hub' else (15 if group == 'switch' else 10)
+                    "lanIp": dev.get("lanIp", ""),
+                    "wan1Ip": dev.get("wan1Ip", ""),
+                    "mac": dev.get("mac", ""),
+                    "firmware": dev.get("firmware", ""),
+                    "networkId": dev.get("networkId", network_id),
+                    "status": device_statuses.get(serial, "online"),
+                    "val": 20 if group == 'hub' else (15 if group == 'switch' else 10),
                 }
                 nodes.append(node)
                 device_map[serial] = node
-            
-            # Process Links
+
+            # 6. Process L2 topology links — resolve derivedId to serial
+            links = []
             if l2_topology and "links" in l2_topology:
                 for link in l2_topology["links"]:
-                     # Standardize source/target
-                     if len(link.get("ends", [])) == 2:
-                         src = link["ends"][0]
-                         dst = link["ends"][1]
-                         
-                         src_id = src.get("device", {}).get("serial") or src.get("node", {}).get("derivedId")
-                         dst_id = dst.get("device", {}).get("serial") or dst.get("node", {}).get("derivedId")
-                         
-                         if src_id and dst_id:
-                             links.append({
-                                 "source": src_id,
-                                 "target": dst_id,
-                                 "type": "wired", 
-                                 "status": "active"
-                             })
+                    ends = link.get("ends", [])
+                    if len(ends) != 2:
+                        continue
+                    src, dst = ends[0], ends[1]
+
+                    src_id = src.get("device", {}).get("serial") or src.get("node", {}).get("derivedId")
+                    dst_id = dst.get("device", {}).get("serial") or dst.get("node", {}).get("derivedId")
+                    if not src_id or not dst_id:
+                        continue
+
+                    # Resolve derivedIds to device serials
+                    src_id = _resolve_id(src_id)
+                    dst_id = _resolve_id(dst_id)
+
+                    # Create placeholder node for discovered (non-managed) endpoints
+                    for end_id, end_data in [(src_id, src), (dst_id, dst)]:
+                        if end_id not in device_map:
+                            disc = end_data.get("discovered", {})
+                            lldp = disc.get("lldp", {})
+                            cdp = disc.get("cdp", {})
+                            disc_name = lldp.get("systemName") or cdp.get("deviceId") or end_id[:12]
+                            disc_model = cdp.get("platform") or ""
+                            node = {
+                                "id": end_id,
+                                "serial": end_id,
+                                "name": disc_name,
+                                "group": "switch",
+                                "model": disc_model,
+                                "lanIp": lldp.get("managementAddress") or cdp.get("address") or "",
+                                "wan1Ip": "",
+                                "mac": end_data.get("node", {}).get("mac", ""),
+                                "firmware": "",
+                                "networkId": network_id,
+                                "status": "online",
+                                "val": 12,
+                            }
+                            nodes.append(node)
+                            device_map[end_id] = node
+
+                    links.append({
+                        "source": src_id,
+                        "target": dst_id,
+                        "type": "wired",
+                        "status": "active",
+                    })
 
             return {"nodes": nodes, "links": links}
 
         except Exception as e:
             logger.error(f"Topology fetch error: {e}")
-            # Fallback to simple device list without links if L2 fails
             return {"nodes": [], "links": []}
 
 

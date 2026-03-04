@@ -109,6 +109,8 @@ export interface VisualizationHubState {
   fetchPerformance: (timeRange: TimeRange) => Promise<void>;
   fetchTETestResults: (testId: number, testType: string) => Promise<void>;
   refresh: () => void;
+  clearError: () => void;
+  retryFetch: () => void;
 }
 
 // ============================================================================
@@ -138,6 +140,7 @@ export function useVisualizationHub(): VisualizationHubState {
 
   const annotations = useCrossPlatformAnnotations({
     topologyNodes: topology.topologyNodes,
+    vpnNodes: vpn.vpnNodes,
     teAgents: te.agents,
     teTests: te.tests,
     teAlerts: te.alerts,
@@ -217,5 +220,7 @@ export function useVisualizationHub(): VisualizationHubState {
     fetchPerformance: performance.fetchPerformance,
     fetchTETestResults,
     refresh,
+    clearError: orgs.clearError,
+    retryFetch: orgs.retryFetch,
   };
 }

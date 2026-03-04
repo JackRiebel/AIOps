@@ -2,9 +2,20 @@
 
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { RefreshCw, AlertCircle, Loader2 } from 'lucide-react';
+import {
+  RefreshCw,
+  AlertCircle,
+  Loader2,
+  Building2,
+  Network,
+  Server,
+  Wifi,
+  WifiOff,
+  ChevronDown,
+  X,
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { apiClient } from '@/lib/api-client';
-import { TopStatsBar, type StatItem } from '@/components/dashboard';
 import {
   type TabType,
   type NetworkWithMeta,
@@ -30,6 +41,69 @@ function detectOrgType(url: string): 'meraki' | 'catalyst' | 'thousandeyes' | 's
   if (urlLower.includes(':8089') || urlLower.includes('splunk')) return 'splunk';
   if (urlLower.includes('dnac') || urlLower.includes('catalyst')) return 'catalyst';
   return 'meraki';
+}
+
+// ============================================================================
+// Stat Card Component
+// ============================================================================
+
+function StatCard({ icon: Icon, label, value, color, subValue }: {
+  icon: React.ElementType;
+  label: string;
+  value: number;
+  color: string;
+  subValue?: string;
+}) {
+  return (
+    <div className="flex items-center gap-3 px-4 py-3 bg-white/80 dark:bg-slate-800/60 rounded-xl border border-slate-200/60 dark:border-slate-700/40">
+      <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${color} flex items-center justify-center shrink-0`}>
+        <Icon className="w-4.5 h-4.5 text-white" />
+      </div>
+      <div>
+        <p className="text-xl font-bold text-slate-900 dark:text-white tabular-nums leading-none">
+          {value.toLocaleString()}
+        </p>
+        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">{label}</p>
+      </div>
+      {subValue && (
+        <span className="ml-auto text-[10px] font-medium text-slate-400 dark:text-slate-500">{subValue}</span>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Loading Skeleton
+// ============================================================================
+
+function PageSkeleton() {
+  return (
+    <div className="h-full bg-slate-50 dark:bg-slate-900">
+      <div className="px-6 py-5 max-w-[1800px] mx-auto">
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <div className="h-7 w-52 bg-slate-200 dark:bg-slate-700/50 rounded-lg animate-pulse" />
+            <div className="h-4 w-80 bg-slate-200 dark:bg-slate-700/50 rounded mt-2 animate-pulse" />
+          </div>
+          <div className="flex gap-2.5">
+            <div className="h-9 w-44 bg-slate-200 dark:bg-slate-700/50 rounded-lg animate-pulse" />
+            <div className="h-9 w-20 bg-slate-200 dark:bg-slate-700/50 rounded-lg animate-pulse" />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
+          {[1, 2, 3, 4, 5].map(i => (
+            <div key={i} className="h-[68px] bg-slate-200 dark:bg-slate-700/50 rounded-xl animate-pulse" style={{ animationDelay: `${i * 80}ms` }} />
+          ))}
+        </div>
+        <div className="h-10 w-96 bg-slate-200 dark:bg-slate-700/50 rounded-xl mb-5 animate-pulse" />
+        <div className="grid grid-cols-3 gap-4">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="h-48 bg-slate-200 dark:bg-slate-700/50 rounded-xl animate-pulse" style={{ animationDelay: `${i * 100}ms` }} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ============================================================================
@@ -73,7 +147,7 @@ export default function NetworksManagementPage() {
   const [aiInsightsExpanded, setAiInsightsExpanded] = useState(false);
 
   // ============================================================================
-  // Computed Stats (Memoized)
+  // Computed Stats
   // ============================================================================
 
   const orgStats = useMemo((): OrgStats[] => {
@@ -108,17 +182,18 @@ export default function NetworksManagementPage() {
     online: allDevices.filter(d => d.status?.toLowerCase() === 'online').length,
   }), [orgStats, allNetworks, allDevices]);
 
-  // TopStatsBar data
-  const topStatsData: StatItem[] = useMemo(() => [
-    { id: 'orgs', label: 'Organizations', value: totalStats.organizations, icon: 'activity', status: 'normal', tooltip: 'Number of Meraki/Catalyst organizations discovered.' },
-    { id: 'networks', label: 'Networks', value: totalStats.networks, icon: 'activity', status: 'normal', tooltip: 'Total networks across all organizations.' },
-    { id: 'devices', label: 'Devices', value: totalStats.devices, icon: 'server', status: 'normal', tooltip: 'Total devices discovered across all networks.' },
-    { id: 'online', label: 'Online', value: totalStats.online, icon: 'server', status: 'success', tooltip: 'Devices currently reachable and reporting status.' },
-    { id: 'offline', label: 'Offline', value: totalStats.devices - totalStats.online, icon: 'alert', status: totalStats.devices - totalStats.online > 0 ? 'critical' : 'normal', tooltip: 'Devices not responding or unreachable.' },
-  ], [totalStats]);
+  const offlineCount = totalStats.devices - totalStats.online;
+  const healthPct = totalStats.devices > 0 ? Math.round((totalStats.online / totalStats.devices) * 100) : 0;
+
+  // Tab counts for badges
+  const tabCounts = useMemo(() => ({
+    organizations: orgStats.length,
+    networks: allNetworks.length,
+    devices: allDevices.length,
+  }), [orgStats, allNetworks, allDevices]);
 
   // ============================================================================
-  // Filtered Data (Memoized)
+  // Filtered Data
   // ============================================================================
 
   const filteredNetworks = useMemo(() => {
@@ -159,7 +234,7 @@ export default function NetworksManagementPage() {
   }, [allDevices, selectedOrg, networkFilter, statusFilter, searchQuery]);
 
   // ============================================================================
-  // Pagination (Memoized)
+  // Pagination
   // ============================================================================
 
   const paginatedNetworks = useMemo(() => {
@@ -178,21 +253,16 @@ export default function NetworksManagementPage() {
   }, [activeTab, filteredNetworks.length, filteredDevices.length, pageSize]);
 
   // ============================================================================
-  // Data Fetching - Cache First, Then Sync
+  // Data Fetching
   // ============================================================================
 
-  // Load cached data (instant) - with fallback to direct API
   const loadCachedData = useCallback(async () => {
     try {
       const response = await fetch('/api/network/cache', { credentials: 'include' });
-      if (!response.ok) {
-        // Cache not available - silently fall back to direct API
-        return null;
-      }
+      if (!response.ok) return null;
 
       const data = await response.json();
 
-      // Transform to expected format
       const networks: NetworkWithMeta[] = (data.networks || []).map((net: NetworkWithMeta) => ({
         ...net,
         organizationType: net.organizationType as 'meraki' | 'catalyst',
@@ -206,12 +276,10 @@ export default function NetworksManagementPage() {
 
       return data;
     } catch {
-      // Cache not available - silently fall back to direct API
       return null;
     }
   }, []);
 
-  // Direct API fetch (fallback when cache is not available)
   const fetchDirectFromAPI = useCallback(async () => {
     try {
       const orgs = await apiClient.getOrganizations();
@@ -271,12 +339,10 @@ export default function NetworksManagementPage() {
     }
   }, []);
 
-  // Sync fresh data from APIs
   const syncData = useCallback(async () => {
     try {
       setSyncing(true);
 
-      // Try cache sync endpoint first
       const response = await fetch('/api/network/sync', {
         method: 'POST',
         credentials: 'include',
@@ -284,10 +350,8 @@ export default function NetworksManagementPage() {
 
       if (response.ok) {
         await response.json();
-        // Reload cached data after sync
         await loadCachedData();
       } else {
-        // Fallback to direct API
         await fetchDirectFromAPI();
       }
     } catch {
@@ -301,24 +365,19 @@ export default function NetworksManagementPage() {
     }
   }, [loadCachedData, fetchDirectFromAPI]);
 
-  // Initial load and sync
   const fetchAllData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // Step 1: Try to load cached data instantly
       const cached = await loadCachedData();
 
       if (cached && (cached.total_networks > 0 || cached.total_devices > 0)) {
-        // Have cache - show it immediately
         setLoading(false);
-        // Trigger sync if cache is older than 5 minutes (await to prevent race condition)
         if (cached.cache_age_seconds === null || cached.cache_age_seconds > 300) {
           await syncData();
         }
       } else {
-        // No cache - fall back to direct API fetch
         setLoading(false);
         setSyncing(true);
         await fetchDirectFromAPI();
@@ -489,7 +548,6 @@ export default function NetworksManagementPage() {
   // Effects
   // ============================================================================
 
-  // Initial data fetch
   useEffect(() => {
     if (!hasFetchedRef.current) {
       hasFetchedRef.current = true;
@@ -497,7 +555,6 @@ export default function NetworksManagementPage() {
     }
   }, [fetchAllData]);
 
-  // Poll for fresh data every 30 seconds
   useEffect(() => {
     const interval = setInterval(() => {
       if (!syncing && !loading) {
@@ -508,104 +565,149 @@ export default function NetworksManagementPage() {
     return () => clearInterval(interval);
   }, [syncing, loading, loadCachedData]);
 
-  // Reset pagination when filters change
   useEffect(() => {
     setCurrentPage(1);
   }, [selectedOrg, searchQuery, statusFilter, networkFilter, activeTab]);
 
-  // Format cache age for display
   const formatCacheAge = useCallback((): string => {
     if (cacheAge === null) return '';
-    if (cacheAge < 60) return 'Updated just now';
-    if (cacheAge < 3600) return `Updated ${Math.floor(cacheAge / 60)}m ago`;
-    return `Updated ${Math.floor(cacheAge / 3600)}h ago`;
+    if (cacheAge < 60) return 'just now';
+    if (cacheAge < 3600) return `${Math.floor(cacheAge / 60)}m ago`;
+    return `${Math.floor(cacheAge / 3600)}h ago`;
   }, [cacheAge]);
 
   // ============================================================================
   // Render
   // ============================================================================
 
+  if (loading) return <PageSkeleton />;
+
   return (
     <div className="h-full bg-slate-50 dark:bg-slate-900 overflow-auto">
-      <div className="px-6 py-8 max-w-[1600px] mx-auto">
+      <div className="px-6 py-5 max-w-[1800px] mx-auto">
         {/* Header */}
-        <header className="flex items-center justify-between mb-6">
+        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 mb-5">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Networks & Devices</h1>
-            <div className="flex items-center gap-2 mt-1">
-              <p className="text-sm text-slate-500 dark:text-slate-400">
-                Manage networks and devices across all platforms
-              </p>
-              {cacheAge !== null && !syncing && (
-                <span className="text-xs text-slate-400 dark:text-slate-500">
-                  • {formatCacheAge()}
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-500 bg-clip-text text-transparent">
+                Networks & Devices
+              </h1>
+              {syncing && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-cyan-50 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 rounded-full text-[11px] font-medium border border-cyan-200/60 dark:border-cyan-500/20">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Syncing
                 </span>
               )}
-              {syncing && (
-                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-cyan-100 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 rounded-full text-xs font-medium">
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                  Syncing...
+              {!syncing && cacheAge !== null && (
+                <span className="text-[11px] text-slate-400 dark:text-slate-500 font-medium">
+                  Updated {formatCacheAge()}
                 </span>
               )}
             </div>
+            <p className="text-[13px] text-slate-500 dark:text-slate-400 mt-1.5 font-light">
+              Manage and monitor networks and devices across all platforms
+            </p>
           </div>
-          <div className="flex items-center gap-3">
+
+          <div className="flex items-center gap-2.5">
             {/* Organization Filter */}
-            <label htmlFor="org-filter" className="sr-only">
-              Filter by organization
-            </label>
-            <select
-              id="org-filter"
-              value={selectedOrg}
-              onChange={(e) => setSelectedOrg(e.target.value)}
-              aria-label="Filter by organization"
-              className="px-4 py-2 bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/50 rounded-lg text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/50 shadow-sm"
-            >
-              <option value="all">All Organizations</option>
-              {orgStats.map(org => (
-                <option key={org.name} value={org.name}>{org.displayName}</option>
-              ))}
-            </select>
+            <div className="relative">
+              <label htmlFor="org-filter" className="sr-only">Filter by organization</label>
+              <select
+                id="org-filter"
+                value={selectedOrg}
+                onChange={(e) => setSelectedOrg(e.target.value)}
+                className="appearance-none pl-3 pr-8 py-2 rounded-lg bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/60 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40 text-slate-800 dark:text-slate-200 transition-all shadow-sm hover:shadow-md cursor-pointer min-w-[180px]"
+              >
+                <option value="all">All Organizations</option>
+                {orgStats.map(org => (
+                  <option key={org.name} value={org.name}>{org.displayName}</option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+            </div>
 
             {/* Sync Button */}
             <button
               onClick={syncData}
               disabled={loading || syncing}
-              aria-label={syncing ? 'Syncing network data' : 'Sync network data'}
-              className="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors shadow-sm hover:shadow-md focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:ring-offset-2"
+              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-all shadow-sm hover:shadow-md"
             >
-              <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} aria-hidden="true" />
+              <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
               {syncing ? 'Syncing...' : 'Sync'}
             </button>
           </div>
-        </header>
+        </div>
 
         {/* Error Alert */}
         {error && (
-          <div className="mb-6 px-4 py-3 bg-red-100 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl flex items-center gap-3">
+          <div className="mb-5 px-4 py-3 bg-red-50 dark:bg-red-500/10 border border-red-200/60 dark:border-red-500/20 rounded-xl flex items-center gap-3">
             <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 shrink-0" />
-            <span className="text-sm text-red-700 dark:text-red-400">{error}</span>
+            <span className="text-sm text-red-700 dark:text-red-400 flex-1">{error}</span>
+            <button
+              onClick={() => setError(null)}
+              className="p-1 text-red-400 hover:text-red-600 dark:hover:text-red-300 transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
         )}
 
-        {/* Top Stats Bar */}
-        <TopStatsBar stats={topStatsData} loading={loading} className="mb-6" />
+        {/* Stats Row */}
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
+          <StatCard
+            icon={Building2}
+            label="Organizations"
+            value={totalStats.organizations}
+            color="from-blue-500 to-indigo-500"
+          />
+          <StatCard
+            icon={Network}
+            label="Networks"
+            value={totalStats.networks}
+            color="from-cyan-500 to-blue-500"
+          />
+          <StatCard
+            icon={Server}
+            label="Total Devices"
+            value={totalStats.devices}
+            color="from-slate-500 to-slate-600"
+          />
+          <StatCard
+            icon={Wifi}
+            label="Online"
+            value={totalStats.online}
+            color="from-emerald-500 to-green-500"
+            subValue={totalStats.devices > 0 ? `${healthPct}%` : undefined}
+          />
+          <StatCard
+            icon={WifiOff}
+            label="Offline"
+            value={offlineCount}
+            color={offlineCount > 0 ? 'from-red-500 to-rose-500' : 'from-slate-400 to-slate-500'}
+          />
+        </div>
 
         {/* Tab Bar */}
-        <NetworksTabBar activeTab={activeTab} onTabChange={setActiveTab} className="mb-6" />
+        <NetworksTabBar
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          counts={tabCounts}
+          className="mb-5"
+        />
 
-        {/* Content */}
-        {loading ? (
-          <div className="flex flex-col items-center justify-center py-32">
-            <Loader2 className="w-10 h-10 text-cyan-500 animate-spin mb-4" />
-            <p className="text-sm text-slate-500 dark:text-slate-400">Loading networks and devices...</p>
-          </div>
-        ) : (
-          <>
+        {/* Tab Content */}
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={activeTab}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.15, ease: 'easeOut' }}
+          >
             {/* Overview Tab */}
             {activeTab === 'overview' && (
-              <div className="space-y-6">
-                {/* AI Insights */}
+              <div className="space-y-5">
                 {orgStats.length > 0 && (
                   <AIInsightsCard
                     insights={aiInsights}
@@ -616,12 +718,10 @@ export default function NetworksManagementPage() {
                     onAskMore={() => navigateToAIChat('Analyze my network and show me devices that need attention')}
                   />
                 )}
-
-                {/* Organizations Grid */}
                 <OrganizationsGrid
                   organizations={orgStats}
                   onNavigateToDevices={navigateToDevices}
-                  loading={loading}
+                  loading={false}
                 />
               </div>
             )}
@@ -632,7 +732,7 @@ export default function NetworksManagementPage() {
                 organizations={orgStats}
                 onNavigateToNetworks={navigateToNetworks}
                 onNavigateToDevices={navigateToDevices}
-                loading={loading}
+                loading={false}
               />
             )}
 
@@ -654,7 +754,6 @@ export default function NetworksManagementPage() {
                   hasActiveFilters={hasActiveFilters}
                   placeholder="Search networks..."
                 />
-
                 <NetworksTable
                   networks={paginatedNetworks}
                   currentPage={currentPage}
@@ -664,7 +763,7 @@ export default function NetworksManagementPage() {
                   onPageChange={handlePageChange}
                   onPageSizeChange={handlePageSizeChange}
                   onViewDevices={navigateToDevices}
-                  loading={loading}
+                  loading={false}
                 />
               </div>
             )}
@@ -687,7 +786,6 @@ export default function NetworksManagementPage() {
                   hasActiveFilters={hasActiveFilters}
                   placeholder="Search by name, serial, or model..."
                 />
-
                 <DevicesTable
                   devices={paginatedDevices}
                   currentPage={currentPage}
@@ -700,12 +798,12 @@ export default function NetworksManagementPage() {
                   onConfigure={handleConfigure}
                   onReboot={handleReboot}
                   onRemove={handleRemove}
-                  loading={loading}
+                  loading={false}
                 />
               </div>
             )}
-          </>
-        )}
+          </motion.div>
+        </AnimatePresence>
       </div>
 
       {/* Device Action Modals */}
@@ -722,7 +820,6 @@ export default function NetworksManagementPage() {
         configureDevice={configureDevice}
         onConfigureClose={() => { setShowConfigureModal(false); setConfigureDevice(null); }}
       />
-
     </div>
   );
 }

@@ -311,10 +311,9 @@ export const MCPSection = memo(() => {
   // Server setup modal state
   const [setupOpen, setSetupOpen] = useState(false);
 
-  // Wrap registerServer to close modal BEFORE the refresh that follows registration.
+  // Let MCPServerSetup manage its own lifecycle — it has success/error handling built in.
   const handleRegister = useCallback(
     async (config: Parameters<typeof registerServer>[0]) => {
-      setSetupOpen(false);
       await registerServer(config);
     },
     [registerServer],

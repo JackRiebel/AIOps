@@ -437,8 +437,11 @@ export default function OrgWideTopology({
                             filter: isHovered || isSelected
                               ? `drop-shadow(0 4px 12px ${statusColors.glow})`
                               : 'drop-shadow(0 2px 4px rgba(0,0,0,0.15))',
+                            transition: 'filter 0.2s ease',
                           }}
                         >
+                          {/* Invisible hit area to prevent hover flicker */}
+                          <circle r={size} fill="transparent" pointerEvents="all" />
                           {/* Selection indicator ring */}
                           {isSelected && (
                             <circle

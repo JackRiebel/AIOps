@@ -1,7 +1,7 @@
 'use client';
 
-import { memo } from 'react';
-import { Play, Pause, Trash2, Clock, Zap, Calendar, AlertCircle } from 'lucide-react';
+import { memo, useMemo } from 'react';
+import { Play, Pause, Trash2, Clock, Zap, Calendar, Activity, Sparkles, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 import type { Workflow } from './types';
 
 interface WorkflowListItemProps {
@@ -12,28 +12,22 @@ interface WorkflowListItemProps {
   onDelete?: () => void;
 }
 
-const STATUS_STYLES = {
-  active: {
-    bg: 'bg-green-100 dark:bg-green-900/30',
-    text: 'text-green-700 dark:text-green-400',
-    dot: 'bg-green-500',
-  },
-  paused: {
-    bg: 'bg-amber-100 dark:bg-amber-900/30',
-    text: 'text-amber-700 dark:text-amber-400',
-    dot: 'bg-amber-500',
-  },
-  draft: {
-    bg: 'bg-slate-100 dark:bg-slate-700',
-    text: 'text-slate-600 dark:text-slate-400',
-    dot: 'bg-slate-400',
-  },
+const STATUS_DOT: Record<string, string> = {
+  active: 'bg-emerald-500',
+  paused: 'bg-amber-500',
+  draft: 'bg-slate-400',
 };
 
-const TRIGGER_ICONS = {
-  splunk_query: Zap,
+const TRIGGER_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  splunk_query: Activity,
   schedule: Calendar,
   manual: Play,
+};
+
+const TRIGGER_LABELS: Record<string, string> = {
+  splunk_query: 'Event',
+  schedule: 'Scheduled',
+  manual: 'Manual',
 };
 
 export const WorkflowListItem = memo(({
@@ -43,118 +37,117 @@ export const WorkflowListItem = memo(({
   onToggle,
   onDelete,
 }: WorkflowListItemProps) => {
-  const statusStyle = STATUS_STYLES[workflow.status];
   const TriggerIcon = TRIGGER_ICONS[workflow.trigger_type] || Zap;
+  const triggerLabel = TRIGGER_LABELS[workflow.trigger_type] || workflow.trigger_type;
+
+  const successRate = useMemo(() => {
+    const total = workflow.success_count + workflow.failure_count;
+    if (total === 0) return null;
+    return Math.round((workflow.success_count / total) * 100);
+  }, [workflow.success_count, workflow.failure_count]);
+
+  const lastTriggered = useMemo(() => {
+    if (!workflow.last_triggered_at) return null;
+    const diffMs = Date.now() - new Date(workflow.last_triggered_at).getTime();
+    const mins = Math.floor(diffMs / 60000);
+    if (mins < 1) return 'Just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    if (days < 7) return `${days}d ago`;
+    return new Date(workflow.last_triggered_at).toLocaleDateString();
+  }, [workflow.last_triggered_at]);
 
   return (
     <div
       onClick={onClick}
-      className={`
-        p-4 cursor-pointer transition-colors group
-        hover:bg-slate-50 dark:hover:bg-slate-700/50
-        ${isSelected ? 'bg-cyan-50 dark:bg-cyan-900/20 border-l-2 border-l-cyan-500' : ''}
-      `}
+      className={`group px-4 py-3.5 cursor-pointer transition-all duration-150 ${
+        isSelected
+          ? 'bg-cyan-50/60 dark:bg-cyan-900/10 border-l-2 border-l-cyan-500'
+          : 'hover:bg-slate-50 dark:hover:bg-slate-700/30 border-l-2 border-l-transparent'
+      }`}
     >
-      <div className="flex items-start justify-between">
+      <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <h3 className="font-medium text-slate-900 dark:text-white truncate">
+          {/* Title + status */}
+          <div className="flex items-center gap-2 mb-1">
+            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${STATUS_DOT[workflow.status] || 'bg-slate-400'}`} />
+            <h3 className="text-[13px] font-semibold text-slate-900 dark:text-white truncate">
               {workflow.name}
             </h3>
-            <span className={`
-              inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full
-              ${statusStyle.bg} ${statusStyle.text}
-            `}>
-              <span className={`w-1.5 h-1.5 rounded-full ${statusStyle.dot}`} />
-              {workflow.status}
-            </span>
           </div>
 
+          {/* Description */}
           {workflow.description && (
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
+            <p className="text-[12px] text-slate-500 dark:text-slate-400 line-clamp-1 ml-4 leading-relaxed">
               {workflow.description}
             </p>
           )}
 
-          <div className="flex items-center gap-3 mt-2 text-xs text-slate-500 dark:text-slate-400">
-            <span className="flex items-center gap-1">
+          {/* Meta row */}
+          <div className="flex items-center gap-2.5 mt-2 ml-4">
+            <span className="inline-flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
               <TriggerIcon className="w-3 h-3" />
-              {workflow.trigger_type.replace('_', ' ')}
+              {triggerLabel}
             </span>
             {workflow.ai_enabled && (
-              <span className="flex items-center gap-1 text-purple-600 dark:text-purple-400">
-                <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z" />
-                </svg>
+              <span className="inline-flex items-center gap-1 text-[11px] text-purple-500 dark:text-purple-400">
+                <Sparkles className="w-3 h-3" />
                 AI
               </span>
             )}
-            <span className="flex items-center gap-1">
-              <Clock className="w-3 h-3" />
-              {workflow.trigger_count} triggers
+            <span className="inline-flex items-center gap-1 text-[11px] text-slate-400 dark:text-slate-500">
+              <Zap className="w-3 h-3" />
+              {workflow.trigger_count}
             </span>
+            {successRate !== null && (
+              <span className={`inline-flex items-center gap-1 text-[11px] font-medium ${
+                successRate >= 90 ? 'text-emerald-600 dark:text-emerald-400' :
+                successRate >= 70 ? 'text-amber-600 dark:text-amber-400' :
+                'text-red-600 dark:text-red-400'
+              }`}>
+                {successRate >= 90 ? <CheckCircle className="w-3 h-3" /> : successRate >= 70 ? <AlertTriangle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
+                {successRate}%
+              </span>
+            )}
+            {lastTriggered && (
+              <span className="inline-flex items-center gap-1 text-[11px] text-slate-400 dark:text-slate-500 ml-auto">
+                <Clock className="w-3 h-3" />
+                {lastTriggered}
+              </span>
+            )}
           </div>
         </div>
 
+        {/* Hover actions */}
         {(onToggle || onDelete) && (
-          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2">
+          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
             {onToggle && (
               <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onToggle();
-                }}
-                className={`
-                  p-1.5 rounded transition-colors
-                  ${workflow.status === 'active'
-                    ? 'hover:bg-amber-100 dark:hover:bg-amber-900/30 text-amber-600 dark:text-amber-400'
-                    : 'hover:bg-green-100 dark:hover:bg-green-900/30 text-green-600 dark:text-green-400'
-                  }
-                `}
-                title={workflow.status === 'active' ? 'Pause workflow' : 'Activate workflow'}
+                onClick={(e) => { e.stopPropagation(); onToggle(); }}
+                className={`p-1.5 rounded-lg transition-colors ${
+                  workflow.status === 'active'
+                    ? 'hover:bg-amber-50 dark:hover:bg-amber-500/10 text-amber-500'
+                    : 'hover:bg-emerald-50 dark:hover:bg-emerald-500/10 text-emerald-500'
+                }`}
+                title={workflow.status === 'active' ? 'Pause' : 'Activate'}
               >
-                {workflow.status === 'active' ? (
-                  <Pause className="w-4 h-4" />
-                ) : (
-                  <Play className="w-4 h-4" />
-                )}
+                {workflow.status === 'active' ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
               </button>
             )}
-
             {onDelete && (
               <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDelete();
-                }}
-                className="p-1.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 transition-colors"
-                title="Delete workflow"
+                onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10 text-red-400 hover:text-red-500 transition-colors"
+                title="Delete"
               >
-                <Trash2 className="w-4 h-4" />
+                <Trash2 className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
         )}
       </div>
-
-      {/* Quick Stats */}
-      {workflow.trigger_count > 0 && (
-        <div className="flex items-center gap-4 mt-3 pt-3 border-t border-slate-100 dark:border-slate-700/50">
-          <div className="flex items-center gap-1 text-xs">
-            <span className="text-green-600 dark:text-green-400">{workflow.success_count}</span>
-            <span className="text-slate-400">success</span>
-          </div>
-          <div className="flex items-center gap-1 text-xs">
-            <span className="text-red-600 dark:text-red-400">{workflow.failure_count}</span>
-            <span className="text-slate-400">failed</span>
-          </div>
-          {workflow.last_triggered_at && (
-            <div className="text-xs text-slate-400 ml-auto">
-              Last: {new Date(workflow.last_triggered_at).toLocaleDateString()}
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 });

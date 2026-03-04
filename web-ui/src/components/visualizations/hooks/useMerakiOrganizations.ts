@@ -21,6 +21,8 @@ export interface UseMerakiOrganizationsReturn {
   error: string | null;
   setSelectedOrg: (org: string) => void;
   setSelectedNetwork: (net: string) => void;
+  clearError: () => void;
+  retryFetch: () => void;
 }
 
 export function useMerakiOrganizations(): UseMerakiOrganizationsReturn {
@@ -32,25 +34,41 @@ export function useMerakiOrganizations(): UseMerakiOrganizationsReturn {
   const [error, setError] = useState<string | null>(null);
   const orgFetchedRef = useRef(false);
 
+  const fetchOrgs = useCallback(async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      const orgs = await apiClient.getNetworkPlatformOrgs();
+      setOrganizations(orgs);
+      if (orgs.length > 0) {
+        setSelectedOrg(orgs[0].name);
+      }
+    } catch (err: any) {
+      console.error('Failed to fetch organizations:', err);
+      const msg = err?.message || '';
+      if (msg.includes('Session expired') || msg.includes('401')) {
+        // Auth issue — AuthContext handles redirect
+      } else {
+        setError('Failed to load organizations. Check that your Meraki or Catalyst credentials are configured in Settings.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   // Fetch organizations on mount
   useEffect(() => {
     if (orgFetchedRef.current) return;
     orgFetchedRef.current = true;
+    fetchOrgs();
+  }, [fetchOrgs]);
 
-    (async () => {
-      try {
-        const orgs = await apiClient.getNetworkPlatformOrgs();
-        setOrganizations(orgs);
-        if (orgs.length > 0) {
-          setSelectedOrg(orgs[0].name);
-        }
-      } catch (err) {
-        console.error('Failed to fetch organizations:', err);
-        setError('Failed to load organizations');
-      } finally {
-        setLoading(false);
-      }
-    })();
+  const retryFetch = useCallback(() => {
+    fetchOrgs();
+  }, [fetchOrgs]);
+
+  const clearError = useCallback(() => {
+    setError(null);
   }, []);
 
   // Fetch networks when org changes
@@ -88,5 +106,7 @@ export function useMerakiOrganizations(): UseMerakiOrganizationsReturn {
     error,
     setSelectedOrg,
     setSelectedNetwork,
+    clearError,
+    retryFetch,
   };
 }

@@ -240,7 +240,8 @@ function VisualizationsPage() {
           <ErrorAlert
             title="Connection Error"
             message={hub.error}
-            onDismiss={() => {}}
+            onRetry={hub.retryFetch}
+            onDismiss={hub.clearError}
             className="mb-5"
           />
         )}
