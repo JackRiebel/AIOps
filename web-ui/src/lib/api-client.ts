@@ -23,7 +23,12 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.detail || errorData.error || `Request failed: ${response.status}`);
+    const detail = errorData.detail;
+    const errMsg = typeof detail === 'string' ? detail
+      : typeof errorData.error === 'string' ? errorData.error
+      : detail ? JSON.stringify(detail)
+      : `Request failed: ${response.status}`;
+    throw new Error(errMsg);
   }
 
   const text = await response.text();
@@ -263,26 +268,26 @@ export const apiClient = {
 
   // AI Settings
   async getAvailableModels() {
-    return request<{ models: Array<{ id: string; name: string; description: string; provider: string; cost_input_1k: number; cost_output_1k: number; speed: number; capability: number; context_window: number; best_for: string[]; key_source?: string }> }>('/api/ai/models');
+    return request<{ models: Array<{ id: string; name: string; description: string; provider: string; cost_input_1k: number; cost_output_1k: number; speed: number; capability: number; context_window: number; best_for: string[]; key_source?: string }> }>('/api/settings/models');
   },
 
   async getUserModel() {
-    return request<{ model: string }>('/api/ai/model');
+    return request<{ model: string }>('/api/settings/model');
   },
 
   async setUserModel(model: string) {
-    return request<void>('/api/ai/model', {
+    return request<void>('/api/settings/model', {
       method: 'PUT',
-      body: JSON.stringify({ model }),
+      body: JSON.stringify({ model_id: model }),
     });
   },
 
   async getAISettings() {
-    return request<{ temperature: number; max_tokens: number }>('/api/ai/settings');
+    return request<{ temperature: number; max_tokens: number }>('/api/settings/ai');
   },
 
   async updateAISettings(settings: { temperature?: number; max_tokens?: number }) {
-    return request<void>('/api/ai/settings', {
+    return request<void>('/api/settings/ai', {
       method: 'PUT',
       body: JSON.stringify(settings),
     });
@@ -294,7 +299,7 @@ export const apiClient = {
       openai: { user_key_set: boolean; admin_key_available: boolean };
       google: { user_key_set: boolean; admin_key_available: boolean };
       cisco: { user_key_set: boolean; admin_key_available: boolean };
-    }>('/api/ai/key-status');
+    }>('/api/settings/api-keys');
   },
 
   // Setup
