@@ -1042,6 +1042,7 @@ export const InternetInsightsPanel = memo(({ onAskAI }: InternetInsightsPanelPro
       </div>
 
       {/* ---- Content ---- */}
+      <div className="min-h-[400px]">
       {loading ? (
         <div className="flex items-center justify-center py-16">
           <Loader2 className="w-6 h-6 text-purple-500 animate-spin" />
@@ -1084,7 +1085,7 @@ export const InternetInsightsPanel = memo(({ onAskAI }: InternetInsightsPanelPro
                       {/* Main row */}
                       <button
                         onClick={() => setExpandedOutage(expanded ? null : outage.id)}
-                        className="flex items-center gap-3 w-full px-3 py-3 text-left hover:bg-slate-50 dark:hover:bg-slate-800/80 transition-colors"
+                        className="flex items-center gap-3 w-full px-3 py-3 min-h-[60px] text-left hover:bg-slate-50 dark:hover:bg-slate-800/80 transition-colors"
                       >
                         {/* Provider avatar */}
                         <div className="relative flex-shrink-0">
@@ -1099,7 +1100,7 @@ export const InternetInsightsPanel = memo(({ onAskAI }: InternetInsightsPanelPro
                           <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
                             {outage.providerName}
                           </p>
-                          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap min-h-[20px]">
                             <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider ${
                               outage.type === 'application'
                                 ? 'bg-purple-100 dark:bg-purple-500/20 text-purple-700 dark:text-purple-400'
@@ -1229,6 +1230,7 @@ export const InternetInsightsPanel = memo(({ onAskAI }: InternetInsightsPanelPro
           )}
         </>
       )}
+      </div>
 
       {/* Watchlist Modal */}
       {showWatchlistModal && (

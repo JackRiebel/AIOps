@@ -296,9 +296,10 @@ function SplunkPage() {
             loading={cc.loadingEnvironment && !cc.initialLoadComplete}
           />
 
-          {/* Hero: AI Panel + Platform Sidebar */}
+          {/* Two-column layout — columns flow independently to eliminate empty space */}
           <div className="grid grid-cols-12 gap-4">
-            <div className="col-span-12 lg:col-span-8">
+            {/* Left column */}
+            <div className="col-span-12 lg:col-span-8 space-y-3">
               <SplunkAIStreamPanel
                 indexCount={cc.indexCount}
                 totalEventCount={cc.totalEventCount}
@@ -310,8 +311,24 @@ function SplunkPage() {
                 logAIQuery={logAIQuery}
                 isAISessionActive={isAISessionActive}
               />
+              <SplunkActivityFeed
+                logs={cc.activityFeed}
+                loading={!cc.initialLoadComplete}
+                onViewAll={() => {
+                  router.replace('/splunk?tab=investigate', { scroll: false });
+                  cc.setCurrentView('investigate');
+                  setInvestigateSubView('search-spl');
+                }}
+              />
+              <SplunkSecuritySummaryCard
+                insights={cc.insights}
+                loading={cc.loadingInsights && !cc.initialLoadComplete}
+                onViewDetails={handleViewSecurityDetails}
+              />
             </div>
-            <div className="col-span-12 lg:col-span-4">
+
+            {/* Right column */}
+            <div className="col-span-12 lg:col-span-4 space-y-3">
               <SplunkPlatformSidebar
                 serverInfo={cc.serverInfo}
                 userInfo={cc.userInfo}
@@ -329,42 +346,12 @@ function SplunkPage() {
                   }
                 }}
               />
-            </div>
-          </div>
-
-          {/* Activity Feed + Correlated Devices */}
-          <div className="grid grid-cols-12 gap-4">
-            <div className="col-span-12 lg:col-span-8">
-              <SplunkActivityFeed
-                logs={cc.activityFeed}
-                loading={!cc.initialLoadComplete}
-                onViewAll={() => {
-                  router.replace('/splunk?tab=investigate', { scroll: false });
-                  cc.setCurrentView('investigate');
-                  setInvestigateSubView('search-spl');
-                }}
-              />
-            </div>
-            <div className="col-span-12 lg:col-span-4">
               <SplunkCorrelatedDevicesCard
                 devices={cc.correlatedDevices}
                 loading={cc.loadingCorrelation}
                 merakiDevices={cc.merakiDevices}
                 catalystDevices={cc.catalystDevices}
               />
-            </div>
-          </div>
-
-          {/* Security Summary Card + Severity Chart */}
-          <div className="grid grid-cols-12 gap-4">
-            <div className="col-span-12 lg:col-span-8">
-              <SplunkSecuritySummaryCard
-                insights={cc.insights}
-                loading={cc.loadingInsights && !cc.initialLoadComplete}
-                onViewDetails={handleViewSecurityDetails}
-              />
-            </div>
-            <div className="col-span-12 lg:col-span-4">
               <SplunkSeverityChart
                 insights={cc.insights}
                 loading={cc.loadingInsights && !cc.initialLoadComplete}
