@@ -37,6 +37,8 @@ interface Suggestion {
 interface ContextualSuggestionsProps {
   onAction: (query: string) => void;
   className?: string;
+  orgName?: string;
+  networks?: { id: string; name: string }[];
 }
 
 // =============================================================================
@@ -83,48 +85,59 @@ const ChartIcon = () => (
 // Default Suggestions (when no specific context)
 // =============================================================================
 
-const DEFAULT_SUGGESTIONS: Suggestion[] = [
-  {
-    id: 'overview',
-    label: 'Network Overview',
-    query: 'Show me an overview of my network health and status',
-    icon: <ChartIcon />,
-    priority: 'medium',
-    category: 'health',
-  },
-  {
-    id: 'security',
-    label: 'Security Check',
-    query: 'Are there any security alerts or threats I should know about?',
-    icon: <SecurityIcon />,
-    priority: 'medium',
-    category: 'security',
-  },
-  {
-    id: 'devices',
-    label: 'Device Status',
-    query: 'List all devices and their current status',
-    icon: <DeviceIcon />,
-    priority: 'medium',
-    category: 'explore',
-  },
-  {
-    id: 'performance',
-    label: 'Performance Analysis',
-    query: 'How is my network performing? Show me throughput and latency metrics',
-    icon: <ExploreIcon />,
-    priority: 'low',
-    category: 'explore',
-  },
-];
+function buildDefaultSuggestions(orgName?: string, networks?: { id: string; name: string }[]): Suggestion[] {
+  const networkList = networks && networks.length > 0
+    ? networks.map(n => n.name).join(', ')
+    : null;
+  const scope = orgName ? ` for ${orgName}` : '';
+  const networkScope = networkList
+    ? ` across all networks (${networkList})`
+    : scope;
+
+  return [
+    {
+      id: 'overview',
+      label: 'Network Overview',
+      query: `Give me a full health overview${networkScope}. Show device status counts, any active alerts, and highlight anything that needs attention.`,
+      icon: <ChartIcon />,
+      priority: 'medium',
+      category: 'health',
+    },
+    {
+      id: 'security',
+      label: 'Security Check',
+      query: `Check for security events and threats${scope}. Include any malware detections, intrusion attempts, rogue APs, and firewall blocks from the last 24 hours.`,
+      icon: <SecurityIcon />,
+      priority: 'medium',
+      category: 'security',
+    },
+    {
+      id: 'devices',
+      label: 'Device Status',
+      query: `List all devices${networkScope} with their current online/offline status, model, and any alerts. Flag any devices that are offline or need attention.`,
+      icon: <DeviceIcon />,
+      priority: 'medium',
+      category: 'explore',
+    },
+    {
+      id: 'performance',
+      label: 'Performance Analysis',
+      query: `Analyze network performance${networkScope}. Show WiFi connection success rates, client counts, uplink latency/loss, and identify any performance bottlenecks.`,
+      icon: <ExploreIcon />,
+      priority: 'low',
+      category: 'explore',
+    },
+  ];
+}
 
 // =============================================================================
 // Generate Contextual Suggestions
 // =============================================================================
 
-function generateSuggestions(health: NetworkHealth | null): Suggestion[] {
-  if (!health) return DEFAULT_SUGGESTIONS;
+function generateSuggestions(health: NetworkHealth | null, orgName?: string, networks?: { id: string; name: string }[]): Suggestion[] {
+  if (!health) return buildDefaultSuggestions(orgName, networks);
 
+  const scope = orgName ? ` for ${orgName}` : '';
   const suggestions: Suggestion[] = [];
 
   // Critical incidents - highest priority
@@ -132,7 +145,7 @@ function generateSuggestions(health: NetworkHealth | null): Suggestion[] {
     suggestions.push({
       id: 'critical-incidents',
       label: `${health.criticalIncidents} Critical Incident${health.criticalIncidents > 1 ? 's' : ''}`,
-      query: 'Show me all critical incidents and their details. What actions should I take?',
+      query: `I have ${health.criticalIncidents} critical incident${health.criticalIncidents > 1 ? 's' : ''}${scope}. Show me each incident with root cause analysis, affected devices/services, and recommended remediation steps.`,
       icon: <AlertIcon />,
       priority: 'high',
       category: 'incident',
@@ -144,7 +157,7 @@ function generateSuggestions(health: NetworkHealth | null): Suggestion[] {
     suggestions.push({
       id: 'offline-devices',
       label: `${health.offlineDevices} Device${health.offlineDevices > 1 ? 's' : ''} Offline`,
-      query: `I have ${health.offlineDevices} offline device${health.offlineDevices > 1 ? 's' : ''}. Show me details and help me troubleshoot.`,
+      query: `${health.offlineDevices} device${health.offlineDevices > 1 ? 's are' : ' is'} offline${scope}. List each offline device with its name, model, network, and last seen time. What is the likely root cause and what steps should I take to restore them?`,
       icon: <DeviceIcon />,
       priority: 'high',
       category: 'health',
@@ -156,7 +169,7 @@ function generateSuggestions(health: NetworkHealth | null): Suggestion[] {
     suggestions.push({
       id: 'alerting-devices',
       label: `${health.alertingDevices} Device Alert${health.alertingDevices > 1 ? 's' : ''}`,
-      query: 'Show me all devices with active alerts and their current status',
+      query: `${health.alertingDevices} device${health.alertingDevices > 1 ? 's have' : ' has'} active alerts${scope}. List each alerting device, what the alert is, severity, and recommended action to resolve.`,
       icon: <AlertIcon />,
       priority: 'medium',
       category: 'health',
@@ -169,7 +182,7 @@ function generateSuggestions(health: NetworkHealth | null): Suggestion[] {
     suggestions.push({
       id: 'active-incidents',
       label: `${nonCritical} Active Incident${nonCritical > 1 ? 's' : ''}`,
-      query: 'Show me all active incidents, prioritized by severity',
+      query: `Show me all ${nonCritical} active incident${nonCritical > 1 ? 's' : ''}${scope}, prioritized by severity. For each, include the affected network, root cause analysis, and remediation steps.`,
       icon: <AlertIcon />,
       priority: 'medium',
       category: 'incident',
@@ -180,7 +193,7 @@ function generateSuggestions(health: NetworkHealth | null): Suggestion[] {
   suggestions.push({
     id: 'health-summary',
     label: 'Network Health',
-    query: 'Give me a comprehensive summary of my network health',
+    query: `Give me a comprehensive health summary${scope} including device status counts, WiFi performance, uplink health, and any issues that need attention. Provide root cause analysis for any problems found.`,
     icon: health.status === 'healthy' ? <HealthIcon /> : <AlertIcon />,
     priority: health.status === 'healthy' ? 'low' : 'medium',
     category: 'health',
@@ -190,7 +203,7 @@ function generateSuggestions(health: NetworkHealth | null): Suggestion[] {
   suggestions.push({
     id: 'security',
     label: 'Security Check',
-    query: 'Are there any security threats or vulnerabilities I should address?',
+    query: `Run a security check${scope}. Check for malware detections, intrusion attempts, rogue APs, unauthorized clients, and firewall blocks in the last 24 hours. Provide findings and recommended actions.`,
     icon: <SecurityIcon />,
     priority: 'medium',
     category: 'security',
@@ -263,6 +276,8 @@ SuggestionButton.displayName = 'SuggestionButton';
 export const ContextualSuggestions = memo(({
   onAction,
   className = '',
+  orgName,
+  networks,
 }: ContextualSuggestionsProps) => {
   const [health, setHealth] = useState<NetworkHealth | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -297,8 +312,8 @@ export const ContextualSuggestions = memo(({
     fetchHealth();
   }, []);
 
-  // Generate suggestions based on health
-  const suggestions = useMemo(() => generateSuggestions(health), [health]);
+  // Generate suggestions based on health and org context
+  const suggestions = useMemo(() => generateSuggestions(health, orgName, networks), [health, orgName, networks]);
 
   // Determine if there are issues requiring attention
   const hasIssues = health && (health.criticalIncidents > 0 || health.offlineDevices > 0);

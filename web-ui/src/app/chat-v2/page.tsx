@@ -411,7 +411,11 @@ function ChatV2PageContent() {
                 {/* Content */}
                 <div className="relative h-full flex items-center justify-center p-8">
                   <div className="w-full max-w-xl">
-                    <ContextualSuggestions onAction={handleSendMessage} />
+                    <ContextualSuggestions
+                      onAction={handleSendMessage}
+                      orgName={defaultMerakiOrg?.display_name || defaultMerakiOrg?.name}
+                      networks={networks}
+                    />
                   </div>
                 </div>
               </div>
