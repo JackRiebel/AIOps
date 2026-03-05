@@ -2083,10 +2083,11 @@ async def get_clients_data(
     try:
         async with get_meraki_dashboard(org_id or "default") as dashboard:
             clients = await dashboard.networks.getNetworkClients(
-                network_id, perPage=100, timespan=3600
+                network_id, perPage=100, timespan=86400
             )
 
             total_clients = len(clients)
+            logger.info(f"[cards] Top clients: {total_clients} clients found for network {network_id}")
 
             # ================================================================
             # Build distributions for ClientDistributionCard

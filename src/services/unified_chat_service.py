@@ -819,34 +819,39 @@ def _transform_card_data(card_type: str, raw_data: Any, tool_name: str) -> Any:
                 return [raw_data]
             return raw_data
 
-        # Top clients → TrafficAnalyticsViz format (TopClient[])
+        # Top clients → TrafficAnalyticsViz format
+        # Frontend transformTopClients expects: { top_clients: [{name, ip, mac, usage: "1.5 GB", ...}] }
         if card_type == "meraki_top_clients":
             if isinstance(raw_data, list):
-                # Transform to TopClient format expected by traffic_analytics viz
                 clients = []
-                for client in raw_data[:10]:  # Top 10
+                for client in raw_data[:10]:
                     usage = client.get("usage", {})
                     if isinstance(usage, dict):
                         sent = usage.get("sent", 0) or 0
                         recv = usage.get("recv", usage.get("received", 0)) or 0
-                        total = usage.get("total", sent + recv) or (sent + recv)
+                        total = sent + recv
                     else:
                         sent = client.get("sent", 0) or 0
                         recv = client.get("recv", 0) or 0
                         total = sent + recv
+                    # Format usage as string to match the card endpoint format
+                    if total > 1_000_000_000:
+                        usage_str = f"{total / 1_000_000_000:.1f} GB"
+                    elif total > 1_000_000:
+                        usage_str = f"{total / 1_000_000:.1f} MB"
+                    elif total > 1000:
+                        usage_str = f"{total / 1000:.1f} KB"
+                    else:
+                        usage_str = f"{total} B"
                     clients.append({
-                        "id": client.get("id") or client.get("mac") or str(len(clients)),
                         "name": client.get("description") or client.get("mac") or client.get("ip", "Unknown"),
-                        "ip": client.get("ip"),
-                        "mac": client.get("mac"),
+                        "ip": client.get("ip") or "N/A",
+                        "mac": client.get("mac") or "N/A",
+                        "usage": usage_str,
                         "manufacturer": client.get("manufacturer") or client.get("os"),
-                        "usage": {
-                            "sent": sent,
-                            "received": recv,
-                            "total": total,
-                        },
                     })
-                return clients
+                # Wrap in dict format expected by frontend transformTopClients
+                return {"top_clients": clients}
             return raw_data
 
         # ThousandEyes path visualization → hops format for TEPathVisualizationViz
@@ -1359,9 +1364,11 @@ def _generate_card_suggestion(
         subtitle = org_name
 
     # Build scope context
+    # credentialOrg is needed by frontend fetchers to pass org_id to API endpoints
     scope = {}
     if org_id:
         scope["organizationId"] = org_id
+        scope["credentialOrg"] = org_id  # Frontend uses this for withOrgQuery()
     if org_name:
         scope["organizationName"] = org_name
     if network_id:
