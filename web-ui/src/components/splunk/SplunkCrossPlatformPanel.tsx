@@ -104,8 +104,10 @@ const statusLabel = (status: string | undefined): string => {
 
 const DeviceCard = memo(({ device }: { device: SplunkCorrelatedDevice }) => {
   const handleInvestigate = useCallback(() => {
-    const query = encodeURIComponent(`Investigate network device ${device.hostname || device.ip} across all platforms. IP: ${device.ip}, platforms: ${device.platforms.join(', ')}`);
-    window.location.href = `/chat-v2?q=${query}`;
+    const message = `Investigate network device ${device.hostname || device.ip} across all platforms. IP: ${device.ip}, platforms: ${device.platforms.join(', ')}`;
+    const payload = { message, context: { type: 'splunk_analysis' as const, data: { category: 'device-status' as const, title: `Device: ${device.hostname || device.ip}`, details: { 'IP': device.ip, 'Platforms': device.platforms.join(', ') } as Record<string, string | number | undefined>, message } } };
+    const encoded = btoa(encodeURIComponent(JSON.stringify(payload)));
+    window.location.href = `/chat-v2?new_session=true&splunk_analysis=${encodeURIComponent(encoded)}`;
   }, [device]);
 
   return (

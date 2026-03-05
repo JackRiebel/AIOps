@@ -191,8 +191,31 @@ export const SplunkSecurityOverview = memo(({
                         <span className="text-[10px] text-slate-400 dark:text-slate-500">{card.log_count.toLocaleString()} occurrences</span>
                         <button
                           onClick={() => {
-                            const prompt = `Investigate Splunk security finding: "${card.title}" (${card.severity} severity, ${card.log_count} occurrences). ${card.description || ''} Provide root cause analysis, impact assessment, and remediation steps.`;
-                            router.push(`/chat-v2?q=${encodeURIComponent(prompt)}`);
+                            const message = `Investigate Splunk security finding: "${card.title}" (${card.severity} severity, ${card.log_count} occurrences). ${card.description || ''} Provide root cause analysis, impact assessment, and remediation steps.`;
+                            const lower = card.title.toLowerCase();
+                            type SplunkCategory = 'security-briefing' | 'firewall' | 'device-status' | 'access-anomaly' | 'threat-impact' | 'assessment' | 'general';
+                            let category: SplunkCategory = 'security-briefing';
+                            if (lower.includes('firewall') || lower.includes('deny') || lower.includes('drop') || lower.includes('blocked')) {
+                              category = 'firewall';
+                            } else if (lower.includes('access') || lower.includes('auth') || lower.includes('anomal')) {
+                              category = 'access-anomaly';
+                            } else if (lower.includes('threat') || lower.includes('attack') || lower.includes('malware') || lower.includes('exploit')) {
+                              category = 'threat-impact';
+                            }
+                            const payload = {
+                              message,
+                              context: {
+                                type: 'splunk_analysis' as const,
+                                data: {
+                                  category,
+                                  title: card.title,
+                                  details: { 'Severity': card.severity, 'Occurrences': card.log_count } as Record<string, string | number | undefined>,
+                                  message,
+                                },
+                              },
+                            };
+                            const encoded = btoa(encodeURIComponent(JSON.stringify(payload)));
+                            router.push(`/chat-v2?new_session=true&splunk_analysis=${encodeURIComponent(encoded)}`);
                           }}
                           className="opacity-0 group-hover:opacity-100 flex items-center gap-1 px-2 py-0.5 text-[9px] font-medium text-cyan-700 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-500/10 border border-cyan-200 dark:border-cyan-500/20 rounded-lg hover:bg-cyan-100 dark:hover:bg-cyan-500/20 transition"
                         >

@@ -112,7 +112,12 @@ export const SplunkCorrelatedDevicesCard = memo(({
                   </div>
                 </div>
                 <button
-                  onClick={() => router.push(`/chat-v2?q=Investigate+device+${encodeURIComponent(dev.hostname || dev.ip)}+in+Splunk+logs`)}
+                  onClick={() => {
+                    const message = `Investigate device ${dev.hostname || dev.ip} in Splunk logs`;
+                    const payload = { message, context: { type: 'splunk_analysis' as const, data: { category: 'device-status' as const, title: `Device: ${dev.hostname || dev.ip}`, details: { 'Host': dev.hostname || dev.ip, 'Events': dev.logCount } as Record<string, string | number | undefined>, message } } };
+                    const encoded = btoa(encodeURIComponent(JSON.stringify(payload)));
+                    router.push(`/chat-v2?new_session=true&splunk_analysis=${encodeURIComponent(encoded)}`);
+                  }}
                   className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-400 hover:bg-cyan-50 dark:hover:bg-cyan-500/10 transition"
                   title="Investigate"
                 >

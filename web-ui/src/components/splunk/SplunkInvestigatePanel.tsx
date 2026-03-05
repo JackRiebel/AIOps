@@ -738,7 +738,12 @@ export const SplunkInvestigatePanel = memo(({
                   {correlatedDevices.slice(0, 15).map((dev, i) => (
                     <button
                       key={i}
-                      onClick={() => router.push(`/chat-v2?q=Investigate+device+${encodeURIComponent(dev.hostname || dev.ip)}+in+Splunk+logs`)}
+                      onClick={() => {
+                        const message = `Investigate device ${dev.hostname || dev.ip} in Splunk logs`;
+                        const payload = { message, context: { type: 'splunk_analysis' as const, data: { category: 'device-status' as const, title: `Device: ${dev.hostname || dev.ip}`, details: { 'Host': dev.hostname || dev.ip } as Record<string, string | number | undefined>, message } } };
+                        const encoded = btoa(encodeURIComponent(JSON.stringify(payload)));
+                        router.push(`/chat-v2?new_session=true&splunk_analysis=${encodeURIComponent(encoded)}`);
+                      }}
                       className="w-full flex items-center gap-2.5 text-[11px] text-left hover:bg-slate-50 dark:hover:bg-slate-800/40 px-4 py-2 transition-colors group"
                     >
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" />

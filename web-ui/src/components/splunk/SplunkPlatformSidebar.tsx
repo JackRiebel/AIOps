@@ -127,7 +127,12 @@ export const SplunkPlatformSidebar = memo(({
         <div className="p-2">
           {[
             { label: 'Search Logs', icon: Search, onClick: () => onNavigate('investigate') },
-            { label: 'Ask AI', icon: Bot, onClick: () => router.push('/chat-v2?q=Help+me+investigate+Splunk+logs') },
+            { label: 'Ask AI', icon: Bot, onClick: () => {
+              const message = 'Help me investigate Splunk logs — analyze recent events and identify anything unusual';
+              const payload = { message, context: { type: 'splunk_analysis' as const, data: { category: 'general' as const, title: 'Splunk Log Investigation', details: {} as Record<string, string | number | undefined>, message } } };
+              const encoded = btoa(encodeURIComponent(JSON.stringify(payload)));
+              router.push(`/chat-v2?new_session=true&splunk_analysis=${encodeURIComponent(encoded)}`);
+            } },
             { label: 'Explore Data', icon: FileBarChart, onClick: () => onNavigate('explore') },
             { label: 'Open Chat', icon: MessageSquare, onClick: () => router.push('/chat-v2') },
           ].map(action => {

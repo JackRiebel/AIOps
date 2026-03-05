@@ -144,8 +144,21 @@ export const SplunkActivityFeed = memo(({ logs, loading, onViewAll }: SplunkActi
   }, [parsed]);
 
   const handleInvestigate = useCallback((event: ParsedEvent) => {
-    const q = `Investigate Splunk event: ${event.label}${event.description ? ` - ${event.description.slice(0, 100)}` : ''} from host ${event.host}`;
-    router.push(`/chat-v2?q=${encodeURIComponent(q)}`);
+    const message = `Investigate Splunk event: ${event.label}${event.description ? ` - ${event.description.slice(0, 100)}` : ''} from host ${event.host}`;
+    const payload = {
+      message,
+      context: {
+        type: 'splunk_analysis' as const,
+        data: {
+          category: 'general' as const,
+          title: event.label,
+          details: { 'Host': event.host, 'Category': event.category } as Record<string, string | number | undefined>,
+          message,
+        },
+      },
+    };
+    const encoded = btoa(encodeURIComponent(JSON.stringify(payload)));
+    router.push(`/chat-v2?new_session=true&splunk_analysis=${encodeURIComponent(encoded)}`);
   }, [router]);
 
   if (loading) {

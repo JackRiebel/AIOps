@@ -198,7 +198,12 @@ Keep it concise and actionable. Use bullet points.`;
             Refresh
           </button>
           <button
-            onClick={() => router.push('/chat-v2?q=Analyze+my+Splunk+environment')}
+            onClick={() => {
+              const message = 'Analyze my Splunk environment — review recent security events, identify patterns, and provide recommendations';
+              const payload = { message, context: { type: 'splunk_analysis' as const, data: { category: 'assessment' as const, title: 'Splunk Environment Analysis', details: {} as Record<string, string | number | undefined>, message } } };
+              const encoded = btoa(encodeURIComponent(JSON.stringify(payload)));
+              router.push(`/chat-v2?new_session=true&splunk_analysis=${encodeURIComponent(encoded)}`);
+            }}
             className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium text-cyan-700 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-500/10 border border-cyan-200 dark:border-cyan-500/20 rounded-lg hover:bg-cyan-100 dark:hover:bg-cyan-500/20 transition"
           >
             <MessageSquare className="w-3 h-3" />
