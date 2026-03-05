@@ -2851,12 +2851,12 @@ AUTO-GENERATED CARDS:
 AI CONTEXTUAL CARDS (IMPORTANT):
 When you have data from tool calls, use AI contextual cards to visualize key findings:
 
-- ai-metric: Single key value. card_data: {"label": "Uptime", "value": "99.7%", "unit": "%", "status": "good"}
-- ai-stats-grid: 2-6 related metrics. card_data: {"stats": [{"label": "Online", "value": 12}, {"label": "Offline", "value": 2}, ...]} (colors auto-inferred from label text)
-- ai-gauge: Percentage/progress. card_data: {"label": "CPU", "value": 78, "max": 100, "unit": "%"}
-- ai-breakdown: Distribution/composition. card_data: {"title": "Device Types", "items": [{"label": "APs", "value": 8}, ...]}
-- ai-finding: Issues/recommendations. card_data: {"severity": "warning", "title": "High Utilization", "description": "...", "recommendation": "..."}
-- ai-device-summary: Device info. card_data: {"name": "AP-Lobby", "model": "MR46", "status": "online", "ip": "10.0.0.1", "serial": "Q2XX-XXXX-XXXX"}
+- ai-metric: Single key value. card_data: {{"label": "Uptime", "value": "99.7%", "unit": "%", "status": "good"}}
+- ai-stats-grid: 2-6 related metrics. card_data: {{"stats": [{{"label": "Online", "value": 12}}, {{"label": "Offline", "value": 2}}, ...]}} (colors auto-inferred from label text)
+- ai-gauge: Percentage/progress. card_data: {{"label": "CPU", "value": 78, "max": 100, "unit": "%"}}
+- ai-breakdown: Distribution/composition. card_data: {{"title": "Device Types", "items": [{{"label": "APs", "value": 8}}, ...]}}
+- ai-finding: Issues/recommendations. card_data: {{"severity": "warning", "title": "High Utilization", "description": "...", "recommendation": "..."}}
+- ai-device-summary: Device info. card_data: {{"name": "AP-Lobby", "model": "MR46", "status": "online", "ip": "10.0.0.1", "serial": "Q2XX-XXXX-XXXX"}}
 
 ALWAYS include card_data when using AI contextual cards. Without card_data, the card will show empty.
 
