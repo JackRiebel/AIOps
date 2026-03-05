@@ -390,8 +390,7 @@ function ThousandEyesPage() {
         {/* ============================================================ */}
         {/* Investigate Tab — Tests, Alerts, Agents, Path, Internet */}
         {/* ============================================================ */}
-        {view === 'investigate' && (
-          <div className="space-y-3">
+        <div className={view === 'investigate' ? 'space-y-3' : 'hidden'}>
             <SubNavPills
               items={INVESTIGATE_PILLS}
               value={investigateSubView}
@@ -466,24 +465,22 @@ function ThousandEyesPage() {
                 <UsageCard />
               </div>
             )}
-          </div>
-        )}
+        </div>
 
         {/* ============================================================ */}
         {/* Platform Tab — AI Journey + MCP Servers */}
+        {/* Always mounted to prefetch data so tab switch is instant */}
         {/* ============================================================ */}
-        {view === 'platform' && (
-          <div className="space-y-3">
+        <div className={view === 'platform' ? 'space-y-3' : 'hidden'}>
             <SubNavPills
               items={PLATFORM_PILLS}
               value={platformSubView}
               onChange={setPlatformSubView}
             />
 
-            {platformSubView === 'ai-journey' && <AIPathJourneyView />}
-            {platformSubView === 'mcp-servers' && <MCPSection />}
-          </div>
-        )}
+            <div className={platformSubView === 'ai-journey' ? '' : 'hidden'}><AIPathJourneyView /></div>
+            <div className={platformSubView === 'mcp-servers' ? '' : 'hidden'}><MCPSection /></div>
+        </div>
       </div>
 
       {/* Create Test Modal */}
