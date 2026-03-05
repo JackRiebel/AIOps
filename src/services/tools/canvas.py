@@ -920,6 +920,9 @@ FOLLOWUP_TOOLS = [
         name="suggest_followups",
         description="""Suggest 2-3 follow-up actions the user might want to take next. These appear as clickable buttons below your response.
 
+IMPORTANT — FIRST SUGGESTION IS ALWAYS "DIG DEEPER":
+The FIRST suggestion should always be a primary investigation action — something like "Investigate further", "Deep dive into root cause", "Run full diagnostic". Its query should instruct thorough investigation with multiple tool calls and visualization cards. The UI renders this first suggestion as a prominent primary button.
+
 WHEN TO USE THIS TOOL:
 - After completing any analysis or investigation — suggest deeper dives
 - After answering a question — suggest related questions the user might have
@@ -930,7 +933,7 @@ WHEN NOT TO USE:
 - Simple yes/no answers
 - When you're asking the user a clarifying question (use text instead)
 
-Each suggestion should be a complete, actionable query that you can answer if the user clicks it.""",
+Each suggestion should be a complete, actionable query that you can answer if the user clicks it. The query for the first "dig deeper" suggestion should be detailed and instruct you to investigate thoroughly, check related systems, add visualization cards, and explain all findings.""",
         platform="canvas",
         category="interaction",
         properties={
@@ -961,9 +964,9 @@ Each suggestion should be a complete, actionable query that you can answer if th
                 "query": "Show me device health",
                 "params": {
                     "suggestions": [
-                        {"label": "Check offline devices", "query": "Investigate the 3 offline devices and check if they have recent alerts"},
-                        {"label": "View bandwidth trends", "query": "Show me bandwidth usage trends for the past 24 hours"},
-                        {"label": "Run health audit", "query": "Run a comprehensive health audit across all networks"},
+                        {"label": "Investigate offline devices", "query": "Investigate the 3 offline devices in depth — check their recent alerts, uplink status, and last seen times. Add visualization cards showing device status and alert timeline. Explain what likely caused them to go offline and recommend fixes."},
+                        {"label": "View bandwidth trends", "query": "Show me bandwidth usage trends for the past 24 hours across all networks"},
+                        {"label": "Run full health audit", "query": "Run a comprehensive health audit across all networks and highlight any issues"},
                     ]
                 }
             },

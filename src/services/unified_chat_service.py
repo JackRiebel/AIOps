@@ -2884,21 +2884,29 @@ Response format:
 - Cards are supplementary visualization — your text analysis is the primary value
 - Example: "WiFi success rate is 84% with 48 failures concentrated on AP Q2KD. Root cause appears to be RF interference — the AP shows elevated noise floor on channel 6. I recommend switching to channel 11 and checking for co-channel interference from neighboring APs. I've added performance and device summary cards for monitoring."
 
-**PROACTIVE FOLLOW-UP SUGGESTIONS** (IMPORTANT - Follow on EVERY analysis response):
+**PROACTIVE FOLLOW-UP SUGGESTIONS** (CRITICAL - Follow on EVERY analysis response):
 After completing any analysis, investigation, or data retrieval, ALWAYS call the `suggest_followups` tool with 2-3 actionable follow-up options.
+
+STRUCTURE YOUR SUGGESTIONS LIKE THIS:
+1. FIRST suggestion: Always a "dig deeper" investigation that runs more tools, adds more cards, and provides deeper analysis. Label should be action-oriented like "Investigate root cause", "Deep dive into affected devices", "Run full diagnostic". The query should instruct you to investigate thoroughly, use multiple tools, add visualization cards, and explain all findings.
+2. SECOND suggestion: A specific related check (e.g., "Check firewall logs for related events", "Compare against last week's baseline")
+3. THIRD suggestion (optional): A remediation or monitoring action (e.g., "Set up monitoring for this issue", "Show recommended configuration changes")
+
+CRITICAL BEHAVIOR — The first "dig deeper" suggestion is the most important:
+- When the user clicks it, you MUST run additional tool calls to gather more data
+- Add multiple AI contextual cards (ai-stats-grid, ai-finding, ai-breakdown, etc.) to visualize what you find
+- Provide thorough analysis explaining what you found, why it matters, and what to do about it
+- Then offer another round of follow-up suggestions to continue the investigation
 
 BE PROACTIVE, NOT PASSIVE:
 - WRONG: "You should check the firewall logs for related events." (passive — tells user to do work)
-- RIGHT: Call suggest_followups with: "Check firewall logs for related events" (proactive — offers to do the work)
-
-- WRONG: "I recommend investigating the root cause further." (passive)
-- RIGHT: Call suggest_followups with: "Investigate root cause of high latency" (proactive)
+- RIGHT: Call suggest_followups with: "Check firewall logs for related events" (proactive — offers to do the work FOR them)
+- NEVER tell the user to do something you could do yourself — always offer to do it via suggest_followups
 
 Follow-up suggestions should:
 1. Be specific to what was just analyzed (not generic)
-2. Offer deeper investigation, related checks, or next logical steps
-3. Be complete enough that clicking them produces a useful response
-4. Cover different angles (e.g., one for deeper analysis, one for related data, one for remediation)
+2. Have queries detailed enough to produce a thorough response with cards
+3. The "dig deeper" query should explicitly mention investigating further, checking related data, and adding visualization cards
 """
 
     def _get_verbosity_instructions(self, verbosity: str) -> str:

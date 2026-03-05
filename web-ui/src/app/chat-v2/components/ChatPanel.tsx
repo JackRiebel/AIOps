@@ -457,7 +457,7 @@ const StreamingIndicator = memo(({
 });
 StreamingIndicator.displayName = 'StreamingIndicator';
 
-// Follow-up suggestion buttons
+// Follow-up suggestion buttons — first is always a primary "dig deeper" action
 const FollowUpButtons = memo(({
   suggestions,
   onClick,
@@ -467,27 +467,50 @@ const FollowUpButtons = memo(({
 }) => {
   if (!suggestions || suggestions.length === 0) return null;
 
+  const [primary, ...secondary] = suggestions;
+
   return (
     <div className="flex justify-start min-w-0">
-      <div className="flex flex-wrap gap-2 max-w-full">
-        {suggestions.map((s, i) => (
-          <button
-            key={i}
-            onClick={() => onClick(s.query)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium
-              text-cyan-700 dark:text-cyan-300
-              bg-cyan-50 dark:bg-cyan-500/10
-              border border-cyan-200 dark:border-cyan-500/20
-              rounded-xl hover:bg-cyan-100 dark:hover:bg-cyan-500/20
-              hover:border-cyan-300 dark:hover:border-cyan-500/30
-              transition-all duration-150 hover:shadow-sm"
-          >
-            <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-            </svg>
-            {s.label}
-          </button>
-        ))}
+      <div className="flex flex-col gap-2 max-w-full">
+        {/* Primary action — prominent "dig deeper" button */}
+        <button
+          onClick={() => onClick(primary.query)}
+          className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium
+            text-white
+            bg-gradient-to-r from-cyan-600 to-blue-600
+            rounded-xl hover:from-cyan-500 hover:to-blue-500
+            shadow-md hover:shadow-lg hover:shadow-cyan-500/20
+            transition-all duration-150 hover:scale-[1.02]"
+        >
+          <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
+          </svg>
+          {primary.label}
+        </button>
+
+        {/* Secondary suggestions — smaller, outlined */}
+        {secondary.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {secondary.map((s, i) => (
+              <button
+                key={i}
+                onClick={() => onClick(s.query)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium
+                  text-cyan-700 dark:text-cyan-300
+                  bg-cyan-50 dark:bg-cyan-500/10
+                  border border-cyan-200 dark:border-cyan-500/20
+                  rounded-lg hover:bg-cyan-100 dark:hover:bg-cyan-500/20
+                  hover:border-cyan-300 dark:hover:border-cyan-500/30
+                  transition-all duration-150"
+              >
+                <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                </svg>
+                {s.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
