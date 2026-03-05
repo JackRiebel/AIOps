@@ -569,9 +569,11 @@ class AISessionService:
 
             # Build event log for AI - include rich context
             event_log = []
-            pages_visited = set()
+            pages_visited = {}  # path -> {name, total_time_seconds, visit_count}
             api_endpoints_called = set()
             ai_conversations = []  # Store full Q&A pairs
+            card_interactions = []  # Track card views/expansions
+            tools_used_set = set()
 
             for e in events:
                 event_entry = {
@@ -586,11 +588,13 @@ class AISessionService:
                         query = e.event_data.get("query", "")
                         response = e.event_data.get("response", e.event_data.get("response_preview", ""))
                         model = e.event_data.get("model", "")
+                        query_tools = e.event_data.get("tools_used", [])
+                        if isinstance(query_tools, list):
+                            tools_used_set.update(query_tools)
                         if query:
-                            event_entry["query"] = query[:300]  # Include in event log
+                            event_entry["query"] = query[:300]
                             if response:
-                                event_entry["response"] = response[:500]  # Include response in event log
-                            # Store full conversation for summary
+                                event_entry["response"] = response[:500]
                             ai_conversations.append({
                                 "user": query[:500],
                                 "assistant": response[:800] if response else "",
@@ -601,12 +605,37 @@ class AISessionService:
                         element = e.event_data.get("element_id", e.event_data.get("element_type", ""))
                         if element:
                             event_entry["clicked"] = str(element)[:50]
-                    # For navigation, capture the path
+                    # For navigation, capture the path with friendly name
                     elif e.event_type == "navigation" and isinstance(e.event_data, dict):
                         path = e.event_data.get("path", "")
+                        page_name = e.event_data.get("page_name", path)
                         if path:
                             event_entry["path"] = path
-                            pages_visited.add(path)
+                            event_entry["page_name"] = page_name
+                            if path not in pages_visited:
+                                pages_visited[path] = {"name": page_name, "total_time_seconds": 0, "visit_count": 0}
+                            pages_visited[path]["visit_count"] += 1
+                    # For page exits, capture time spent
+                    elif e.event_type == "page_exit" and isinstance(e.event_data, dict):
+                        path = e.event_data.get("path", "")
+                        time_seconds = e.event_data.get("time_on_page_seconds", 0)
+                        if path and path in pages_visited:
+                            pages_visited[path]["total_time_seconds"] += time_seconds
+                        event_entry["time_on_page_seconds"] = time_seconds
+                    # For card interactions, capture card details
+                    elif e.event_type == "card_interaction" and isinstance(e.event_data, dict):
+                        card_type = e.event_data.get("card_type", "unknown")
+                        card_title = e.event_data.get("card_title", "")
+                        action = e.event_data.get("action", "view")
+                        event_entry["card_type"] = card_type
+                        if card_title:
+                            event_entry["card_title"] = card_title
+                        event_entry["action"] = action
+                        card_interactions.append({
+                            "type": card_type,
+                            "title": card_title,
+                            "action": action,
+                        })
 
                 if e.input_tokens and e.output_tokens:
                     event_entry["tokens"] = e.input_tokens + e.output_tokens
@@ -616,7 +645,7 @@ class AISessionService:
                     event_entry["api"] = f"{e.api_method} {endpoint}"
                     api_endpoints_called.add(endpoint)
 
-                if e.page_path and e.event_type != "navigation":
+                if e.page_path and e.event_type not in ("navigation", "page_exit"):
                     event_entry["page"] = e.page_path
 
                 event_log.append(event_entry)
@@ -629,9 +658,40 @@ class AISessionService:
             # Format event log as proper JSON string (limit to 50 most recent events to fit context)
             event_log_json = json_module.dumps(event_log[-50:], indent=2, default=str)
 
-            # Build a context summary for pages and APIs
-            pages_summary = ", ".join(list(pages_visited)[:10]) if pages_visited else "None"
+            # Build a context summary for pages (with friendly names and time spent)
+            if pages_visited:
+                pages_lines = []
+                for path, info in list(pages_visited.items())[:10]:
+                    time_str = f" ({info['total_time_seconds']}s)" if info['total_time_seconds'] > 0 else ""
+                    visits = f" x{info['visit_count']}" if info['visit_count'] > 1 else ""
+                    pages_lines.append(f"  - {info['name']} [{path}]{visits}{time_str}")
+                pages_summary = "\n".join(pages_lines)
+            else:
+                pages_summary = "  None"
+
             apis_summary = ", ".join(list(api_endpoints_called)[:10]) if api_endpoints_called else "None"
+
+            # Build card interaction summary
+            if card_interactions:
+                card_summary_map = {}
+                for ci in card_interactions:
+                    key = ci["type"]
+                    if key not in card_summary_map:
+                        card_summary_map[key] = {"titles": set(), "actions": set(), "count": 0}
+                    card_summary_map[key]["count"] += 1
+                    card_summary_map[key]["actions"].add(ci["action"])
+                    if ci["title"]:
+                        card_summary_map[key]["titles"].add(ci["title"][:50])
+                card_interaction_summary = "\n".join([
+                    f"  - {ctype}: {info['count']} interactions ({', '.join(info['actions'])})"
+                    + (f" - {', '.join(list(info['titles'])[:3])}" if info['titles'] else "")
+                    for ctype, info in list(card_summary_map.items())[:10]
+                ])
+            else:
+                card_interaction_summary = "  None"
+
+            # Tools used by AI
+            tools_summary = ", ".join(sorted(tools_used_set)[:15]) if tools_used_set else "None"
 
             # Build AI conversation transcript
             conversation_transcript = ""
@@ -659,7 +719,13 @@ SESSION METRICS:
 - Total Tokens Used: {ai_session.total_tokens:,}
 - Total AI Cost: ${float(ai_session.total_cost_usd):.4f}
 
-PAGES VISITED: {pages_summary}
+PAGES VISITED (with time spent):
+{pages_summary}
+
+CARD INTERACTIONS (dashboards/visualizations viewed):
+{card_interaction_summary}
+
+AI TOOLS USED: {tools_summary}
 
 API ENDPOINTS CALLED: {apis_summary}
 
@@ -669,23 +735,31 @@ AI CONVERSATION TRANSCRIPT (User questions and AI responses):
 DETAILED EVENT LOG (most recent {len(event_log[-50:])} events, chronological):
 {event_log_json}
 
-Based on this session data, generate:
-1. A SHORT, DESCRIPTIVE session name (3-6 words) that captures what the user was doing
-2. A complete session summary
+Based on this session data, generate a comprehensive summary. Pay close attention to:
+- Which specific pages/dashboards the user visited and how long they spent on each
+- What topics they discussed with the AI (from the conversation transcript)
+- Which cards/visualizations they interacted with (expanded, refreshed, etc.)
+- What tools the AI used to answer their questions
+- The overall workflow: what did they start investigating, what did they find, what actions did they take?
 
 Return a JSON object with EXACTLY this format:
 {{
-    "session_name": "Short descriptive name for this session (3-6 words)",
+    "session_name": "Short descriptive name (3-6 words, based on primary activity)",
     "outcome": "One-line summary of what was accomplished (max 100 chars)",
-    "narrative": "2-3 sentence workflow narrative describing what the user did and accomplished",
-    "milestones": ["Key milestone 1", "Key milestone 2", ...],
+    "narrative": "2-4 sentence workflow narrative. Be specific: mention actual page names, topics discussed, and findings. Example: 'User started on the Splunk Dashboard reviewing security alerts, then asked the AI about anomalous login patterns. The AI identified 3 failed auth attempts from unusual IPs. User then checked ThousandEyes for network path issues.'",
+    "milestones": ["Specific milestone 1 (e.g., 'Identified 3 critical Meraki alerts')", "Specific milestone 2", ...],
+    "pages_visited": [
+        {{"name": "Page Name", "time_seconds": 120, "purpose": "Brief description of what they did here"}}
+    ],
+    "topics_discussed": ["Topic 1 from AI conversations", "Topic 2", ...],
     "metrics": {{
         "duration_minutes": {duration_minutes:.1f},
         "total_cost_usd": {float(ai_session.total_cost_usd):.6f},
         "total_tokens": {ai_session.total_tokens},
         "ai_queries": {ai_session.ai_query_count},
         "api_calls": {ai_session.api_call_count},
-        "estimated_manual_time_minutes": <estimate how long this would take manually without AI assistance>
+        "cards_viewed": {len(card_interactions)},
+        "estimated_manual_time_minutes": "<estimate how long this would take manually without AI>"
     }},
     "insights": ["Actionable insight about the session", ...],
     "recommendations": ["Recommendation for future sessions", ...]

@@ -7,6 +7,33 @@ import { useAuth } from './AuthContext';
 // Store original fetch for patching
 const originalFetch = typeof window !== 'undefined' ? window.fetch : null;
 
+// Friendly page name mapping
+const PAGE_NAMES: Record<string, string> = {
+  '/': 'Home Dashboard',
+  '/chat-v2': 'AI Chat',
+  '/splunk': 'Splunk Dashboard',
+  '/thousandeyes': 'ThousandEyes Monitoring',
+  '/meraki': 'Meraki Dashboard',
+  '/catalyst': 'Catalyst Center',
+  '/incidents': 'Incidents',
+  '/admin': 'Administration',
+  '/card-test': 'Card Testing',
+  '/settings': 'Settings',
+};
+
+function getPageName(path: string): string {
+  // Exact match first
+  if (PAGE_NAMES[path]) return PAGE_NAMES[path];
+  // Check prefix matches for nested routes
+  const segments = path.split('/').filter(Boolean);
+  if (segments.length > 1) {
+    const basePath = '/' + segments[0];
+    if (PAGE_NAMES[basePath]) return PAGE_NAMES[basePath];
+  }
+  // Fallback: capitalize the path
+  return path.replace(/^\//, '').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) || 'Home';
+}
+
 // Model pricing type
 interface ModelPricing {
   input: number;
@@ -99,6 +126,7 @@ interface AISessionContextType {
   logClick: (elementId: string, elementType: string, data?: Record<string, any>) => void;
   logEditAction: (action: string, data: Record<string, any>) => void;
   logError: (error: string, data?: Record<string, any>) => void;
+  logCardInteraction: (action: 'view' | 'expand' | 'collapse' | 'refresh' | 'click', cardType: string, cardTitle?: string, data?: Record<string, any>) => void;
   completedSession: AISession | null;
   clearCompletedSession: () => void;
 }
@@ -177,6 +205,9 @@ export function AISessionProvider({ children }: { children: React.ReactNode }) {
   const eventQueue = useRef<SessionEvent[]>([]);
   const batchTimerRef = useRef<NodeJS.Timeout | null>(null);
   const durationTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Time-on-page tracking
+  const lastPageRef = useRef<{ path: string; enteredAt: number } | null>(null);
 
   // Stable ref for queueEvent callback (prevents fetch patch effect from re-running)
   const queueEventRef = useRef<((event: SessionEvent) => void) | null>(null);
@@ -266,12 +297,34 @@ export function AISessionProvider({ children }: { children: React.ReactNode }) {
     checkActiveSession();
   }, [user]);
 
-  // Track navigation changes
+  // Track navigation changes with friendly names and time-on-page
   useEffect(() => {
     if (session && pathname) {
+      const now = Date.now();
+      const pageName = getPageName(pathname);
+
+      // Log time spent on the previous page
+      if (lastPageRef.current && lastPageRef.current.path !== pathname) {
+        const timeOnPageMs = now - lastPageRef.current.enteredAt;
+        if (timeOnPageMs > 500) { // Only log if they spent meaningful time
+          queueEvent({
+            event_type: 'page_exit',
+            event_data: {
+              path: lastPageRef.current.path,
+              page_name: getPageName(lastPageRef.current.path),
+              time_on_page_ms: timeOnPageMs,
+              time_on_page_seconds: Math.round(timeOnPageMs / 1000),
+            },
+            page_path: lastPageRef.current.path,
+          });
+        }
+      }
+
+      // Log the new navigation
+      lastPageRef.current = { path: pathname, enteredAt: now };
       queueEvent({
         event_type: 'navigation',
-        event_data: { path: pathname },
+        event_data: { path: pathname, page_name: pageName },
         page_path: pathname,
       });
     }
@@ -522,11 +575,12 @@ export function AISessionProvider({ children }: { children: React.ReactNode }) {
         // Initialize real-time metrics
         setRealTimeMetrics(createInitialMetrics());
 
-        // Log initial navigation
+        // Log initial navigation with friendly name
         if (pathname) {
+          lastPageRef.current = { path: pathname, enteredAt: Date.now() };
           queueEvent({
             event_type: 'navigation',
-            event_data: { path: pathname, initial: true },
+            event_data: { path: pathname, page_name: getPageName(pathname), initial: true },
             page_path: pathname,
           });
         }
@@ -541,6 +595,24 @@ export function AISessionProvider({ children }: { children: React.ReactNode }) {
 
   const stopSession = useCallback(async (): Promise<AISession | null> => {
     if (!session) return null;
+
+    // Log time on the final page before stopping
+    if (lastPageRef.current) {
+      const timeOnPageMs = Date.now() - lastPageRef.current.enteredAt;
+      if (timeOnPageMs > 500) {
+        queueEvent({
+          event_type: 'page_exit',
+          event_data: {
+            path: lastPageRef.current.path,
+            page_name: getPageName(lastPageRef.current.path),
+            time_on_page_ms: timeOnPageMs,
+            time_on_page_seconds: Math.round(timeOnPageMs / 1000),
+          },
+          page_path: lastPageRef.current.path,
+        });
+      }
+      lastPageRef.current = null;
+    }
 
     // Flush remaining events
     await flushEvents();
@@ -663,7 +735,7 @@ export function AISessionProvider({ children }: { children: React.ReactNode }) {
   const logNavigation = useCallback((path: string) => {
     queueEvent({
       event_type: 'navigation',
-      event_data: { path },
+      event_data: { path, page_name: getPageName(path) },
       page_path: path,
     });
   }, [queueEvent]);
@@ -695,6 +767,23 @@ export function AISessionProvider({ children }: { children: React.ReactNode }) {
     });
   }, [queueEvent]);
 
+  const logCardInteraction = useCallback((
+    action: 'view' | 'expand' | 'collapse' | 'refresh' | 'click',
+    cardType: string,
+    cardTitle?: string,
+    data?: Record<string, any>
+  ) => {
+    queueEvent({
+      event_type: 'card_interaction',
+      event_data: {
+        action,
+        card_type: cardType,
+        ...(cardTitle && { card_title: cardTitle }),
+        ...data,
+      },
+    });
+  }, [queueEvent]);
+
   const clearCompletedSession = useCallback(() => {
     setCompletedSession(null);
   }, []);
@@ -715,6 +804,7 @@ export function AISessionProvider({ children }: { children: React.ReactNode }) {
         logClick,
         logEditAction,
         logError,
+        logCardInteraction,
         completedSession,
         clearCompletedSession,
       }}

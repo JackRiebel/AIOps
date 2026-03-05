@@ -982,17 +982,25 @@ async def get_mttr_dashboard(
             inc_result = await session.execute(stmt)
             incident = inc_result.scalar_one_or_none()
 
+            # Use session-type-specific baseline if available
+            session_type = s.session_type or "default"
+            incident_baseline = scorer.MTTR_BASELINES.get(
+                session_type, scorer.MTTR_BASELINES["default"]
+            )
+            resolution_min = float(s.resolution_time_minutes)
+            improvement_pct = max(0, (
+                (incident_baseline - resolution_min) / incident_baseline * 100
+            )) if incident_baseline > 0 else 0
+
             recent_resolved.append({
                 "session_id": s.id,
                 "session_name": s.name,
                 "incident_id": s.incident_id,
                 "incident_title": incident.title if incident else f"Incident #{s.incident_id}",
-                "resolution_time_minutes": float(s.resolution_time_minutes),
-                "baseline_minutes": scorer.MTTR_BASELINES.get("default", 30),
-                "improvement_percentage": max(0, (
-                    (scorer.MTTR_BASELINES.get("default", 30) - float(s.resolution_time_minutes))
-                    / scorer.MTTR_BASELINES.get("default", 30) * 100
-                )),
+                "resolution_time_minutes": resolution_min,
+                "baseline_minutes": incident_baseline,
+                "baseline_source": "industry_benchmark",
+                "improvement_percentage": improvement_pct,
                 "resolved_at": s.ended_at.isoformat() if s.ended_at else None,
             })
 

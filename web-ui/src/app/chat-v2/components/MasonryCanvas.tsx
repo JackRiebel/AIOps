@@ -17,6 +17,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import type { SmartCard } from '../cards/types';
 import { useHighlight } from '../contexts/HighlightContext';
 import { SmartCardWrapper } from '../cards/SmartCardWrapper';
+import { useAISession } from '@/contexts/AISessionContext';
 
 // =============================================================================
 // Types
@@ -239,6 +240,7 @@ export const MasonryCanvas = memo(({
 }: MasonryCanvasProps) => {
   const [expandedCardId, setExpandedCardId] = useState<string | null>(null);
   const { isCardHighlighted, highlightFromCard, clearHighlight } = useHighlight();
+  const { isActive: isSessionActive, logCardInteraction } = useAISession();
 
   // Get expanded card
   const expandedCard = useMemo((): SmartCard | null => {
@@ -258,14 +260,31 @@ export const MasonryCanvas = memo(({
     return [...pinned, ...unpinned];
   }, [cards]);
 
-  // Handle card expansion
+  // Handle card expansion with session tracking
   const handleExpand = useCallback((cardId: string) => {
     setExpandedCardId(cardId);
-  }, []);
+    if (isSessionActive) {
+      const card = cards.find(c => c.id === cardId);
+      if (card) logCardInteraction('expand', card.type, card.title);
+    }
+  }, [isSessionActive, cards, logCardInteraction]);
 
   const handleCloseExpanded = useCallback(() => {
+    if (isSessionActive && expandedCardId) {
+      const card = cards.find(c => c.id === expandedCardId);
+      if (card) logCardInteraction('collapse', card.type, card.title);
+    }
     setExpandedCardId(null);
-  }, []);
+  }, [isSessionActive, expandedCardId, cards, logCardInteraction]);
+
+  // Wrap onCardAction to also track via AI session
+  const trackedCardAction = useCallback((cardId: string, action: string, payload?: unknown) => {
+    if (isSessionActive && action !== 'data-loaded' && action !== 'data-error') {
+      const card = cards.find(c => c.id === cardId);
+      if (card) logCardInteraction('click', card.type, card.title, { action });
+    }
+    onCardAction?.(cardId, action, payload);
+  }, [isSessionActive, cards, logCardInteraction, onCardAction]);
 
   // Handle card highlight
   const handleCardMouseEnter = useCallback((card: SmartCard) => {
@@ -323,7 +342,7 @@ export const MasonryCanvas = memo(({
                   onPin={onCardPin ? () => onCardPin(card.id) : undefined}
                   onRemove={() => onCardRemove(card.id)}
                   onExpand={() => handleExpand(card.id)}
-                  onAction={onCardAction}
+                  onAction={trackedCardAction}
                   onMouseEnter={() => handleCardMouseEnter(card)}
                   onMouseLeave={clearHighlight}
                   pollingContext={pollingContext}
@@ -352,7 +371,7 @@ export const MasonryCanvas = memo(({
               handleCloseExpanded();
             }}
             onPin={onCardPin ? () => onCardPin(expandedCard.id) : undefined}
-            onAction={onCardAction}
+            onAction={trackedCardAction}
             pollingContext={pollingContext}
           />
         )}

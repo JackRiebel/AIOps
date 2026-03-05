@@ -298,7 +298,7 @@ function CostsDashboardContent() {
         // Backend returns data nested in 'summary' object
         const summary = mttr.summary || {};
         setMTTRData({
-          baselineMinutes: summary.baseline_mttr_minutes || 30,
+          baselineMinutes: summary.baseline_mttr_minutes || 60,
           aiAssistedMinutes: summary.ai_assisted_mttr_minutes || 0,
           improvementPercentage: summary.improvement_percentage || 0,
           incidentsResolved: summary.incidents_resolved || 0,
@@ -321,7 +321,7 @@ function CostsDashboardContent() {
             incidentType: inc.incident_title || 'general',
             resolved: true,
             resolutionTimeMinutes: inc.resolution_time_minutes,
-            baselineMinutes: inc.baseline_minutes || 30,
+            baselineMinutes: inc.baseline_minutes,
             startedAt: inc.resolved_at || '',
             endedAt: inc.resolved_at,
           })),
@@ -434,37 +434,6 @@ function CostsDashboardContent() {
     };
   }, [summary]);
 
-  const sessionMetrics = useMemo(() => {
-    const completedSessions = sessions.filter((s) => s.status === 'completed');
-
-    const totalTimeSaved = completedSessions.reduce((sum, s) => {
-      const est = s.ai_summary?.metrics?.estimated_manual_time_minutes || 0;
-      const dur = s.ai_summary?.metrics?.duration_minutes || 0;
-      return sum + Math.max(0, est - dur);
-    }, 0);
-
-    const avgDuration =
-      completedSessions.length > 0
-        ? completedSessions.reduce(
-            (sum, s) => sum + (s.ai_summary?.metrics?.duration_minutes || 0),
-            0
-          ) / completedSessions.length
-        : 0;
-
-    const avgROI =
-      completedSessions.length > 0
-        ? completedSessions.reduce((sum, s) => {
-            const est = s.ai_summary?.metrics?.estimated_manual_time_minutes || 0;
-            const dur = s.ai_summary?.metrics?.duration_minutes || 1;
-            return sum + ((est / dur - 1) * 100);
-          }, 0) / completedSessions.length
-        : 0;
-
-    const activeSessions = sessions.filter((s) => s.status === 'active').length;
-
-    return { totalTimeSaved, avgDuration, avgROI, activeSessions };
-  }, [sessions]);
-
   // Format time helper
   const formatTimeSaved = (minutes: number): string => {
     if (minutes < 60) return `${Math.round(minutes)}m`;
@@ -548,7 +517,7 @@ function CostsDashboardContent() {
         changeLabel: weekChange?.time_saved_change != null
           ? `${weekChange.time_saved_change >= 0 ? '+' : ''}${weekChange.time_saved_change.toFixed(0)}% vs last week`
           : 'vs manual work',
-        tooltip: 'Total time saved by AI assistance compared to estimated manual completion time.',
+        tooltip: 'Estimated time saved vs manual work, based on industry benchmarks for each unique task type performed.',
       },
       {
         id: 'cost',
@@ -568,7 +537,7 @@ function CostsDashboardContent() {
         changeLabel: weekChange?.roi_change != null
           ? `${weekChange.roi_change >= 0 ? '+' : ''}${weekChange.roi_change.toFixed(0)}pts vs last week`
           : 'efficiency gain',
-        tooltip: 'Return on investment: (Labor saved - AI cost) / AI cost. Higher is better.',
+        tooltip: 'Estimated ROI: (Est. labor saved - AI cost) / AI cost. Based on industry time benchmarks × $85/hr engineer rate.',
       },
       {
         id: 'savings',
@@ -578,11 +547,10 @@ function CostsDashboardContent() {
         changeLabel: roiDashboard?.mttr_improvement_pct != null
           ? `${roiDashboard.mttr_improvement_pct.toFixed(0)}% MTTR improvement`
           : 'labor cost avoided',
-        tooltip: 'Labor cost avoided minus AI cost. Positive = AI saved money.',
+        tooltip: 'Estimated labor cost avoided minus actual AI API cost. Labor estimate uses industry benchmarks.',
       },
     ];
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessions, sessionMetrics, roiDashboard, formatTimeSaved, formatROIValue, formatCostValue]);
+  }, [sessions, roiDashboard]);
 
   // ============================================================================
   // Event Handlers
@@ -879,13 +847,22 @@ function CostsDashboardContent() {
                         const avgROI = completedSessions.length > 0
                           ? completedSessions.reduce((sum, s) => sum + (s.roi_percentage || 0), 0) / completedSessions.length
                           : 0;
+                        // Calculate real average session duration from actual session data
+                        const avgDuration = completedSessions.length > 0
+                          ? completedSessions.reduce((sum, s) => {
+                              if (s.started_at && s.ended_at) {
+                                return sum + (new Date(s.ended_at).getTime() - new Date(s.started_at).getTime()) / 60000;
+                              }
+                              return sum + (s.ai_summary?.metrics?.duration_minutes || 0);
+                            }, 0) / completedSessions.length
+                          : 0;
                         return {
                           timeSavedMinutes,
                           manualCostEstimate: laborSaved,
                           aiCostTotal: totalCost,
                           roiPercentage: avgROI,
                           sessionsCount: completedSessions.length,
-                          avgSessionDuration: timeSavedMinutes / Math.max(1, completedSessions.length) / 2,
+                          avgSessionDuration: avgDuration,
                         };
                       })()}
                       className="lg:col-span-2"

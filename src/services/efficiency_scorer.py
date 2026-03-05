@@ -96,11 +96,13 @@ class EfficiencyScorer:
     """Service for calculating detailed efficiency scores."""
 
     # MTTR baselines by incident type (minutes)
-    # Based on industry research:
+    # IMPORTANT: These are INDUSTRY BENCHMARKS, not organization-specific data.
+    # Sources:
     # - P1 incident MTTR target: Under 4 hours (240 min) per INOC NOC benchmarks
     # - Tier 1 resolution: 60-80% resolved within 15-30 minutes
     # - Complex issues: 33%+ of IT pros take hours to days to resolve
     # - Time to action: Under 15 minutes for initial response
+    # When real historical MTTR data is available, use that instead.
     MTTR_BASELINES = {
         "network_outage": 180.0,      # Full outage - P1, target under 4 hours
         "device_offline": 45.0,       # Single device - lower priority
@@ -276,7 +278,17 @@ class EfficiencyScorer:
         sessions: List[AISession],
         baseline_minutes: float = None
     ) -> MTTRComparison:
-        """Calculate MTTR comparison for a set of sessions."""
+        """Calculate MTTR comparison for a set of sessions.
+
+        The baseline is determined as follows:
+        1. If an explicit baseline_minutes is provided, use it.
+        2. Otherwise, use the industry benchmark for the dominant
+           incident type in the session set.
+
+        NOTE: The baseline is an industry benchmark estimate, not
+        this organization's actual historical MTTR. The UI should
+        clearly label it as such.
+        """
         incident_sessions = [
             s for s in sessions
             if s.incident_id and s.incident_resolved and s.resolution_time_minutes
@@ -297,7 +309,18 @@ class EfficiencyScorer:
         )
         avg_resolution = total_resolution_time / len(incident_sessions)
 
-        baseline = baseline_minutes or self.MTTR_BASELINES["default"]
+        # Use provided baseline, or look up by dominant session type
+        if baseline_minutes:
+            baseline = baseline_minutes
+        else:
+            # Find dominant session type for baseline lookup
+            type_counts: Dict[str, int] = {}
+            for s in incident_sessions:
+                stype = s.session_type or "default"
+                type_counts[stype] = type_counts.get(stype, 0) + 1
+            dominant_type = max(type_counts, key=type_counts.get) if type_counts else "default"
+            baseline = self.MTTR_BASELINES.get(dominant_type, self.MTTR_BASELINES["default"])
+
         improvement = ((baseline - avg_resolution) / baseline) * 100 if baseline > 0 else 0
         time_saved = baseline - avg_resolution
 

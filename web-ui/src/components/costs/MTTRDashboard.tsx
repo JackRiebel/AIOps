@@ -101,7 +101,7 @@ export function MTTRDashboard({ data, className = '' }: MTTRDashboardProps) {
             </div>
             <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-900 dark:text-white">
               Mean Time to Resolution (MTTR)
-              <HelpTooltip content="MTTR measures the average time from when an incident is detected to when it's fully resolved. Lower is better." />
+              <HelpTooltip content="Compares your AI-assisted resolution times against industry benchmarks (NOC/IT operations research). MTTR = average time from detection to resolution." />
             </h3>
           </div>
           <div className={`flex items-center gap-1 px-2 py-1 rounded-full ${improvementColors.bg}/10`}>
@@ -120,8 +120,8 @@ export function MTTRDashboard({ data, className = '' }: MTTRDashboardProps) {
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <span className="flex items-center gap-1 text-xs text-slate-600 dark:text-slate-400">
-                Before AI (baseline)
-                <HelpTooltip content="Your organization's historical average resolution time before implementing AI assistance. Based on similar incident types." />
+                Industry Benchmark
+                <HelpTooltip content="Industry benchmark for manual incident resolution time (without AI). Based on NOC performance data from INOC, Gartner, and ServiceNow research. Not specific to your organization." />
               </span>
               <span className="text-sm font-mono text-slate-700 dark:text-slate-300">
                 {formatTime(data.baselineMinutes)}
@@ -142,7 +142,7 @@ export function MTTRDashboard({ data, className = '' }: MTTRDashboardProps) {
             <div className="flex items-center justify-between mb-1.5">
               <span className="flex items-center gap-1 text-xs text-slate-600 dark:text-slate-400">
                 With AI assistance
-                <HelpTooltip content="Average resolution time when using the AI assistant for diagnosis, root cause analysis, and remediation guidance." />
+                <HelpTooltip content="Actual average resolution time when using the AI assistant, measured from your incident-linked sessions." />
               </span>
               <span className="text-sm font-mono text-slate-700 dark:text-slate-300">
                 {formatTime(data.aiAssistedMinutes)}
@@ -167,7 +167,7 @@ export function MTTRDashboard({ data, className = '' }: MTTRDashboardProps) {
             </p>
             <p className="flex items-center justify-center gap-1 text-xs text-slate-500 dark:text-slate-400">
               Incidents Resolved
-              <HelpTooltip content="Number of incidents where AI assistance was used to help diagnose and resolve the issue." />
+              <HelpTooltip content="Number of incidents manually linked to AI sessions that were marked as resolved." />
             </p>
           </div>
           <div className="text-center border-l-2 border-l-emerald-500 pl-3">
@@ -175,8 +175,8 @@ export function MTTRDashboard({ data, className = '' }: MTTRDashboardProps) {
               {data.improvementPercentage.toFixed(0)}%
             </p>
             <p className="flex items-center justify-center gap-1 text-xs text-slate-500 dark:text-slate-400">
-              Improvement
-              <HelpTooltip content="Percentage reduction in resolution time compared to the baseline (manual resolution without AI)." />
+              vs Benchmark
+              <HelpTooltip content="Percentage improvement compared to industry benchmark resolution times. Based on NOC/IT operations research, not your org's historical data." />
             </p>
           </div>
           <div className="text-center border-l-2 border-l-cyan-500 pl-3">
@@ -184,8 +184,8 @@ export function MTTRDashboard({ data, className = '' }: MTTRDashboardProps) {
               {formatTime(data.avgTimeSavedPerIncident)}
             </p>
             <p className="flex items-center justify-center gap-1 text-xs text-slate-500 dark:text-slate-400">
-              Saved/Incident
-              <HelpTooltip content="Average time saved per incident when using AI assistance compared to manual resolution." />
+              Est. Saved/Incident
+              <HelpTooltip content="Estimated average time saved per incident vs industry benchmark. Actual savings may vary." />
             </p>
           </div>
         </div>

@@ -145,31 +145,48 @@ class ROICalculator:
         self, events: List[AISessionEvent]
     ) -> Tuple[float, Dict[str, float]]:
         """
-        Calculate total time saved based on event action types.
+        Calculate total time saved based on unique action types performed.
+
+        IMPORTANT: We deduplicate by action type to avoid inflation.
+        A session that asks 5 questions about device status is ONE device
+        lookup task, not five. Each unique action type is counted once,
+        using the baseline for that action minus the total AI time spent
+        on that action type.
+
+        Only AI query events contribute to time saved — navigation and
+        API calls are side effects of the same investigation, not
+        independent manual tasks.
 
         Returns:
             Tuple of (total_time_saved_minutes, action_breakdown)
         """
-        total_saved = 0.0
-        action_breakdown: Dict[str, float] = {}
+        # Group AI query events by action type
+        action_ai_times: Dict[str, float] = {}  # action_type -> total AI minutes
 
         for event in events:
+            # Only count AI queries — navigation and API calls are side effects
+            if event.event_type != "ai_query" and not event.action_type:
+                continue
+
             action_type = self._classify_action(event)
             if not action_type:
                 continue
 
+            ai_time_minutes = (event.duration_ms or 0) / 60000
+            if action_type not in action_ai_times:
+                action_ai_times[action_type] = 0.0
+            action_ai_times[action_type] += ai_time_minutes
+
+        # For each unique action type, count one baseline worth of time saved
+        total_saved = 0.0
+        action_breakdown: Dict[str, float] = {}
+
+        for action_type, ai_minutes in action_ai_times.items():
             baseline = get_baseline(action_type)
-            ai_time_minutes = (event.duration_ms or 0) / 60000  # Convert ms to minutes
-
-            # Time saved = baseline - AI time (minimum 0)
-            time_saved = max(0, baseline.manual_minutes - ai_time_minutes)
-
+            # Time saved = one baseline occurrence minus total AI time on this type
+            time_saved = max(0, baseline.manual_minutes - ai_minutes)
             total_saved += time_saved
-
-            # Track by action type
-            if action_type not in action_breakdown:
-                action_breakdown[action_type] = 0.0
-            action_breakdown[action_type] += time_saved
+            action_breakdown[action_type] = time_saved
 
         return total_saved, action_breakdown
 
@@ -177,89 +194,74 @@ class ROICalculator:
         """
         Classify an event into an action type that maps to ROI baselines.
 
+        Only AI query events (and events with explicit action_type) are
+        classified. Navigation and API call events are side effects of
+        the user's investigation, not independent manual tasks.
+
         Returns:
             Action type string or None if not classifiable
         """
-        # Use explicit action_type if set
+        # Use explicit action_type if set (from logAIQuery metadata)
         if event.action_type:
             return event.action_type
 
         event_type = event.event_type
         event_data = event.event_data or {}
 
-        # Classify based on event type and content
-        if event_type == "ai_query":
-            query = str(event_data.get("query", "")).lower()
+        # Only classify AI queries — navigation and API calls are side effects
+        if event_type != "ai_query":
+            return None
 
-            # Log analysis
-            if any(kw in query for kw in ["splunk", "log", "logs", "events", "syslog"]):
-                if any(kw in query for kw in ["correlat", "root cause", "why"]):
-                    return "event_correlation"
-                if any(kw in query for kw in ["security", "threat", "attack", "ids", "firewall"]):
-                    return "security_event_analysis"
-                return "log_analysis"
+        query = str(event_data.get("query", "")).lower()
 
-            # Device operations
-            if any(kw in query for kw in ["device", "serial", "status", "online", "offline"]):
-                return "device_lookup"
-            if any(kw in query for kw in ["client", "mac", "ip address"]):
-                return "client_lookup"
-            if any(kw in query for kw in ["port", "switch port", "interface"]):
-                return "port_status_check"
-            if any(kw in query for kw in ["uplink", "wan", "internet"]):
-                return "uplink_status_check"
+        # Log analysis
+        if any(kw in query for kw in ["splunk", "log", "logs", "events", "syslog"]):
+            if any(kw in query for kw in ["correlat", "root cause", "why"]):
+                return "event_correlation"
+            if any(kw in query for kw in ["security", "threat", "attack", "ids", "firewall"]):
+                return "security_event_analysis"
+            return "log_analysis"
 
-            # Troubleshooting
-            if any(kw in query for kw in ["troubleshoot", "debug", "diagnose", "fix", "issue", "problem"]):
-                if "wireless" in query or "wifi" in query or "ssid" in query:
-                    return "wireless_troubleshooting"
-                if "connect" in query:
-                    return "connectivity_troubleshooting"
-                if any(kw in query for kw in ["slow", "latency", "performance"]):
-                    return "performance_diagnosis"
-                return "troubleshooting_research"
+        # Device operations
+        if any(kw in query for kw in ["device", "serial", "online", "offline"]):
+            return "device_lookup"
+        if any(kw in query for kw in ["client", "mac", "ip address"]):
+            return "client_lookup"
+        if any(kw in query for kw in ["port", "switch port", "interface"]):
+            return "port_status_check"
+        if any(kw in query for kw in ["uplink", "wan"]):
+            return "uplink_status_check"
 
-            # Incident
-            if any(kw in query for kw in ["incident", "alert", "alarm", "critical"]):
-                if any(kw in query for kw in ["triage", "priorit"]):
-                    return "incident_triage"
-                return "incident_investigation"
-
-            # Configuration
-            if any(kw in query for kw in ["config", "configuration", "setting"]):
-                if "compare" in query or "diff" in query:
-                    return "config_comparison"
-                return "config_review"
-
-            # Monitoring
-            if any(kw in query for kw in ["health", "status", "overview"]):
-                return "health_check"
-            if any(kw in query for kw in ["bandwidth", "traffic", "throughput"]):
-                return "bandwidth_analysis"
-
-            # Default for unclassified AI queries
+        # Troubleshooting (only when explicitly troubleshooting)
+        if any(kw in query for kw in ["troubleshoot", "debug", "diagnose", "fix"]):
+            if "wireless" in query or "wifi" in query or "ssid" in query:
+                return "wireless_troubleshooting"
+            if "connect" in query:
+                return "connectivity_troubleshooting"
+            if any(kw in query for kw in ["slow", "latency", "performance"]):
+                return "performance_diagnosis"
             return "troubleshooting_research"
 
-        elif event_type == "api_call":
-            endpoint = event.api_endpoint or ""
-
-            if "/devices" in endpoint:
-                return "device_lookup"
-            if "/clients" in endpoint:
-                return "client_lookup"
-            if "/uplinks" in endpoint:
-                return "uplink_status_check"
-
-        elif event_type == "navigation":
-            path = event.page_path or ""
-
-            if "/incidents" in path:
+        # Incident
+        if any(kw in query for kw in ["incident", "alert", "alarm", "critical", "outage"]):
+            if any(kw in query for kw in ["triage", "priorit"]):
                 return "incident_triage"
-            if "/splunk" in path or "/logs" in path:
-                return "log_search_simple"
-            if "/network" in path or "/devices" in path:
-                return "device_lookup"
+            return "incident_investigation"
 
+        # Configuration
+        if any(kw in query for kw in ["config", "configuration", "setting"]):
+            if "compare" in query or "diff" in query:
+                return "config_comparison"
+            return "config_review"
+
+        # Monitoring
+        if any(kw in query for kw in ["health", "overview", "monitor"]):
+            return "health_check"
+        if any(kw in query for kw in ["bandwidth", "traffic", "throughput"]):
+            return "bandwidth_analysis"
+
+        # Unclassified queries — return None instead of a default.
+        # We don't want to inflate ROI with unrelated queries.
         return None
 
     def _calculate_roi_percentage(self, manual_cost: float, ai_cost: float) -> float:

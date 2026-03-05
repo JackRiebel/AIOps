@@ -99,7 +99,7 @@ export function ROIComparisonCard({ data, className = '' }: ROIComparisonCardPro
           <div className="flex items-center justify-between mb-2">
             <span className="flex items-center gap-1 text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
               Cost Comparison
-              <HelpTooltip content="Compares estimated manual labor costs (based on engineer time × hourly rate) vs actual AI API costs for the same tasks." />
+              <HelpTooltip content="Estimated manual labor cost (industry benchmark time × $85/hr) vs actual AI API costs. Manual estimates use published NOC/IT operations benchmarks." />
             </span>
             <span className="text-xs font-medium text-emerald-500">
               {savingsPercentage.toFixed(0)}% savings
@@ -109,7 +109,7 @@ export function ROIComparisonCard({ data, className = '' }: ROIComparisonCardPro
           <div className="space-y-2">
             {/* Without AI */}
             <div className="flex items-center gap-3">
-              <span className="w-20 text-xs text-slate-600 dark:text-slate-400">Without AI</span>
+              <span className="w-20 text-xs text-slate-600 dark:text-slate-400">Est. Manual</span>
               <div className="flex-1 h-6 bg-slate-100 dark:bg-slate-700/50 rounded overflow-hidden">
                 <div
                   className="h-full bg-slate-400 dark:bg-slate-500 flex items-center justify-end px-2 transition-all duration-500"
@@ -124,7 +124,7 @@ export function ROIComparisonCard({ data, className = '' }: ROIComparisonCardPro
 
             {/* With AI */}
             <div className="flex items-center gap-3">
-              <span className="w-20 text-xs text-slate-600 dark:text-slate-400">With AI</span>
+              <span className="w-20 text-xs text-slate-600 dark:text-slate-400">Actual AI</span>
               <div className="flex-1 h-6 bg-slate-100 dark:bg-slate-700/50 rounded overflow-hidden relative">
                 {(() => {
                   const barWidth = data.manualCostEstimate > 0 ? Math.max(3, (data.aiCostTotal / data.manualCostEstimate) * 100) : 3;
@@ -168,8 +168,8 @@ export function ROIComparisonCard({ data, className = '' }: ROIComparisonCardPro
                 {formatTime(data.timeSavedMinutes)}
               </div>
               <span className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
-                Time Saved
-                <HelpTooltip content="Estimated time saved compared to manual resolution. Calculated based on AI analysis of what tasks were completed and industry benchmarks." />
+                Est. Time Saved
+                <HelpTooltip content="Estimated time saved vs manual work. Based on industry benchmarks for each task type (e.g., device lookup ~5 min, log analysis ~45 min). Each unique task type is counted once per session." />
               </span>
             </div>
           </div>
@@ -188,8 +188,8 @@ export function ROIComparisonCard({ data, className = '' }: ROIComparisonCardPro
                 {formatROI(data.roiPercentage)}
               </div>
               <span className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
-                ROI Achieved
-                <HelpTooltip content="Return on Investment = (Manual Cost - AI Cost) / AI Cost × 100. Values above 100% mean AI assistance saves more than it costs." />
+                Est. ROI
+                <HelpTooltip content="Estimated ROI = (Est. Manual Cost - AI Cost) / AI Cost × 100. Manual cost uses industry benchmarks × $85/hr engineer rate. Values above 100% mean estimated savings exceed AI costs." />
               </span>
             </div>
           </div>
@@ -220,8 +220,8 @@ export function ROIComparisonCard({ data, className = '' }: ROIComparisonCardPro
                 {formatCost(data.manualCostEstimate - data.aiCostTotal)}
               </div>
               <span className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
-                Net Savings
-                <HelpTooltip content="Estimated manual labor cost minus AI costs. Manual cost is calculated from time saved × average engineer hourly rate ($85/hr)." />
+                Est. Net Savings
+                <HelpTooltip content="Estimated manual labor cost minus actual AI API costs. Manual cost = estimated time saved × $85/hr (industry avg fully-loaded engineer rate)." />
               </span>
             </div>
           </div>

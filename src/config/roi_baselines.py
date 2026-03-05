@@ -344,12 +344,17 @@ SESSION_TYPES = {
 # =============================================================================
 
 def get_baseline(action_type: str) -> BaselineEstimate:
-    """Get baseline estimate for an action type, with fallback."""
+    """Get baseline estimate for an action type.
+
+    Returns the known baseline if it exists, otherwise returns a minimal
+    fallback with low confidence. The fallback uses 0 minutes — unknown
+    actions should not inflate ROI estimates.
+    """
     return ROI_BASELINES.get(action_type, BaselineEstimate(
-        manual_minutes=5.0,
-        confidence=0.50,
+        manual_minutes=0.0,
+        confidence=0.0,
         category=ActionCategory.TROUBLESHOOTING,
-        description=f"Unknown action type: {action_type}"
+        description=f"Unknown action type: {action_type} (no baseline — excluded from ROI)"
     ))
 
 

@@ -271,8 +271,12 @@ def _build_session_context(session: AISession, events: List[AISessionEvent]) -> 
                 })
 
         elif event.event_type == "navigation":
-            path = event.page_path or (event.event_data or {}).get("path", "")
-            if path:
+            data = event.event_data or {}
+            page_name = data.get("page_name", "")
+            path = event.page_path or data.get("path", "")
+            if page_name:
+                navigations.append(f"{page_name} ({path})")
+            elif path:
                 navigations.append(path)
 
         elif event.event_type in ("click", "edit_action"):
