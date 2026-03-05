@@ -491,7 +491,7 @@ export default function UsersTab() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-lg font-semibold text-white">User Management</h2>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">User Management</h2>
           <p className="text-sm text-slate-400 mt-0.5">
             {filteredUsers.length} user{filteredUsers.length !== 1 ? 's' : ''} total
           </p>
@@ -516,13 +516,13 @@ export default function UsersTab() {
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             placeholder="Search users..."
-            className="w-full pl-10 pr-4 py-2 bg-slate-800/50 border border-slate-700/50 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
+            className="w-full pl-10 pr-4 py-2 bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/50 rounded-lg text-sm text-slate-900 dark:text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
           />
         </div>
         <select
           value={roleFilter}
           onChange={e => setRoleFilter(e.target.value)}
-          className="px-3 py-2 bg-slate-800/50 border border-slate-700/50 rounded-lg text-sm text-white focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
+          className="px-3 py-2 bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/50 rounded-lg text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
         >
           <option value="all">All Roles</option>
           <option value="admin">Admin</option>
@@ -533,7 +533,7 @@ export default function UsersTab() {
         <select
           value={statusFilter}
           onChange={e => setStatusFilter(e.target.value as 'all' | 'active' | 'inactive')}
-          className="px-3 py-2 bg-slate-800/50 border border-slate-700/50 rounded-lg text-sm text-white focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
+          className="px-3 py-2 bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/50 rounded-lg text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
         >
           <option value="all">All Status</option>
           <option value="active">Active</option>
@@ -542,23 +542,23 @@ export default function UsersTab() {
       </div>
 
       {/* Users List */}
-      <div className="bg-slate-800/30 rounded-xl border border-slate-700/30 overflow-hidden">
+      <div className="bg-white dark:bg-slate-800/30 rounded-xl border border-slate-200 dark:border-slate-700/30 overflow-hidden">
         {filteredUsers.length === 0 ? (
           <div className="py-12 text-center">
             <UserCog className="w-12 h-12 text-slate-600 mx-auto mb-3" />
             <p className="text-slate-400">No users found</p>
           </div>
         ) : (
-          <div className="divide-y divide-slate-700/30">
+          <div className="divide-y divide-slate-200 dark:divide-slate-700/30">
             {filteredUsers.map(user => (
-              <div key={user.id} className="hover:bg-slate-800/30 transition-colors">
+              <div key={user.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
                 {/* Main User Row */}
                 <div className="px-4 py-3 flex items-center justify-between">
                   <div className="flex items-center gap-4 flex-1 min-w-0">
                     {/* Expand Button */}
                     <button
                       onClick={() => toggleUserExpanded(user.id)}
-                      className="p-1 hover:bg-slate-700/50 rounded text-slate-500 hover:text-white transition-colors"
+                      className="p-1 hover:bg-slate-100 dark:hover:bg-slate-700/50 rounded text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors"
                     >
                       {expandedUsers.has(user.id) ? (
                         <ChevronDown className="w-4 h-4" />
@@ -577,7 +577,7 @@ export default function UsersTab() {
                     {/* User Info */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-white truncate">{user.username}</span>
+                        <span className="text-sm font-medium text-slate-900 dark:text-white truncate">{user.username}</span>
                         {user.id === currentUser?.id && (
                           <span className="px-1.5 py-0.5 bg-cyan-500/10 text-cyan-400 text-[10px] rounded font-medium">
                             YOU
@@ -628,7 +628,7 @@ export default function UsersTab() {
                   <div className="flex items-center gap-1 ml-4">
                     <button
                       onClick={() => openPermissionsModal(user)}
-                      className="p-1.5 hover:bg-slate-700/50 rounded-lg text-slate-400 hover:text-cyan-400 transition-colors"
+                      className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700/50 rounded-lg text-slate-400 hover:text-cyan-400 transition-colors"
                       title="View Permissions"
                     >
                       <Eye className="w-4 h-4" />
@@ -636,7 +636,7 @@ export default function UsersTab() {
                     <PermissionGate permission={PERMISSIONS.USERS_UPDATE}>
                       <button
                         onClick={() => openEditModal(user)}
-                        className="p-1.5 hover:bg-slate-700/50 rounded-lg text-slate-400 hover:text-white transition-colors"
+                        className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700/50 rounded-lg text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"
                         title="Edit User"
                       >
                         <Edit2 className="w-4 h-4" />
@@ -645,7 +645,7 @@ export default function UsersTab() {
                     <PermissionGate permission={PERMISSIONS.USERS_UPDATE}>
                       <button
                         onClick={() => handleToggleStatus(user)}
-                        className={`p-1.5 hover:bg-slate-700/50 rounded-lg transition-colors ${
+                        className={`p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700/50 rounded-lg transition-colors ${
                           user.is_active ? 'text-amber-400 hover:text-amber-300' : 'text-green-400 hover:text-green-300'
                         }`}
                         title={user.is_active ? 'Deactivate' : 'Activate'}
@@ -657,7 +657,7 @@ export default function UsersTab() {
                       <button
                         onClick={() => handleToggleSuperAdmin(user)}
                         disabled={user.id === currentUser?.id}
-                        className={`p-1.5 hover:bg-slate-700/50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                        className={`p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700/50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                           user.is_super_admin ? 'text-amber-400 hover:text-amber-300' : 'text-slate-400 hover:text-amber-400'
                         }`}
                         title={user.is_super_admin ? 'Remove Super Admin' : 'Grant Super Admin'}
@@ -669,7 +669,7 @@ export default function UsersTab() {
                       <button
                         onClick={() => handleDeleteUser(user.id)}
                         disabled={user.id === currentUser?.id}
-                        className="p-1.5 hover:bg-slate-700/50 rounded-lg text-red-400 hover:text-red-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700/50 rounded-lg text-red-400 hover:text-red-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         title="Delete User"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -681,7 +681,7 @@ export default function UsersTab() {
                 {/* Expanded Details */}
                 {expandedUsers.has(user.id) && (
                   <div className="px-4 pb-4 pl-16 animate-in slide-in-from-top-2 duration-200">
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 p-4 bg-slate-900/50 rounded-lg border border-slate-700/30">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 p-4 bg-slate-50 dark:bg-slate-900/50 rounded-lg border border-slate-200 dark:border-slate-700/30">
                       {/* Role Info */}
                       <div>
                         <div className="flex items-center gap-2 text-xs text-slate-500 mb-2">
@@ -705,7 +705,7 @@ export default function UsersTab() {
                         {user.organizations && user.organizations.length > 0 ? (
                           <div className="space-y-1">
                             {user.organizations.map((org, idx) => (
-                              <div key={idx} className="text-xs text-slate-300">
+                              <div key={idx} className="text-xs text-slate-700 dark:text-slate-300">
                                 {org.organization_name}
                                 <span className="text-slate-500 ml-1">({org.role_name})</span>
                               </div>
@@ -750,9 +750,9 @@ export default function UsersTab() {
       {/* Create/Edit User Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-slate-900 rounded-xl border border-slate-700/50 shadow-2xl max-w-lg w-full max-h-[90vh] overflow-auto">
+          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700/50 shadow-2xl max-w-lg w-full max-h-[90vh] overflow-auto">
             {/* Header */}
-            <div className="px-6 py-4 border-b border-slate-700/50 flex items-center justify-between sticky top-0 bg-slate-900 z-10">
+            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700/50 flex items-center justify-between sticky top-0 bg-white dark:bg-slate-900 z-10">
               <div className="flex items-center gap-3">
                 <div className={`p-2 rounded-lg ${editingUser ? 'bg-blue-500/10' : 'bg-green-500/10'}`}>
                   {editingUser ? (
@@ -762,7 +762,7 @@ export default function UsersTab() {
                   )}
                 </div>
                 <div>
-                  <h3 className="text-lg font-semibold text-white">
+                  <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
                     {editingUser ? 'Edit User' : 'Create New User'}
                   </h3>
                   {editingUser && (
@@ -776,7 +776,7 @@ export default function UsersTab() {
                   setEditingUser(null);
                   resetForm();
                 }}
-                className="p-1 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+                className="p-1 text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
               >
                 <XCircle className="w-5 h-5" />
               </button>
@@ -800,7 +800,7 @@ export default function UsersTab() {
                         value={formData.username}
                         onChange={e => setFormData({ ...formData, username: e.target.value })}
                         disabled={!!editingUser}
-                        className="w-full px-3 py-2.5 bg-slate-800/50 border border-slate-700/50 rounded-lg text-sm text-white disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 transition-all"
+                        className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/50 rounded-lg text-sm text-slate-900 dark:text-white disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 transition-all"
                         placeholder="johndoe"
                       />
                       {editingUser && (
@@ -815,7 +815,7 @@ export default function UsersTab() {
                         type="text"
                         value={formData.full_name}
                         onChange={e => setFormData({ ...formData, full_name: e.target.value })}
-                        className="w-full px-3 py-2.5 bg-slate-800/50 border border-slate-700/50 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 transition-all"
+                        className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/50 rounded-lg text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 transition-all"
                         placeholder="John Doe"
                       />
                     </div>
@@ -829,7 +829,7 @@ export default function UsersTab() {
                       type="email"
                       value={formData.email}
                       onChange={e => setFormData({ ...formData, email: e.target.value })}
-                      className="w-full px-3 py-2.5 bg-slate-800/50 border border-slate-700/50 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 transition-all"
+                      className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/50 rounded-lg text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 transition-all"
                       placeholder="john@example.com"
                     />
                   </div>
@@ -846,7 +846,7 @@ export default function UsersTab() {
                       type="password"
                       value={formData.password}
                       onChange={e => setFormData({ ...formData, password: e.target.value })}
-                      className="w-full px-3 py-2.5 bg-slate-800/50 border border-slate-700/50 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 transition-all"
+                      className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/50 rounded-lg text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 transition-all"
                       placeholder={editingUser ? '••••••••' : 'Min. 8 characters'}
                     />
                   </div>
@@ -872,10 +872,10 @@ export default function UsersTab() {
                         className={`p-3 rounded-lg border-2 text-left transition-all ${
                           formData.role === 'admin'
                             ? 'border-red-500/50 bg-red-500/10'
-                            : 'border-slate-700/50 bg-slate-800/30 hover:border-slate-600/50'
+                            : 'border-slate-200 dark:border-slate-700/50 bg-slate-50 dark:bg-slate-800/30 hover:border-slate-300 dark:hover:border-slate-600/50'
                         }`}
                       >
-                        <div className={`text-sm font-medium ${formData.role === 'admin' ? 'text-red-400' : 'text-white'}`}>
+                        <div className={`text-sm font-medium ${formData.role === 'admin' ? 'text-red-400' : 'text-slate-900 dark:text-white'}`}>
                           Admin
                         </div>
                         <div className="text-[10px] text-slate-500 mt-0.5">Full system access</div>
@@ -888,10 +888,10 @@ export default function UsersTab() {
                         className={`p-3 rounded-lg border-2 text-left transition-all ${
                           formData.role === 'editor'
                             ? 'border-blue-500/50 bg-blue-500/10'
-                            : 'border-slate-700/50 bg-slate-800/30 hover:border-slate-600/50'
+                            : 'border-slate-200 dark:border-slate-700/50 bg-slate-50 dark:bg-slate-800/30 hover:border-slate-300 dark:hover:border-slate-600/50'
                         }`}
                       >
-                        <div className={`text-sm font-medium ${formData.role === 'editor' ? 'text-blue-400' : 'text-white'}`}>
+                        <div className={`text-sm font-medium ${formData.role === 'editor' ? 'text-blue-400' : 'text-slate-900 dark:text-white'}`}>
                           Editor
                         </div>
                         <div className="text-[10px] text-slate-500 mt-0.5">Create & modify content</div>
@@ -904,10 +904,10 @@ export default function UsersTab() {
                         className={`p-3 rounded-lg border-2 text-left transition-all ${
                           formData.role === 'operator'
                             ? 'border-purple-500/50 bg-purple-500/10'
-                            : 'border-slate-700/50 bg-slate-800/30 hover:border-slate-600/50'
+                            : 'border-slate-200 dark:border-slate-700/50 bg-slate-50 dark:bg-slate-800/30 hover:border-slate-300 dark:hover:border-slate-600/50'
                         }`}
                       >
-                        <div className={`text-sm font-medium ${formData.role === 'operator' ? 'text-purple-400' : 'text-white'}`}>
+                        <div className={`text-sm font-medium ${formData.role === 'operator' ? 'text-purple-400' : 'text-slate-900 dark:text-white'}`}>
                           Operator
                         </div>
                         <div className="text-[10px] text-slate-500 mt-0.5">Limited operations</div>
@@ -920,10 +920,10 @@ export default function UsersTab() {
                         className={`p-3 rounded-lg border-2 text-left transition-all ${
                           formData.role === 'viewer'
                             ? 'border-slate-500/50 bg-slate-500/10'
-                            : 'border-slate-700/50 bg-slate-800/30 hover:border-slate-600/50'
+                            : 'border-slate-200 dark:border-slate-700/50 bg-slate-50 dark:bg-slate-800/30 hover:border-slate-300 dark:hover:border-slate-600/50'
                         }`}
                       >
-                        <div className={`text-sm font-medium ${formData.role === 'viewer' ? 'text-slate-300' : 'text-white'}`}>
+                        <div className={`text-sm font-medium ${formData.role === 'viewer' ? 'text-slate-300' : 'text-slate-900 dark:text-white'}`}>
                           Viewer
                         </div>
                         <div className="text-[10px] text-slate-500 mt-0.5">Read-only access</div>
@@ -940,7 +940,7 @@ export default function UsersTab() {
                       <select
                         value={formData.primary_organization_id || ''}
                         onChange={e => setFormData({ ...formData, primary_organization_id: e.target.value ? parseInt(e.target.value) : null })}
-                        className="w-full px-3 py-2.5 bg-slate-800/50 border border-slate-700/50 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 transition-all"
+                        className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/50 rounded-lg text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 transition-all"
                       >
                         <option value="">No organization</option>
                         {organizations.map(org => (
@@ -960,15 +960,15 @@ export default function UsersTab() {
                     <div className={`p-4 rounded-lg border-2 transition-all ${
                       formData.is_super_admin
                         ? 'border-amber-500/50 bg-gradient-to-r from-amber-500/10 to-yellow-500/10'
-                        : 'border-slate-700/50 bg-slate-800/30'
+                        : 'border-slate-200 dark:border-slate-700/50 bg-slate-50 dark:bg-slate-800/30'
                     }`}>
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                          <div className={`p-2 rounded-lg ${formData.is_super_admin ? 'bg-amber-500/20' : 'bg-slate-700/50'}`}>
+                          <div className={`p-2 rounded-lg ${formData.is_super_admin ? 'bg-amber-500/20' : 'bg-slate-100 dark:bg-slate-700/50'}`}>
                             <Crown className={`w-5 h-5 ${formData.is_super_admin ? 'text-amber-400' : 'text-slate-500'}`} />
                           </div>
                           <div>
-                            <div className={`text-sm font-medium ${formData.is_super_admin ? 'text-amber-400' : 'text-white'}`}>
+                            <div className={`text-sm font-medium ${formData.is_super_admin ? 'text-amber-400' : 'text-slate-900 dark:text-white'}`}>
                               Super Admin
                             </div>
                             <div className="text-[10px] text-slate-500">
@@ -1012,15 +1012,15 @@ export default function UsersTab() {
                   <div className="space-y-3">
                     {/* Account Status Info */}
                     <div className="grid grid-cols-2 gap-3">
-                      <div className="p-3 bg-slate-800/30 rounded-lg border border-slate-700/30">
+                      <div className="p-3 bg-slate-50 dark:bg-slate-800/30 rounded-lg border border-slate-200 dark:border-slate-700/30">
                         <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Created</div>
-                        <div className="text-sm text-white">
+                        <div className="text-sm text-slate-900 dark:text-white">
                           {new Date(editingUser.created_at).toLocaleDateString()}
                         </div>
                       </div>
-                      <div className="p-3 bg-slate-800/30 rounded-lg border border-slate-700/30">
+                      <div className="p-3 bg-slate-50 dark:bg-slate-800/30 rounded-lg border border-slate-200 dark:border-slate-700/30">
                         <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Last Login</div>
-                        <div className="text-sm text-white">
+                        <div className="text-sm text-slate-900 dark:text-white">
                           {editingUser.last_login
                             ? new Date(editingUser.last_login).toLocaleDateString()
                             : 'Never'}
@@ -1057,7 +1057,7 @@ export default function UsersTab() {
             </div>
 
             {/* Footer */}
-            <div className="px-6 py-4 border-t border-slate-700/50 flex items-center justify-between sticky bottom-0 bg-slate-900 z-10">
+            <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-700/50 flex items-center justify-between sticky bottom-0 bg-white dark:bg-slate-900 z-10">
               <div className="text-xs text-slate-500">
                 <span className="text-red-400">*</span> Required fields
               </div>
@@ -1068,7 +1068,7 @@ export default function UsersTab() {
                     setEditingUser(null);
                     resetForm();
                   }}
-                  className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+                  className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
                 >
                   Cancel
                 </button>
@@ -1098,10 +1098,10 @@ export default function UsersTab() {
       {/* View Permissions Modal */}
       {showPermissionsModal && selectedUserPermissions && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-slate-900 rounded-xl border border-slate-700/50 shadow-2xl max-w-lg w-full max-h-[80vh] overflow-auto">
-            <div className="px-6 py-4 border-b border-slate-700/50 flex items-center justify-between sticky top-0 bg-slate-900">
+          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700/50 shadow-2xl max-w-lg w-full max-h-[80vh] overflow-auto">
+            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700/50 flex items-center justify-between sticky top-0 bg-white dark:bg-slate-900">
               <div>
-                <h3 className="text-lg font-semibold text-white">User Permissions</h3>
+                <h3 className="text-lg font-semibold text-slate-900 dark:text-white">User Permissions</h3>
                 <p className="text-sm text-slate-400">{selectedUserPermissions.username}</p>
               </div>
               <button
@@ -1110,7 +1110,7 @@ export default function UsersTab() {
                   setSelectedUserPermissions(null);
                   setUserPermissions([]);
                 }}
-                className="text-slate-400 hover:text-white"
+                className="text-slate-400 hover:text-slate-900 dark:hover:text-white"
               >
                 <XCircle className="w-5 h-5" />
               </button>
@@ -1131,7 +1131,7 @@ export default function UsersTab() {
                   {userPermissions.map((perm, idx) => (
                     <div
                       key={idx}
-                      className="px-3 py-2 bg-slate-800/50 rounded-lg text-sm text-slate-300 flex items-center gap-2"
+                      className="px-3 py-2 bg-slate-100 dark:bg-slate-800/50 rounded-lg text-sm text-slate-700 dark:text-slate-300 flex items-center gap-2"
                     >
                       <CheckCircle className="w-4 h-4 text-green-400" />
                       {perm}

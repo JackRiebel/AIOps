@@ -1762,22 +1762,25 @@ async def get_wireless_overview_data(
             except Exception as e:
                 logger.warning(f"[cards] Could not fetch device statuses for wireless-overview: {e}")
 
-            # Get channel utilization history (requires at least one AP)
-            channel_util_data = {}
-            if aps:
-                try:
-                    # Use the first AP's serial to get channel utilization for the network
-                    first_ap_serial = aps[0].get("serial")
-                    if first_ap_serial:
-                        channel_history = await dashboard.wireless.getDeviceWirelessConnectionStats(
-                            first_ap_serial, timespan=7200  # Last 2 hours
-                        )
-                        # Alternative: try getNetworkWirelessUsageHistory which doesn't require device
-                        # Process channel utilization data from connection stats
-                        if isinstance(channel_history, dict):
-                            channel_util_data["connectionStats"] = channel_history
-                except Exception as e:
-                    logger.debug(f"[cards] Could not get channel utilization for {first_ap_serial}: {e}")
+            # Get channel utilization history per AP (wifi0=2.4GHz, wifi1=5GHz)
+            ap_utilization: Dict[str, Dict[str, float]] = {}  # serial -> {util_2g, util_5g}
+            try:
+                util_history = await dashboard.wireless.getNetworkWirelessChannelUtilizationHistory(
+                    network_id, timespan=3600  # Last hour
+                )
+                if isinstance(util_history, list):
+                    for item in util_history:
+                        serial = item.get("serial")
+                        if not serial:
+                            continue
+                        wifi0 = item.get("wifi0", [])  # 2.4GHz
+                        wifi1 = item.get("wifi1", [])  # 5GHz
+                        util_2g = sum(w.get("utilization", 0) for w in wifi0) / len(wifi0) if wifi0 else 0
+                        util_5g = sum(w.get("utilization", 0) for w in wifi1) / len(wifi1) if wifi1 else 0
+                        ap_utilization[serial] = {"util_2g": round(util_2g, 1), "util_5g": round(util_5g, 1)}
+                    logger.debug(f"[cards] Got channel utilization for {len(ap_utilization)} APs")
+            except Exception as e:
+                logger.debug(f"[cards] Could not get channel utilization history: {e}")
 
             # Get client counts per AP (aggregate across all SSIDs)
             ap_client_counts: Dict[str, int] = {}
@@ -1844,6 +1847,18 @@ async def get_wireless_overview_data(
 
                 client_count = ap_client_counts.get(serial, 0)
 
+                # Get real utilization from channel utilization history
+                ap_util = ap_utilization.get(serial, {})
+                util_2g = ap_util.get("util_2g", 0)
+                util_5g = ap_util.get("util_5g", 0)
+                primary_util = util_5g if primary_band == "5GHz" else util_2g
+
+                # Add per-band utilization to radio objects
+                if radio_2g:
+                    radio_2g["utilization"] = util_2g
+                if radio_5g:
+                    radio_5g["utilization"] = util_5g
+
                 access_points.append({
                     "name": ap.get("name") or serial,
                     "apName": ap.get("name") or serial,
@@ -1853,7 +1868,9 @@ async def get_wireless_overview_data(
                     "band": primary_band,
                     "channel": primary_radio["channel"],
                     "channelWidth": primary_radio.get("channelWidth", 20),
-                    "utilization": 0,  # Meraki API doesn't expose per-AP utilization directly
+                    "utilization": primary_util,
+                    "utilization_2g": util_2g,
+                    "utilization_5g": util_5g,
                     "clients": client_count,
                     "power": primary_radio["power"],
                     # Per-band radio info for the frontend card
@@ -1893,42 +1910,45 @@ async def get_wireless_overview_data(
             if len(crowded_channels) > 3:
                 recommendations.append("Multiple APs on common channels - consider DFS channels")
 
-            # Channel heatmap data - derive from actual AP data when available
-            # Group APs by channel and band to get real utilization data
-            channels_2g_map = {}  # channel -> list of utilization values
-            channels_5g_map = {}
+            # Channel heatmap data - use per-band utilization from each AP
+            # Each AP can have both 2.4GHz and 5GHz radios with separate channels
+            channels_2g_map: Dict[int, list] = {}  # channel -> list of utilization values
+            channels_5g_map: Dict[int, list] = {}
 
             for ap in access_points:
-                channel = ap.get("channel", 0)
-                utilization = ap.get("utilization", 0)
-                band = ap.get("band", "5GHz")
+                # Add 2.4GHz radio data if present
+                radio_2g_info = ap.get("radio_2g")
+                if radio_2g_info and radio_2g_info.get("channel"):
+                    ch = radio_2g_info["channel"]
+                    util = ap.get("utilization_2g", 0)
+                    if ch not in channels_2g_map:
+                        channels_2g_map[ch] = []
+                    channels_2g_map[ch].append(util)
 
-                if "2.4" in band or channel in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]:
-                    if channel not in channels_2g_map:
-                        channels_2g_map[channel] = []
-                    channels_2g_map[channel].append(utilization)
-                else:
-                    if channel not in channels_5g_map:
-                        channels_5g_map[channel] = []
-                    channels_5g_map[channel].append(utilization)
+                # Add 5GHz radio data if present
+                radio_5g_info = ap.get("radio_5g")
+                if radio_5g_info and radio_5g_info.get("channel"):
+                    ch = radio_5g_info["channel"]
+                    util = ap.get("utilization_5g", 0)
+                    if ch not in channels_5g_map:
+                        channels_5g_map[ch] = []
+                    channels_5g_map[ch].append(util)
 
             # Build channel arrays with average utilization per channel
             if channels_2g_map:
                 channels_2g = [
-                    {"channel": ch, "utilization": sum(utils) // len(utils)}
+                    {"channel": ch, "utilization": round(sum(utils) / len(utils), 1)}
                     for ch, utils in sorted(channels_2g_map.items())
                 ]
             else:
-                # No channel data available
                 channels_2g = []
 
             if channels_5g_map:
                 channels_5g = [
-                    {"channel": ch, "utilization": sum(utils) // len(utils)}
+                    {"channel": ch, "utilization": round(sum(utils) / len(utils), 1)}
                     for ch, utils in sorted(channels_5g_map.items())
                 ]
             else:
-                # No 5GHz channel data available
                 channels_5g = []
 
             # Roaming events - would need real client event data from Meraki

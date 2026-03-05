@@ -602,6 +602,15 @@ class ToolSelector:
         if not exclude_meta_tool:
             default_tools.append(self._request_more_tools)
 
+        # Always include cross-cutting tools (canvas, suggest_followups, think)
+        selected_names = {t.name for t in default_tools}
+        for tool_name in ALWAYS_INCLUDE_TOOLS:
+            if tool_name not in selected_names:
+                tool = self.registry.get(tool_name)
+                if tool:
+                    default_tools.append(tool)
+                    selected_names.add(tool_name)
+
         return ToolSelectionResult(
             tools=default_tools,
             platforms_detected=["meraki"],
@@ -633,6 +642,15 @@ class ToolSelector:
         # Ensure we have at least the request_more_tools meta-tool
         if not exclude_meta_tool and self._request_more_tools not in incident_tools:
             incident_tools.append(self._request_more_tools)
+
+        # Always include cross-cutting tools (canvas, suggest_followups, think)
+        selected_names = {t.name for t in incident_tools}
+        for tool_name in ALWAYS_INCLUDE_TOOLS:
+            if tool_name not in selected_names:
+                tool = self.registry.get(tool_name)
+                if tool:
+                    incident_tools.append(tool)
+                    selected_names.add(tool_name)
 
         logger.info(f"[ToolSelector] Incident tools selected: {len(incident_tools)} tools")
         return incident_tools

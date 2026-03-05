@@ -141,7 +141,7 @@ export function RestrictionsTab({ className = '' }: RestrictionsTabProps) {
     return (
       <div className={`flex items-center justify-center py-12 ${className}`}>
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-        <span className="ml-3 text-gray-400">Loading restrictions...</span>
+        <span className="ml-3 text-slate-500 dark:text-gray-400">Loading restrictions...</span>
       </div>
     );
   }
@@ -165,8 +165,8 @@ export function RestrictionsTab({ className = '' }: RestrictionsTabProps) {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-semibold text-white">Access Restrictions</h2>
-          <p className="text-sm text-gray-400 mt-1">
+          <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Access Restrictions</h2>
+          <p className="text-sm text-slate-500 dark:text-gray-400 mt-1">
             {restrictions.length} restriction{restrictions.length !== 1 ? 's' : ''} configured
             {activeCount > 0 && (
               <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-500/20 text-green-400">
@@ -222,7 +222,7 @@ export function RestrictionsTab({ className = '' }: RestrictionsTabProps) {
             placeholder="Search restrictions..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-800 border border-slate-200 dark:border-gray-700 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           />
         </div>
       )}
@@ -239,17 +239,17 @@ export function RestrictionsTab({ className = '' }: RestrictionsTabProps) {
           return (
             <div
               key={type.value}
-              className="bg-gray-800/50 rounded-lg border border-gray-700 p-4"
+              className="bg-slate-50 dark:bg-gray-800/50 rounded-lg border border-slate-200 dark:border-gray-700 p-4"
             >
               <div className="flex items-start gap-3">
-                <div className="p-2 bg-gray-700/50 rounded-lg">
+                <div className="p-2 bg-slate-100 dark:bg-gray-700/50 rounded-lg">
                   <TypeIcon className="h-5 w-5 text-gray-400" />
                 </div>
                 <div className="flex-1">
-                  <h3 className="font-medium text-white">{type.label}</h3>
-                  <p className="text-xs text-gray-400 mt-0.5">{type.description}</p>
+                  <h3 className="font-medium text-slate-900 dark:text-white">{type.label}</h3>
+                  <p className="text-xs text-slate-500 dark:text-gray-400 mt-0.5">{type.description}</p>
                   <div className="flex items-center gap-2 mt-2">
-                    <span className="text-sm text-gray-400">{count} rules</span>
+                    <span className="text-sm text-slate-500 dark:text-gray-400">{count} rules</span>
                     {activeCount > 0 && (
                       <span className="text-xs text-green-400">({activeCount} active)</span>
                     )}
@@ -263,7 +263,7 @@ export function RestrictionsTab({ className = '' }: RestrictionsTabProps) {
 
       {/* Restrictions List */}
       {filteredRestrictions.length > 0 && (
-        <div className="bg-gray-800/50 rounded-lg border border-gray-700 divide-y divide-gray-700">
+        <div className="bg-slate-50 dark:bg-gray-800/50 rounded-lg border border-slate-200 dark:border-gray-700 divide-y divide-slate-200 dark:divide-gray-700">
           {filteredRestrictions.map(restriction => {
             const config = getTypeConfig(restriction.restriction_type);
             const TypeIcon = config.icon;
@@ -272,12 +272,12 @@ export function RestrictionsTab({ className = '' }: RestrictionsTabProps) {
               <div key={restriction.id} className="p-4">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex items-start gap-4 flex-1">
-                    <div className={`p-2 rounded-lg ${restriction.is_active ? 'bg-green-500/20' : 'bg-gray-700/50'}`}>
+                    <div className={`p-2 rounded-lg ${restriction.is_active ? 'bg-green-500/20' : 'bg-slate-100 dark:bg-gray-700/50'}`}>
                       <TypeIcon className={`h-5 w-5 ${restriction.is_active ? 'text-green-400' : 'text-gray-400'}`} />
                     </div>
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
-                        <h4 className="font-medium text-white">{config.label}</h4>
+                        <h4 className="font-medium text-slate-900 dark:text-white">{config.label}</h4>
                         {restriction.is_active ? (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-500/20 text-green-400">
                             <CheckCircle className="h-3 w-3" />
@@ -290,7 +290,7 @@ export function RestrictionsTab({ className = '' }: RestrictionsTabProps) {
                           </span>
                         )}
                       </div>
-                      <p className="text-sm text-gray-400 mt-1">
+                      <p className="text-sm text-slate-500 dark:text-gray-400 mt-1">
                         {formatRestrictionValue(restriction)}
                       </p>
                     </div>
@@ -311,7 +311,7 @@ export function RestrictionsTab({ className = '' }: RestrictionsTabProps) {
                       </button>
                       <button
                         onClick={() => setEditingRestriction(restriction)}
-                        className="p-2 text-gray-400 hover:bg-gray-700 rounded-lg transition-colors"
+                        className="p-2 text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
                         title="Edit"
                       >
                         <Edit2 className="h-4 w-4" />
@@ -488,15 +488,15 @@ function RestrictionModal({ restriction, onClose, onSaved }: RestrictionModalPro
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-800 rounded-lg w-full max-w-lg">
+      <div className="bg-white dark:bg-gray-800 rounded-lg w-full max-w-lg">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-700">
-          <h3 className="text-lg font-semibold text-white">
+        <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-gray-700">
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
             {isEdit ? 'Edit Restriction' : 'Add Access Restriction'}
           </h3>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-white transition-colors"
+            className="text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"
           >
             <X className="h-5 w-5" />
           </button>
@@ -512,13 +512,13 @@ function RestrictionModal({ restriction, onClose, onSaved }: RestrictionModalPro
 
           {/* Restriction Type */}
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-slate-700 dark:text-gray-300 mb-2">
               Restriction Type *
             </label>
             <select
               value={restrictionType}
               onChange={(e) => setRestrictionType(e.target.value as RestrictionType)}
-              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 bg-slate-50 dark:bg-gray-700 border border-slate-300 dark:border-gray-600 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               disabled={isEdit}
             >
               {RESTRICTION_TYPES.map(type => (
@@ -534,14 +534,14 @@ function RestrictionModal({ restriction, onClose, onSaved }: RestrictionModalPro
 
           {/* Value */}
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-slate-700 dark:text-gray-300 mb-2">
               Value *
             </label>
             <textarea
               value={valueInput}
               onChange={(e) => setValueInput(e.target.value)}
               placeholder={getValuePlaceholder()}
-              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              className="w-full px-3 py-2 bg-slate-50 dark:bg-gray-700 border border-slate-300 dark:border-gray-600 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
               rows={3}
               required
             />
@@ -550,7 +550,7 @@ function RestrictionModal({ restriction, onClose, onSaved }: RestrictionModalPro
 
           {/* Applies to Role */}
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-slate-700 dark:text-gray-300 mb-2">
               Applies to Role (optional)
             </label>
             <input
@@ -558,7 +558,7 @@ function RestrictionModal({ restriction, onClose, onSaved }: RestrictionModalPro
               value={appliesToRole}
               onChange={(e) => setAppliesToRole(e.target.value)}
               placeholder="Leave empty to apply to all roles"
-              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 bg-slate-50 dark:bg-gray-700 border border-slate-300 dark:border-gray-600 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <p className="mt-1 text-xs text-gray-500">
               Optionally restrict this rule to users with a specific role
@@ -571,7 +571,7 @@ function RestrictionModal({ restriction, onClose, onSaved }: RestrictionModalPro
               type="button"
               onClick={() => setIsActive(!isActive)}
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                isActive ? 'bg-green-600' : 'bg-gray-600'
+                isActive ? 'bg-green-600' : 'bg-slate-300 dark:bg-gray-600'
               }`}
             >
               <span
@@ -580,24 +580,24 @@ function RestrictionModal({ restriction, onClose, onSaved }: RestrictionModalPro
                 }`}
               />
             </button>
-            <span className="text-sm text-gray-300">
+            <span className="text-sm text-slate-700 dark:text-gray-300">
               {isActive ? 'Active' : 'Inactive'}
             </span>
           </div>
 
           {/* Actions */}
-          <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-700">
+          <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200 dark:border-gray-700">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-gray-400 hover:text-white transition-colors"
+              className="px-4 py-2 text-slate-500 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={submitting || !valueInput}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 dark:disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
             >
               <Save className="h-4 w-4" />
               {submitting ? 'Saving...' : isEdit ? 'Update' : 'Create'}

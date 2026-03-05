@@ -176,7 +176,7 @@ export function DelegationsTab({ className = '' }: DelegationsTabProps) {
     return (
       <div className={`flex items-center justify-center py-12 ${className}`}>
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-        <span className="ml-3 text-gray-400">Loading delegations...</span>
+        <span className="ml-3 text-slate-500 dark:text-gray-400">Loading delegations...</span>
       </div>
     );
   }
@@ -200,8 +200,8 @@ export function DelegationsTab({ className = '' }: DelegationsTabProps) {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-semibold text-white">Permission Delegations</h2>
-          <p className="text-sm text-gray-400 mt-1">
+          <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Permission Delegations</h2>
+          <p className="text-sm text-slate-500 dark:text-gray-400 mt-1">
             Temporarily grant your permissions to other users
           </p>
         </div>
@@ -237,7 +237,7 @@ export function DelegationsTab({ className = '' }: DelegationsTabProps) {
             placeholder="Search by user or reason..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-800 border border-slate-200 dark:border-gray-700 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           />
         </div>
 
@@ -250,7 +250,7 @@ export function DelegationsTab({ className = '' }: DelegationsTabProps) {
               className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                 statusFilter === status
                   ? 'bg-blue-600 text-white'
-                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                  : 'bg-slate-100 dark:bg-gray-800 text-slate-500 dark:text-gray-400 hover:bg-slate-200 dark:hover:bg-gray-700'
               }`}
             >
               {status.charAt(0).toUpperCase() + status.slice(1)}
@@ -261,10 +261,10 @@ export function DelegationsTab({ className = '' }: DelegationsTabProps) {
 
       {/* Delegations List */}
       {filteredDelegations.length === 0 ? (
-        <div className="bg-gray-800/50 rounded-lg border border-gray-700 p-12 text-center">
+        <div className="bg-slate-50 dark:bg-gray-800/50 rounded-lg border border-slate-200 dark:border-gray-700 p-12 text-center">
           <UserCheck className="h-12 w-12 mx-auto mb-4 text-gray-500" />
-          <h3 className="text-lg font-medium text-white mb-2">No Delegations Found</h3>
-          <p className="text-gray-400 mb-4">
+          <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">No Delegations Found</h3>
+          <p className="text-slate-500 dark:text-gray-400 mb-4">
             {statusFilter !== 'all'
               ? `No ${statusFilter} delegations found.`
               : 'Create a delegation to temporarily grant your permissions to another user.'}
@@ -280,7 +280,7 @@ export function DelegationsTab({ className = '' }: DelegationsTabProps) {
           )}
         </div>
       ) : (
-        <div className="bg-gray-800/50 rounded-lg border border-gray-700 divide-y divide-gray-700">
+        <div className="bg-slate-50 dark:bg-gray-800/50 rounded-lg border border-slate-200 dark:border-gray-700 divide-y divide-slate-200 dark:divide-gray-700">
           {filteredDelegations.map(delegation => (
             <DelegationRow
               key={delegation.id}
@@ -341,7 +341,7 @@ function DelegationRow({
                 <User className="h-4 w-4 text-blue-400" />
               </div>
               <div>
-                <p className="text-sm font-medium text-white">
+                <p className="text-sm font-medium text-slate-900 dark:text-white">
                   {delegation.delegator_name || `User ${delegation.delegator_id}`}
                 </p>
                 <p className="text-xs text-gray-500">Delegator</p>
@@ -355,7 +355,7 @@ function DelegationRow({
                 <UserCheck className="h-4 w-4 text-green-400" />
               </div>
               <div>
-                <p className="text-sm font-medium text-white">
+                <p className="text-sm font-medium text-slate-900 dark:text-white">
                   {delegation.delegate_name || `User ${delegation.delegate_id}`}
                 </p>
                 <p className="text-xs text-gray-500">Delegatee</p>
@@ -521,13 +521,13 @@ function CreateDelegationModal({ onClose, onCreated }: CreateDelegationModalProp
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-800 rounded-lg w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+      <div className="bg-white dark:bg-gray-800 rounded-lg w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-700">
-          <h3 className="text-lg font-semibold text-white">Create Permission Delegation</h3>
+        <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-gray-700">
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Create Permission Delegation</h3>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-white transition-colors"
+            className="text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"
           >
             &times;
           </button>
@@ -549,13 +549,13 @@ function CreateDelegationModal({ onClose, onCreated }: CreateDelegationModalProp
 
               {/* Select User */}
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
+                <label className="block text-sm font-medium text-slate-700 dark:text-gray-300 mb-2">
                   Delegate to User *
                 </label>
                 <select
                   value={selectedUserId || ''}
                   onChange={(e) => setSelectedUserId(Number(e.target.value) || null)}
-                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-gray-700 border border-slate-300 dark:border-gray-600 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   required
                 >
                   <option value="">Select a user...</option>
@@ -570,26 +570,26 @@ function CreateDelegationModal({ onClose, onCreated }: CreateDelegationModalProp
               {/* Time Range */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                  <label className="block text-sm font-medium text-slate-700 dark:text-gray-300 mb-2">
                     Starts At *
                   </label>
                   <input
                     type="datetime-local"
                     value={startsAt}
                     onChange={(e) => setStartsAt(e.target.value)}
-                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-gray-700 border border-slate-300 dark:border-gray-600 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                     required
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                  <label className="block text-sm font-medium text-slate-700 dark:text-gray-300 mb-2">
                     Expires At *
                   </label>
                   <input
                     type="datetime-local"
                     value={expiresAt}
                     onChange={(e) => setExpiresAt(e.target.value)}
-                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-gray-700 border border-slate-300 dark:border-gray-600 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                     required
                   />
                 </div>
@@ -597,14 +597,14 @@ function CreateDelegationModal({ onClose, onCreated }: CreateDelegationModalProp
 
               {/* Reason */}
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
+                <label className="block text-sm font-medium text-slate-700 dark:text-gray-300 mb-2">
                   Reason
                 </label>
                 <textarea
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
                   placeholder="e.g., Covering during vacation..."
-                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-gray-700 border border-slate-300 dark:border-gray-600 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                   rows={2}
                 />
               </div>
@@ -612,7 +612,7 @@ function CreateDelegationModal({ onClose, onCreated }: CreateDelegationModalProp
               {/* Permissions */}
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="block text-sm font-medium text-gray-300">
+                  <label className="block text-sm font-medium text-slate-700 dark:text-gray-300">
                     Permissions to Delegate *
                   </label>
                   <div className="flex gap-2">
@@ -633,17 +633,17 @@ function CreateDelegationModal({ onClose, onCreated }: CreateDelegationModalProp
                     </button>
                   </div>
                 </div>
-                <div className="bg-gray-700/50 rounded-lg border border-gray-600 max-h-64 overflow-auto">
+                <div className="bg-slate-50 dark:bg-gray-700/50 rounded-lg border border-slate-300 dark:border-gray-600 max-h-64 overflow-auto">
                   {Object.entries(permissionsByCategory).map(([category, perms]) => (
-                    <div key={category} className="border-b border-gray-600 last:border-b-0">
-                      <div className="px-3 py-2 bg-gray-700/50 text-xs font-medium text-gray-400 uppercase">
+                    <div key={category} className="border-b border-slate-300 dark:border-gray-600 last:border-b-0">
+                      <div className="px-3 py-2 bg-slate-100 dark:bg-gray-700/50 text-xs font-medium text-slate-500 dark:text-gray-400 uppercase">
                         {category}
                       </div>
                       <div className="p-2 grid grid-cols-2 gap-1">
                         {perms.map(perm => (
                           <label
                             key={perm.code}
-                            className="flex items-center gap-2 p-2 rounded hover:bg-gray-600/50 cursor-pointer"
+                            className="flex items-center gap-2 p-2 rounded hover:bg-slate-100 dark:hover:bg-gray-600/50 cursor-pointer"
                           >
                             <input
                               type="checkbox"
@@ -651,7 +651,7 @@ function CreateDelegationModal({ onClose, onCreated }: CreateDelegationModalProp
                               onChange={() => togglePermission(perm.code)}
                               className="rounded border-gray-600 text-blue-500 focus:ring-blue-500 bg-gray-700"
                             />
-                            <span className="text-sm text-gray-300">{perm.name}</span>
+                            <span className="text-sm text-slate-700 dark:text-gray-300">{perm.name}</span>
                           </label>
                         ))}
                       </div>
@@ -667,18 +667,18 @@ function CreateDelegationModal({ onClose, onCreated }: CreateDelegationModalProp
         </form>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-3 p-4 border-t border-gray-700">
+        <div className="flex items-center justify-end gap-3 p-4 border-t border-slate-200 dark:border-gray-700">
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-gray-400 hover:text-white transition-colors"
+            className="px-4 py-2 text-slate-500 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition-colors"
           >
             Cancel
           </button>
           <button
             onClick={handleSubmit}
             disabled={loading || submitting || !selectedUserId || selectedPermissions.length === 0}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 dark:disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
           >
             {submitting ? 'Creating...' : 'Create Delegation'}
           </button>

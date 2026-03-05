@@ -1213,6 +1213,100 @@ def _transform_card_data(card_type: str, raw_data: Any, tool_name: str) -> Any:
         return raw_data
 
 
+def _generate_auto_followups(
+    tools_executed: List[str],
+    original_query: str,
+) -> List[Dict[str, str]]:
+    """Auto-generate follow-up suggestions based on tools used during the response.
+
+    Called when the AI model didn't use the suggest_followups tool itself.
+    Returns 2-3 contextual follow-up suggestions with label + query.
+    """
+    if not tools_executed:
+        return []
+
+    tool_set = set(tools_executed)
+    query_lower = original_query.lower() if original_query else ""
+    followups: List[Dict[str, str]] = []
+
+    # Primary "dig deeper" suggestion based on what was analyzed
+    if any(t.startswith("meraki_") for t in tool_set):
+        if "wireless" in query_lower or "wifi" in query_lower or "ap" in query_lower or "ssid" in query_lower:
+            followups.append({
+                "label": "Deep dive into wireless health",
+                "query": "Investigate wireless health in more detail — check channel utilization, client connection stats, failed associations, and RF interference across all APs. Add visualization cards for key findings.",
+            })
+        elif "vpn" in query_lower or "wan" in query_lower:
+            followups.append({
+                "label": "Analyze VPN & WAN performance",
+                "query": "Do a deep analysis of VPN tunnel status, WAN uplink performance, and failover readiness. Show key metrics with visualization cards.",
+            })
+        elif "switch" in query_lower or "port" in query_lower:
+            followups.append({
+                "label": "Investigate switch port health",
+                "query": "Deep dive into switch port statuses, error counters, and STP topology. Identify any ports with high error rates or unusual traffic patterns. Show findings with cards.",
+            })
+        else:
+            followups.append({
+                "label": "Investigate further",
+                "query": f"Dig deeper into this analysis — check related systems, look for anomalies, and provide a comprehensive assessment with visualization cards. Original question: {original_query}",
+            })
+    elif any(t.startswith("te_") or "thousandeyes" in t for t in tool_set):
+        followups.append({
+            "label": "Deep dive into test results",
+            "query": "Investigate ThousandEyes test results in detail — check path visualization, packet loss, latency trends, and BGP route changes. Add visualization cards for critical findings.",
+        })
+    elif any(t.startswith("splunk_") for t in tool_set):
+        followups.append({
+            "label": "Analyze Splunk logs deeper",
+            "query": "Do a deeper analysis of the Splunk logs — look for error patterns, unusual spikes, correlate events across sources, and identify root causes. Show key findings with visualization cards.",
+        })
+    elif any(t.startswith("catalyst_") for t in tool_set):
+        followups.append({
+            "label": "Investigate network health",
+            "query": "Deep dive into Catalyst network health — check device health scores, client connectivity issues, and site-level performance metrics. Add visualization cards for findings.",
+        })
+    else:
+        followups.append({
+            "label": "Investigate further",
+            "query": f"Dig deeper into this analysis — investigate root causes, check related systems, and provide detailed recommendations with visualization cards. Original question: {original_query}",
+        })
+
+    # Secondary suggestions based on complementary analysis
+    if any(t.startswith("meraki_") for t in tool_set):
+        if not any("alert" in t for t in tool_set):
+            followups.append({
+                "label": "Check recent alerts",
+                "query": "Show me any recent network alerts or configuration changes that might affect performance.",
+            })
+        if "wireless" not in query_lower and any("wireless" not in t for t in tool_set):
+            followups.append({
+                "label": "Review client experience",
+                "query": "Analyze client connectivity and experience — check connection success rates, latency, and any clients with poor performance.",
+            })
+
+    if any(t.startswith("splunk_") for t in tool_set):
+        followups.append({
+            "label": "Correlate with network data",
+            "query": "Cross-reference these Splunk findings with live network data from Meraki and ThousandEyes to identify correlations.",
+        })
+
+    if any(t.startswith("te_") or "thousandeyes" in t for t in tool_set):
+        followups.append({
+            "label": "Check network path health",
+            "query": "Analyze the network path data — look at hop-by-hop latency, packet loss at each node, and identify bottlenecks.",
+        })
+
+    # Always offer a general "what else" if we have room
+    if len(followups) < 3:
+        followups.append({
+            "label": "What should I check next?",
+            "query": "Based on everything we've looked at so far, what are the most important things I should check or monitor next? Provide specific recommendations.",
+        })
+
+    return followups[:3]
+
+
 def _generate_card_suggestion(
     tool_name: str,
     tool_result: Dict[str, Any],
@@ -2360,6 +2454,7 @@ class UnifiedChatService:
             # so the frontend can show tool activity in the Agent Flow
             tools_used = []
             platforms_used = set()
+            ns_followups_emitted = False
 
             # Check if any canvas tools were called - if so, skip auto-card generation
             canvas_tools_in_response = any(
@@ -2448,6 +2543,7 @@ class UnifiedChatService:
                 if tool_name == "suggest_followups" and isinstance(tool_result, dict) and tool_result.get("success"):
                     followups = tool_result.get("followup_suggestions", [])
                     if followups:
+                        ns_followups_emitted = True
                         yield {"type": "followup_suggestions", "suggestions": followups}
 
             if tools_used:
@@ -2455,6 +2551,13 @@ class UnifiedChatService:
 
             # Emit text response
             yield {"type": "text_delta", "text": result.response}
+
+            # Auto-generate follow-up suggestions if AI didn't call suggest_followups
+            if not ns_followups_emitted and tools_used:
+                auto_followups = _generate_auto_followups(tools_used, message)
+                if auto_followups:
+                    logger.info(f"[FollowUp] Non-streaming: auto-generating {len(auto_followups)} follow-ups")
+                    yield {"type": "followup_suggestions", "suggestions": auto_followups}
 
             # Include tool_data for canvas cards in done event
             done_event = {
@@ -4269,6 +4372,7 @@ I've added 3 monitoring cards for real-time visibility."
             # This MUST be outside the loop so it persists when AI does multi-turn tool calls
             canvas_tools_succeeded_in_session = False
             canvas_emitted_card_types: set = set()  # Track card types emitted by canvas tools
+            followups_emitted = False  # Track if suggest_followups was already called by AI
 
             # Determine thinking effort for streaming (adaptive thinking with interleaved reasoning)
             # We compute this once from the original query (first user message)
@@ -4602,6 +4706,7 @@ I've added 3 monitoring cards for real-time visibility."
                                 if block.name == "suggest_followups" and isinstance(safe_result, dict) and safe_result.get("success"):
                                     followups = safe_result.get("followup_suggestions", [])
                                     if followups:
+                                        followups_emitted = True
                                         yield {"type": "followup_suggestions", "suggestions": followups}
 
                                 # Store result for conversation history
@@ -4807,6 +4912,13 @@ I've added 3 monitoring cards for real-time visibility."
                     )
                 except Exception as trace_err:
                     logger.warning(f"[Trace] Failed to end trace: {trace_err}")
+
+            # Auto-generate follow-up suggestions if AI didn't call suggest_followups
+            if not followups_emitted and all_tools_executed:
+                auto_followups = _generate_auto_followups(all_tools_executed, query)
+                if auto_followups:
+                    logger.info(f"[FollowUp] Auto-generating {len(auto_followups)} follow-ups (AI didn't call suggest_followups)")
+                    yield {"type": "followup_suggestions", "suggestions": auto_followups}
 
             yield {
                 "type": "done",
@@ -5056,6 +5168,13 @@ I've added 3 monitoring cards for real-time visibility."
                     )
                 except Exception:
                     pass
+
+            # Auto-generate follow-up suggestions for OpenAI path
+            if current_tool and current_tool.get("name") and current_tool["name"] != "suggest_followups":
+                auto_followups = _generate_auto_followups([current_tool["name"]], query)
+                if auto_followups:
+                    logger.info(f"[FollowUp] OpenAI: auto-generating {len(auto_followups)} follow-ups")
+                    yield {"type": "followup_suggestions", "suggestions": auto_followups}
 
             yield {
                 "type": "done",

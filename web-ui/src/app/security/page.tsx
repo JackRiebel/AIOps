@@ -108,13 +108,13 @@ export default function SecurityPage() {
   }, [error]);
 
   return (
-    <div className="h-full bg-slate-900 overflow-auto">
+    <div className="h-full bg-slate-50 dark:bg-slate-900 overflow-auto">
       <div className="px-6 py-6">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-white">Security & Access Control</h1>
-            <p className="text-sm text-slate-400 mt-0.5">
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Security & Access Control</h1>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
               Manage users, roles, permissions, and security policies
             </p>
           </div>
@@ -158,7 +158,7 @@ export default function SecurityPage() {
           <div
             role="tablist"
             aria-label="Security management sections"
-            className="flex gap-1 border-b border-slate-700/50 overflow-x-auto"
+            className="flex gap-1 border-b border-slate-200 dark:border-slate-700/50 overflow-x-auto"
           >
             {accessibleTabs.map(tab => {
               const Icon = tab.icon;
@@ -170,10 +170,10 @@ export default function SecurityPage() {
                   aria-selected={isActive}
                   aria-controls={`tabpanel-${tab.id}`}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-all border-b-2 -mb-px whitespace-nowrap focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:ring-offset-1 focus:ring-offset-slate-900 ${
+                  className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-all border-b-2 -mb-px whitespace-nowrap focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:ring-offset-1 focus:ring-offset-white dark:focus:ring-offset-slate-900 ${
                     isActive
-                      ? 'border-cyan-500 text-cyan-400'
-                      : 'border-transparent text-slate-400 hover:text-slate-300'
+                      ? 'border-cyan-500 text-cyan-600 dark:text-cyan-400'
+                      : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
                   }`}
                 >
                   <Icon className="w-4 h-4" aria-hidden="true" />
@@ -248,7 +248,7 @@ export default function SecurityPage() {
                   <LoadingSpinner />
                 ) : config ? (
                   <div className="space-y-6">
-                    <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">
+                    <h2 className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                       Security Configuration
                     </h2>
 
@@ -257,7 +257,7 @@ export default function SecurityPage() {
                       className={`rounded-xl border p-6 ${
                         config.audit_logging
                           ? 'bg-green-500/5 border-green-500/20'
-                          : 'bg-slate-800/30 border-slate-700/30'
+                          : 'bg-slate-100 dark:bg-slate-800/30 border-slate-200 dark:border-slate-700/30'
                       }`}
                     >
                       <div className="flex items-start justify-between">
@@ -266,14 +266,14 @@ export default function SecurityPage() {
                             className={`p-3 rounded-lg ${
                               config.audit_logging
                                 ? 'bg-green-500/10 text-green-400'
-                                : 'bg-slate-700/50 text-slate-400'
+                                : 'bg-slate-200 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400'
                             }`}
                           >
                             <FileText className="w-6 h-6" aria-hidden="true" />
                           </div>
                           <div>
-                            <h3 className="text-lg font-semibold text-white">Audit Logging</h3>
-                            <p className="text-sm text-slate-400 mt-1">
+                            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Audit Logging</h3>
+                            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
                               {config.audit_logging
                                 ? 'All API operations are being recorded for compliance.'
                                 : 'No operation history is retained. Enable for production environments.'}
@@ -284,9 +284,9 @@ export default function SecurityPage() {
                           <button
                             onClick={handleToggleAuditLogging}
                             aria-label={config.audit_logging ? 'Disable audit logging' : 'Enable audit logging'}
-                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-900 ${
+                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-slate-900 ${
                               config.audit_logging
-                                ? 'bg-slate-700/50 hover:bg-slate-700 text-slate-300 focus:ring-slate-500'
+                                ? 'bg-slate-200 dark:bg-slate-700/50 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 focus:ring-slate-500'
                                 : 'bg-green-600 hover:bg-green-700 text-white focus:ring-green-500'
                             }`}
                           >
@@ -297,14 +297,14 @@ export default function SecurityPage() {
                     </div>
 
                     {/* Session Settings Card */}
-                    <div className="bg-slate-800/30 rounded-xl border border-slate-700/30 p-6">
+                    <div className="bg-slate-100 dark:bg-slate-800/30 rounded-xl border border-slate-200 dark:border-slate-700/30 p-6">
                       <div className="flex items-center gap-4">
-                        <div className="p-3 rounded-lg bg-slate-700/50 text-slate-400">
+                        <div className="p-3 rounded-lg bg-slate-200 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400">
                           <Lock className="w-6 h-6" aria-hidden="true" />
                         </div>
                         <div>
-                          <h3 className="text-lg font-semibold text-white">Session Security</h3>
-                          <p className="text-sm text-slate-400 mt-1">
+                          <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Session Security</h3>
+                          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
                             Sessions expire after 24 hours of inactivity. HTTP-only secure cookies are used.
                           </p>
                         </div>
@@ -312,14 +312,14 @@ export default function SecurityPage() {
                     </div>
 
                     {/* Password Policy Card */}
-                    <div className="bg-slate-800/30 rounded-xl border border-slate-700/30 p-6">
+                    <div className="bg-slate-100 dark:bg-slate-800/30 rounded-xl border border-slate-200 dark:border-slate-700/30 p-6">
                       <div className="flex items-center gap-4">
-                        <div className="p-3 rounded-lg bg-slate-700/50 text-slate-400">
+                        <div className="p-3 rounded-lg bg-slate-200 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400">
                           <Key className="w-6 h-6" aria-hidden="true" />
                         </div>
                         <div>
-                          <h3 className="text-lg font-semibold text-white">Password Policy</h3>
-                          <p className="text-sm text-slate-400 mt-1">
+                          <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Password Policy</h3>
+                          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
                             Passwords are hashed using bcrypt. Minimum 8 characters required.
                           </p>
                         </div>
@@ -342,7 +342,7 @@ function LoadingSpinner() {
     <div className="flex items-center justify-center py-32">
       <div className="text-center">
         <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-cyan-500 border-r-transparent"></div>
-        <p className="mt-3 text-slate-400 text-sm">Loading...</p>
+        <p className="mt-3 text-slate-500 dark:text-slate-400 text-sm">Loading...</p>
       </div>
     </div>
   );
@@ -355,8 +355,8 @@ function AccessDeniedMessage() {
       <div className="p-4 bg-red-500/10 rounded-full mb-4">
         <AlertCircle className="w-8 h-8 text-red-400" />
       </div>
-      <h3 className="text-lg font-medium text-white mb-2">Access Denied</h3>
-      <p className="text-sm text-slate-400 max-w-md">
+      <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">Access Denied</h3>
+      <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md">
         You don&apos;t have permission to view this section. Contact your administrator if you believe this is an error.
       </p>
     </div>

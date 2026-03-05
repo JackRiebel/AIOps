@@ -98,7 +98,6 @@ class SessionAuthMiddleware:
         "/api/auth/mfa/verify",
         "/api/auth/mfa/challenge",
         "/api/auth/reset-password",
-        "/api/health",
         "/api/readiness",  # Public endpoint for startup health checks
         "/api/mcp-monitor/oauth/callback",  # OAuth redirect from external providers (Cloudflare, etc.)
         "/docs",

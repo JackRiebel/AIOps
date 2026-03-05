@@ -168,7 +168,7 @@ export function RequestsTab({ className = '' }: RequestsTabProps) {
     return (
       <div className={`flex items-center justify-center py-12 ${className}`}>
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-        <span className="ml-3 text-gray-400">Loading requests...</span>
+        <span className="ml-3 text-slate-500 dark:text-gray-400">Loading requests...</span>
       </div>
     );
   }
@@ -192,8 +192,8 @@ export function RequestsTab({ className = '' }: RequestsTabProps) {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-semibold text-white">Role Change Requests</h2>
-          <p className="text-sm text-gray-400 mt-1">
+          <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Role Change Requests</h2>
+          <p className="text-sm text-slate-500 dark:text-gray-400 mt-1">
             Review and manage role change requests
             {pendingCount > 0 && (
               <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-500/20 text-yellow-400">
@@ -229,7 +229,7 @@ export function RequestsTab({ className = '' }: RequestsTabProps) {
             placeholder="Search by user, role, or reason..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-800 border border-slate-200 dark:border-gray-700 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           />
         </div>
 
@@ -242,7 +242,7 @@ export function RequestsTab({ className = '' }: RequestsTabProps) {
               className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                 statusFilter === status
                   ? 'bg-blue-600 text-white'
-                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                  : 'bg-slate-100 dark:bg-gray-800 text-slate-500 dark:text-gray-400 hover:bg-slate-200 dark:hover:bg-gray-700'
               }`}
             >
               {status.charAt(0).toUpperCase() + status.slice(1)}
@@ -261,17 +261,17 @@ export function RequestsTab({ className = '' }: RequestsTabProps) {
         {/* Requests List */}
         <div className="flex-1">
           {filteredRequests.length === 0 ? (
-            <div className="bg-gray-800/50 rounded-lg border border-gray-700 p-12 text-center">
+            <div className="bg-slate-50 dark:bg-gray-800/50 rounded-lg border border-slate-200 dark:border-gray-700 p-12 text-center">
               <UserPlus className="h-12 w-12 mx-auto mb-4 text-gray-500" />
-              <h3 className="text-lg font-medium text-white mb-2">No Requests Found</h3>
-              <p className="text-gray-400">
+              <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">No Requests Found</h3>
+              <p className="text-slate-500 dark:text-gray-400">
                 {statusFilter !== 'all'
                   ? `No ${statusFilter} role change requests.`
                   : 'There are no role change requests at this time.'}
               </p>
             </div>
           ) : (
-            <div className="bg-gray-800/50 rounded-lg border border-gray-700 divide-y divide-gray-700">
+            <div className="bg-slate-50 dark:bg-gray-800/50 rounded-lg border border-slate-200 dark:border-gray-700 divide-y divide-slate-200 dark:divide-gray-700">
               {filteredRequests.map(request => (
                 <RequestRow
                   key={request.id}
@@ -327,23 +327,23 @@ function RequestRow({
       className={`w-full flex items-center gap-4 p-4 text-left transition-colors ${
         isSelected
           ? 'bg-blue-500/20 border-l-2 border-blue-500'
-          : 'hover:bg-gray-700/30 border-l-2 border-transparent'
+          : 'hover:bg-slate-100 dark:hover:bg-gray-700/30 border-l-2 border-transparent'
       }`}
     >
-      <div className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center shrink-0">
+      <div className="w-10 h-10 rounded-full bg-slate-200 dark:bg-gray-700 flex items-center justify-center shrink-0">
         <User className="h-5 w-5 text-gray-400" />
       </div>
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <span className="font-medium text-white truncate">
+          <span className="font-medium text-slate-900 dark:text-white truncate">
             {request.target_user_name || `User ${request.target_user_id}`}
           </span>
           {request.status === 'pending' && (
             <span className="w-2 h-2 bg-yellow-400 rounded-full animate-pulse" />
           )}
         </div>
-        <div className="flex items-center gap-2 text-sm text-gray-400 mt-0.5">
+        <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-gray-400 mt-0.5">
           <span className="truncate">{request.current_role_name || 'No Role'}</span>
           <ArrowRight className="h-3 w-3 shrink-0" />
           <span className="text-blue-400 truncate">{request.requested_role_name}</span>
@@ -394,13 +394,13 @@ function RequestDetailPanel({
   };
 
   return (
-    <div className="bg-gray-800 rounded-lg border border-gray-700 sticky top-4">
+    <div className="bg-white dark:bg-gray-800 rounded-lg border border-slate-200 dark:border-gray-700 sticky top-4">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-700">
-        <h3 className="font-medium text-white">Request Details</h3>
+      <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-gray-700">
+        <h3 className="font-medium text-slate-900 dark:text-white">Request Details</h3>
         <button
           onClick={onClose}
-          className="text-gray-400 hover:text-white transition-colors"
+          className="text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"
         >
           &times;
         </button>
@@ -410,25 +410,25 @@ function RequestDetailPanel({
       <div className="p-4 space-y-4">
         {/* User Info */}
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-full bg-gray-700 flex items-center justify-center">
+          <div className="w-12 h-12 rounded-full bg-slate-200 dark:bg-gray-700 flex items-center justify-center">
             <User className="h-6 w-6 text-gray-400" />
           </div>
           <div>
-            <p className="font-medium text-white">
+            <p className="font-medium text-slate-900 dark:text-white">
               {request.target_user_name || `User ${request.target_user_id}`}
             </p>
             {request.requester_name && (
-              <p className="text-sm text-gray-400">Requested by: {request.requester_name}</p>
+              <p className="text-sm text-slate-500 dark:text-gray-400">Requested by: {request.requester_name}</p>
             )}
           </div>
         </div>
 
         {/* Role Change */}
-        <div className="bg-gray-700/50 rounded-lg p-3">
+        <div className="bg-slate-100 dark:bg-gray-700/50 rounded-lg p-3">
           <label className="text-xs text-gray-500 uppercase tracking-wide">Role Change</label>
           <div className="flex items-center gap-3 mt-2">
             <div className="flex-1">
-              <p className="text-sm text-gray-400">{request.current_role_name || 'No Role'}</p>
+              <p className="text-sm text-slate-500 dark:text-gray-400">{request.current_role_name || 'No Role'}</p>
             </div>
             <ArrowRight className="h-4 w-4 text-gray-500" />
             <div className="flex-1">
@@ -446,7 +446,7 @@ function RequestDetailPanel({
         {/* Request Reason */}
         <div>
           <label className="text-xs text-gray-500 uppercase tracking-wide">Reason</label>
-          <p className="text-sm text-gray-300 mt-1">
+          <p className="text-sm text-slate-700 dark:text-gray-300 mt-1">
             {request.reason || <span className="italic text-gray-500">No reason provided</span>}
           </p>
         </div>
@@ -455,12 +455,12 @@ function RequestDetailPanel({
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="text-xs text-gray-500 uppercase tracking-wide">Requested</label>
-            <p className="text-sm text-gray-300 mt-1">{formatDateTime(request.created_at)}</p>
+            <p className="text-sm text-slate-700 dark:text-gray-300 mt-1">{formatDateTime(request.created_at)}</p>
           </div>
           {request.reviewed_at && (
             <div>
               <label className="text-xs text-gray-500 uppercase tracking-wide">Reviewed</label>
-              <p className="text-sm text-gray-300 mt-1">{formatDateTime(request.reviewed_at)}</p>
+              <p className="text-sm text-slate-700 dark:text-gray-300 mt-1">{formatDateTime(request.reviewed_at)}</p>
             </div>
           )}
         </div>
@@ -469,7 +469,7 @@ function RequestDetailPanel({
         {request.reviewer_name && (
           <div>
             <label className="text-xs text-gray-500 uppercase tracking-wide">Reviewed By</label>
-            <p className="text-sm text-gray-300 mt-1">{request.reviewer_name}</p>
+            <p className="text-sm text-slate-700 dark:text-gray-300 mt-1">{request.reviewer_name}</p>
           </div>
         )}
 
@@ -477,22 +477,22 @@ function RequestDetailPanel({
         {request.review_notes && (
           <div>
             <label className="text-xs text-gray-500 uppercase tracking-wide">Review Notes</label>
-            <p className="text-sm text-gray-300 mt-1 italic">&ldquo;{request.review_notes}&rdquo;</p>
+            <p className="text-sm text-slate-700 dark:text-gray-300 mt-1 italic">&ldquo;{request.review_notes}&rdquo;</p>
           </div>
         )}
 
         {/* Action Section (for pending requests) */}
         {request.status === 'pending' && canManage && (
-          <div className="pt-4 border-t border-gray-700 space-y-4">
+          <div className="pt-4 border-t border-slate-200 dark:border-gray-700 space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
+              <label className="block text-sm font-medium text-slate-700 dark:text-gray-300 mb-2">
                 Review Comment (optional)
               </label>
               <textarea
                 value={reviewComment}
                 onChange={(e) => setReviewComment(e.target.value)}
                 placeholder="Add a comment for the requester..."
-                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                className="w-full px-3 py-2 bg-slate-50 dark:bg-gray-700 border border-slate-300 dark:border-gray-600 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                 rows={2}
               />
             </div>
@@ -501,7 +501,7 @@ function RequestDetailPanel({
               <button
                 onClick={handleApprove}
                 disabled={processing}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white rounded-lg transition-colors"
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-slate-300 dark:disabled:bg-gray-600 text-white rounded-lg transition-colors"
               >
                 <ThumbsUp className="h-4 w-4" />
                 Approve
@@ -509,7 +509,7 @@ function RequestDetailPanel({
               <button
                 onClick={handleReject}
                 disabled={processing}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-600 text-white rounded-lg transition-colors"
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-slate-300 dark:disabled:bg-gray-600 text-white rounded-lg transition-colors"
               >
                 <ThumbsDown className="h-4 w-4" />
                 Reject

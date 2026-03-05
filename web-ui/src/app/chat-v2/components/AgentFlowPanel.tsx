@@ -204,7 +204,7 @@ const StatusBadge = memo(({ phase, isComplete }: { phase: StreamingPhase; isComp
   }
 
   const phaseConfig: Record<StreamingPhase, { label: string; color: string }> = {
-    idle: { label: 'Idle', color: 'bg-slate-500/10 text-slate-400' },
+    idle: { label: 'Idle', color: 'bg-slate-200/50 dark:bg-slate-500/10 text-slate-500 dark:text-slate-400' },
     thinking: { label: 'Thinking', color: 'bg-cyan-500/10 text-cyan-400' },
     tool_call: { label: 'Using Tools', color: 'bg-amber-500/10 text-amber-400' },
     agent_work: { label: 'Agent Working', color: 'bg-purple-500/10 text-purple-400' },
@@ -247,7 +247,7 @@ const SimpleNode = memo(({
         relative w-10 h-10 rounded-full flex items-center justify-center transition-all duration-300
         ${isActive ? 'bg-cyan-500/20 text-cyan-400 ring-2 ring-cyan-500/50' : ''}
         ${isComplete ? 'bg-emerald-500/20 text-emerald-400' : ''}
-        ${status === 'idle' ? 'bg-slate-700/50 text-slate-500' : ''}
+        ${status === 'idle' ? 'bg-slate-200 dark:bg-slate-700/50 text-slate-400 dark:text-slate-500' : ''}
       `}>
         {isActive && <div className="absolute inset-0 rounded-full bg-cyan-500/20 animate-ping" />}
         {isComplete ? <CheckIcon /> : icon}
@@ -256,7 +256,7 @@ const SimpleNode = memo(({
         text-[11px] font-medium transition-colors
         ${isActive ? 'text-cyan-400' : ''}
         ${isComplete ? 'text-emerald-400' : ''}
-        ${status === 'idle' ? 'text-slate-500' : ''}
+        ${status === 'idle' ? 'text-slate-400 dark:text-slate-500' : ''}
       `}>
         {label}
       </span>
@@ -287,7 +287,7 @@ const PlatformNodeItem = memo(({ platform, isFlowComplete }: { platform: Platfor
       <div
         className={`
           relative w-10 h-10 rounded-full flex items-center justify-center transition-all duration-300
-          ${effectiveStatus === 'idle' ? 'bg-slate-700/50 grayscale opacity-50' : ''}
+          ${effectiveStatus === 'idle' ? 'bg-slate-200 dark:bg-slate-700/50 grayscale opacity-50' : ''}
         `}
         style={{
           backgroundColor: effectiveStatus !== 'idle' ? `${config.color}20` : undefined,
@@ -308,7 +308,7 @@ const PlatformNodeItem = memo(({ platform, isFlowComplete }: { platform: Platfor
       </div>
 
       <span
-        className={`text-[11px] font-medium transition-colors ${effectiveStatus === 'idle' ? 'text-slate-500' : ''}`}
+        className={`text-[11px] font-medium transition-colors ${effectiveStatus === 'idle' ? 'text-slate-400 dark:text-slate-500' : ''}`}
         style={{ color: effectiveStatus !== 'idle' ? config.color : undefined }}
       >
         {config.name}
@@ -335,10 +335,10 @@ const FlowArrow = memo(({ active, complete }: { active: boolean; complete: boole
       w-6 h-0.5 rounded-full transition-all duration-500
       ${complete ? 'bg-emerald-500' : ''}
       ${active && !complete ? 'bg-cyan-500' : ''}
-      ${!active && !complete ? 'bg-slate-700' : ''}
+      ${!active && !complete ? 'bg-slate-300 dark:bg-slate-700' : ''}
     `} />
     <svg
-      className={`w-2 h-2 -ml-0.5 transition-colors ${complete ? 'text-emerald-500' : active ? 'text-cyan-500' : 'text-slate-700'}`}
+      className={`w-2 h-2 -ml-0.5 transition-colors ${complete ? 'text-emerald-500' : active ? 'text-cyan-500' : 'text-slate-300 dark:text-slate-700'}`}
       fill="currentColor"
       viewBox="0 0 24 24"
     >
@@ -388,7 +388,7 @@ const ToolItem = memo(({ tool, color, isFlowComplete }: { tool: ToolExecution; c
       <div
         className={`
           flex items-center gap-1.5 px-2 py-1 text-[10px] cursor-pointer
-          ${isRunning ? 'text-white' : isError ? 'text-red-400' : 'text-slate-400'}
+          ${isRunning ? 'text-white' : isError ? 'text-red-400' : 'text-slate-500 dark:text-slate-400'}
         `}
         onClick={() => hasPreview && setExpanded(prev => !prev)}
       >
@@ -424,11 +424,11 @@ const ToolItem = memo(({ tool, color, isFlowComplete }: { tool: ToolExecution; c
 
       {/* Expandable detail */}
       {expanded && hasPreview && (
-        <div className="px-2 pb-1.5 pt-0.5 border-t border-slate-700/30 mx-1">
+        <div className="px-2 pb-1.5 pt-0.5 border-t border-slate-200 dark:border-slate-700/30 mx-1">
           {Object.entries(tool.resultPreview!).map(([key, value]) => (
             <div key={key} className="flex items-center justify-between text-[9px] py-0.5">
               <span className="text-slate-500 capitalize">{key.replace(/_/g, ' ')}</span>
-              <span className="text-slate-300 font-mono truncate max-w-[100px] text-right">
+              <span className="text-slate-700 dark:text-slate-300 font-mono truncate max-w-[100px] text-right">
                 {typeof value === 'object' ? JSON.stringify(value).slice(0, 30) : String(value)}
               </span>
             </div>
@@ -470,19 +470,19 @@ const FlowStatsRow = memo(({ tools, isComplete }: { tools: ToolExecution[]; isCo
   if (!stats || !isComplete) return null;
 
   return (
-    <div className="flex items-center gap-3 px-3 py-2 mt-2 rounded-lg bg-slate-800/40 border border-slate-700/30 text-[10px]">
-      <span className="text-slate-400">
-        <strong className="text-slate-300">{stats.totalTools}</strong> tools
+    <div className="flex items-center gap-3 px-3 py-2 mt-2 rounded-lg bg-slate-100 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/30 text-[10px]">
+      <span className="text-slate-500 dark:text-slate-400">
+        <strong className="text-slate-700 dark:text-slate-300">{stats.totalTools}</strong> tools
       </span>
       {stats.wallMs > 0 && (
-        <span className="text-slate-400">
-          <strong className="text-slate-300">
+        <span className="text-slate-500 dark:text-slate-400">
+          <strong className="text-slate-700 dark:text-slate-300">
             {stats.wallMs >= 1000 ? `${(stats.wallMs / 1000).toFixed(1)}s` : `${stats.wallMs}ms`}
           </strong> total
         </span>
       )}
       {stats.totalFindings > 0 && (
-        <span className="text-slate-400">
+        <span className="text-slate-500 dark:text-slate-400">
           <strong className="text-cyan-400">{stats.totalFindings}</strong> findings
         </span>
       )}
@@ -593,17 +593,17 @@ export const AgentFlowPanel = memo(({
   }
 
   return (
-    <div className={`bg-slate-900/95 backdrop-blur-md border-t border-slate-700/50 shadow-[0_-4px_20px_rgba(0,0,0,0.3)] ${className}`}>
+    <div className={`bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-700/50 shadow-[0_-4px_20px_rgba(0,0,0,0.08)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.3)] ${className}`}>
       {/* Header - Always Visible */}
       <button
         onClick={toggleExpanded}
-        className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-slate-800/50 transition-colors"
+        className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors"
         aria-expanded={isExpanded}
       >
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             <div className={`w-2 h-2 rounded-full ${isActive ? 'bg-cyan-500 animate-pulse' : isComplete ? 'bg-emerald-500' : 'bg-slate-500'}`} />
-            <span className="text-xs font-semibold text-slate-300">Agent Flow</span>
+            <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Agent Flow</span>
           </div>
           <StatusBadge phase={phase} isComplete={isComplete} />
 
@@ -658,7 +658,7 @@ export const AgentFlowPanel = memo(({
                     <div key={platform.id} className="flex items-center">
                       <PlatformNodeItem platform={platform} isFlowComplete={isComplete} />
                       {idx < platformNodes.length - 1 && (
-                        <div className="w-2 h-0.5 bg-slate-700 mx-1" />
+                        <div className="w-2 h-0.5 bg-slate-300 dark:bg-slate-700 mx-1" />
                       )}
                     </div>
                   ))}
@@ -672,7 +672,7 @@ export const AgentFlowPanel = memo(({
               // Show placeholder when no platforms yet
               thinkingStatus !== 'idle' && (
                 <>
-                  <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800/30 text-slate-500 text-[10px]">
+                  <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-100 dark:bg-slate-800/30 text-slate-400 dark:text-slate-500 text-[10px]">
                     Waiting for tool calls...
                   </div>
                   <FlowArrow active={false} complete={false} />

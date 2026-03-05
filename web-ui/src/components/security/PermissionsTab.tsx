@@ -160,7 +160,7 @@ export function PermissionsTab({ className = '' }: PermissionsTabProps) {
     return (
       <div className={`flex items-center justify-center py-12 ${className}`}>
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-        <span className="ml-3 text-gray-400">Loading permissions...</span>
+        <span className="ml-3 text-slate-500 dark:text-gray-400">Loading permissions...</span>
       </div>
     );
   }
@@ -184,8 +184,8 @@ export function PermissionsTab({ className = '' }: PermissionsTabProps) {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-semibold text-white">System Permissions</h2>
-          <p className="text-sm text-gray-400 mt-1">
+          <h2 className="text-xl font-semibold text-slate-900 dark:text-white">System Permissions</h2>
+          <p className="text-sm text-slate-500 dark:text-gray-400 mt-1">
             {permissions.length} permissions available across {categories.length} categories
           </p>
         </div>
@@ -201,7 +201,7 @@ export function PermissionsTab({ className = '' }: PermissionsTabProps) {
             placeholder="Search permissions by name, code, or description..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-800 border border-slate-200 dark:border-gray-700 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           />
         </div>
 
@@ -211,7 +211,7 @@ export function PermissionsTab({ className = '' }: PermissionsTabProps) {
           <select
             value={selectedCategory || ''}
             onChange={(e) => setSelectedCategory(e.target.value || null)}
-            className="pl-10 pr-8 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent appearance-none cursor-pointer"
+            className="pl-10 pr-8 py-2 bg-white dark:bg-gray-800 border border-slate-200 dark:border-gray-700 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent appearance-none cursor-pointer"
           >
             <option value="">All Categories</option>
             {categories.map(category => {
@@ -232,9 +232,9 @@ export function PermissionsTab({ className = '' }: PermissionsTabProps) {
         <div className="flex-1 space-y-4">
           {searchQuery || selectedCategory ? (
             // Flat list when filtering
-            <div className="bg-gray-800/50 rounded-lg border border-gray-700 divide-y divide-gray-700">
+            <div className="bg-slate-50 dark:bg-gray-800/50 rounded-lg border border-slate-200 dark:border-gray-700 divide-y divide-slate-200 dark:divide-gray-700">
               {filteredPermissions.length === 0 ? (
-                <div className="p-8 text-center text-gray-400">
+                <div className="p-8 text-center text-slate-500 dark:text-gray-400">
                   <Search className="h-12 w-12 mx-auto mb-3 opacity-50" />
                   <p>No permissions match your search criteria</p>
                 </div>
@@ -262,17 +262,17 @@ export function PermissionsTab({ className = '' }: PermissionsTabProps) {
               return (
                 <div
                   key={category}
-                  className="bg-gray-800/50 rounded-lg border border-gray-700 overflow-hidden"
+                  className="bg-slate-50 dark:bg-gray-800/50 rounded-lg border border-slate-200 dark:border-gray-700 overflow-hidden"
                 >
                   {/* Category Header */}
                   <button
                     onClick={() => toggleCategory(category)}
-                    className="w-full flex items-center justify-between p-4 hover:bg-gray-700/30 transition-colors"
+                    className="w-full flex items-center justify-between p-4 hover:bg-slate-100 dark:hover:bg-gray-700/30 transition-colors"
                   >
                     <div className="flex items-center gap-3">
                       <CategoryIcon className={`h-5 w-5 ${config.color}`} />
-                      <span className="font-medium text-white">{config.label}</span>
-                      <span className="px-2 py-0.5 bg-gray-700 rounded text-xs text-gray-300">
+                      <span className="font-medium text-slate-900 dark:text-white">{config.label}</span>
+                      <span className="px-2 py-0.5 bg-slate-200 dark:bg-gray-700 rounded text-xs text-slate-600 dark:text-gray-300">
                         {categoryPermissions.length}
                       </span>
                     </div>
@@ -285,7 +285,7 @@ export function PermissionsTab({ className = '' }: PermissionsTabProps) {
 
                   {/* Permissions List */}
                   {isExpanded && (
-                    <div className="border-t border-gray-700 divide-y divide-gray-700">
+                    <div className="border-t border-slate-200 dark:border-gray-700 divide-y divide-slate-200 dark:divide-gray-700">
                       {categoryPermissions.map(permission => (
                         <PermissionRow
                           key={permission.id}
@@ -345,22 +345,22 @@ function PermissionRow({
       className={`w-full flex items-center gap-4 p-4 text-left transition-colors ${
         isSelected
           ? 'bg-blue-500/20 border-l-2 border-blue-500'
-          : 'hover:bg-gray-700/30 border-l-2 border-transparent'
+          : 'hover:bg-slate-100 dark:hover:bg-gray-700/30 border-l-2 border-transparent'
       }`}
     >
-      <div className={`p-2 rounded-lg bg-gray-700/50 ${config.color}`}>
+      <div className={`p-2 rounded-lg bg-slate-100 dark:bg-gray-700/50 ${config.color}`}>
         {React.createElement(IconComponent, { className: 'h-4 w-4' })}
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <span className="font-medium text-white truncate">{permission.name}</span>
+          <span className="font-medium text-slate-900 dark:text-white truncate">{permission.name}</span>
           {permission.is_system && (
             <span title="System permission">
               <Lock className="h-3 w-3 text-gray-500 shrink-0" />
             </span>
           )}
         </div>
-        <code className="text-xs text-gray-400 font-mono">{permission.code}</code>
+        <code className="text-xs text-slate-500 dark:text-gray-400 font-mono">{permission.code}</code>
       </div>
       <ChevronRight className="h-4 w-4 text-gray-500 shrink-0" />
     </button>
@@ -383,13 +383,13 @@ function PermissionDetailPanel({
   const CategoryIcon = config.icon;
 
   return (
-    <div className="bg-gray-800 rounded-lg border border-gray-700 sticky top-4">
+    <div className="bg-white dark:bg-gray-800 rounded-lg border border-slate-200 dark:border-gray-700 sticky top-4">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-700">
-        <h3 className="font-medium text-white">Permission Details</h3>
+      <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-gray-700">
+        <h3 className="font-medium text-slate-900 dark:text-white">Permission Details</h3>
         <button
           onClick={onClose}
-          className="text-gray-400 hover:text-white transition-colors"
+          className="text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"
         >
           &times;
         </button>
@@ -399,7 +399,7 @@ function PermissionDetailPanel({
       <div className="p-4 space-y-4">
         {/* Name and Code */}
         <div>
-          <h4 className="text-lg font-medium text-white">{permission.name}</h4>
+          <h4 className="text-lg font-medium text-slate-900 dark:text-white">{permission.name}</h4>
           <code className="text-sm text-blue-400 font-mono">{permission.code}</code>
         </div>
 
@@ -407,7 +407,7 @@ function PermissionDetailPanel({
         {permission.description && (
           <div>
             <label className="text-xs text-gray-500 uppercase tracking-wide">Description</label>
-            <p className="text-sm text-gray-300 mt-1">{permission.description}</p>
+            <p className="text-sm text-slate-700 dark:text-gray-300 mt-1">{permission.description}</p>
           </div>
         )}
 
@@ -416,7 +416,7 @@ function PermissionDetailPanel({
           <label className="text-xs text-gray-500 uppercase tracking-wide">Category</label>
           <div className="flex items-center gap-2 mt-1">
             <CategoryIcon className={`h-4 w-4 ${config.color}`} />
-            <span className="text-sm text-gray-300">{config.label}</span>
+            <span className="text-sm text-slate-700 dark:text-gray-300">{config.label}</span>
           </div>
         </div>
 
@@ -424,16 +424,16 @@ function PermissionDetailPanel({
         {permission.resource_type && (
           <div>
             <label className="text-xs text-gray-500 uppercase tracking-wide">Resource Type</label>
-            <p className="text-sm text-gray-300 mt-1">{permission.resource_type}</p>
+            <p className="text-sm text-slate-700 dark:text-gray-300 mt-1">{permission.resource_type}</p>
           </div>
         )}
 
         {/* System Permission Badge */}
         {permission.is_system && (
-          <div className="flex items-center gap-2 p-3 bg-gray-700/50 rounded-lg">
+          <div className="flex items-center gap-2 p-3 bg-slate-100 dark:bg-gray-700/50 rounded-lg">
             <Lock className="h-4 w-4 text-gray-400" />
             <div>
-              <p className="text-sm font-medium text-gray-300">System Permission</p>
+              <p className="text-sm font-medium text-slate-700 dark:text-gray-300">System Permission</p>
               <p className="text-xs text-gray-500">This permission cannot be modified or deleted</p>
             </div>
           </div>
