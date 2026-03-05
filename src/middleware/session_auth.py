@@ -27,6 +27,8 @@ class _AuthenticatedUser:
     __slots__ = (
         "id", "username", "email", "is_active", "role",
         "is_super_admin", "primary_organization_id",
+        # Profile fields needed by /api/auth/me
+        "full_name", "created_at", "updated_at", "last_login",
         # AI/settings fields needed by /api/settings/* routes
         "preferred_model", "ai_temperature", "ai_max_tokens",
         "user_anthropic_api_key", "user_openai_api_key",
@@ -42,6 +44,11 @@ class _AuthenticatedUser:
         self.role = getattr(user, "role", "viewer")
         self.is_super_admin = getattr(user, "is_super_admin", False)
         self.primary_organization_id = getattr(user, "primary_organization_id", None)
+        # Profile fields
+        self.full_name = getattr(user, "full_name", None)
+        self.created_at = getattr(user, "created_at", None)
+        self.updated_at = getattr(user, "updated_at", None)
+        self.last_login = getattr(user, "last_login", None)
         # AI settings
         self.preferred_model = getattr(user, "preferred_model", None)
         self.ai_temperature = getattr(user, "ai_temperature", None)

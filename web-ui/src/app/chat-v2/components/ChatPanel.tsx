@@ -19,6 +19,7 @@ import { IncidentContextCard, hasIncidentContext } from './IncidentContextCard';
 import { PathAnalysisContextCard, hasPathAnalysisContext } from './PathAnalysisContextCard';
 import { TestDataPointContextCard, hasTestDataPointContext } from './TestDataPointContextCard';
 import { TEAnalysisContextCard, hasTEAnalysisContext } from './TEAnalysisContextCard';
+import { SplunkAnalysisContextCard, hasSplunkAnalysisContext } from './SplunkAnalysisContextCard';
 import PendingActionsBar from '@/components/cards/PendingActionsBar';
 
 // =============================================================================
@@ -301,9 +302,11 @@ const Message = memo(({ message, isHighlighted, onMouseEnter, onMouseLeave, isLa
   const showTestDataPointCard = isUser && hasTestDataPointContext(message.metadata);
   // Check if this message has generic TE analysis context (from any ThousandEyes "Ask AI" button)
   const showTEAnalysisCard = isUser && hasTEAnalysisContext(message.metadata);
+  // Check if this message has Splunk analysis context (from Splunk page "Ask AI" buttons)
+  const showSplunkAnalysisCard = isUser && hasSplunkAnalysisContext(message.metadata);
 
   // Show analyzing state only if this is the last user message and AI is still responding
-  const isAnalyzing = (showIncidentCard || showPathAnalysisCard || showTestDataPointCard || showTEAnalysisCard) && isLastMessage && isStreaming;
+  const isAnalyzing = (showIncidentCard || showPathAnalysisCard || showTestDataPointCard || showTEAnalysisCard || showSplunkAnalysisCard) && isLastMessage && isStreaming;
 
   return (
     <div
@@ -344,6 +347,14 @@ const Message = memo(({ message, isHighlighted, onMouseEnter, onMouseLeave, isLa
           />
         )}
 
+        {/* Splunk Analysis Context Card - shown above user message from Splunk "Ask AI" buttons */}
+        {showSplunkAnalysisCard && (
+          <SplunkAnalysisContextCard
+            data={message.metadata!.splunkAnalysisContext!.data}
+            isAnalyzing={isAnalyzing}
+          />
+        )}
+
         <div
           className={`rounded-2xl px-5 py-3.5 overflow-hidden transition-all duration-200 ${
             isUser
@@ -370,6 +381,10 @@ const Message = memo(({ message, isHighlighted, onMouseEnter, onMouseLeave, isLa
             ) : showTEAnalysisCard ? (
               <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">
                 Analyze this {message.metadata!.teAnalysisContext!.data.category.replace('-', ' ')} and provide insights.
+              </p>
+            ) : showSplunkAnalysisCard ? (
+              <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">
+                Run {message.metadata!.splunkAnalysisContext!.data.category === 'security-briefing' ? 'a security intelligence briefing' : `a ${message.metadata!.splunkAnalysisContext!.data.category.replace('-', ' ')} analysis`} and provide recommendations.
               </p>
             ) : (
               <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{message.content}</p>

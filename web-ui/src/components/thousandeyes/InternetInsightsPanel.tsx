@@ -3,7 +3,7 @@
 import { memo, useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   Globe, Loader2, Eye, EyeOff, Search, X, ChevronDown, ChevronUp,
-  Activity, AlertTriangle, Monitor, BookmarkCheck,
+  Activity, AlertTriangle, Monitor, BookmarkCheck, MapPin, Check,
 } from 'lucide-react';
 import { geoNaturalEarth1, geoPath } from 'd3-geo';
 import { feature } from 'topojson-client';
@@ -237,6 +237,77 @@ function getProviderCoords(
   const jitterLng = ((hash * 31) % 12) - 6;
   const jitterLat = ((hash * 47) % 8) - 4;
   return [anchor[0] + jitterLng, anchor[1] + jitterLat];
+}
+
+// ============================================================================
+// Continent Classification
+// ============================================================================
+
+type Continent = 'North America' | 'South America' | 'Europe' | 'Asia' | 'Oceania' | 'Africa';
+
+const ALL_CONTINENTS: Continent[] = ['North America', 'South America', 'Europe', 'Asia', 'Oceania', 'Africa'];
+
+/** Classify a [lng, lat] coordinate into a continent using bounding regions */
+function classifyContinent(coords: [number, number]): Continent {
+  const [lng, lat] = coords;
+
+  // Oceania: Australia, NZ, Pacific islands
+  if (lat < -10 && lng > 100) return 'Oceania';
+
+  // South America
+  if (lat < 15 && lng > -85 && lng < -30) return 'South America';
+
+  // Africa
+  if (lng > -20 && lng < 55 && lat < 37 && lat > -40) {
+    // Exclude Middle East / Europe overlap — anything east of Suez with lat > 12 might be ME → Asia
+    if (lng > 25 && lat > 12) return 'Asia';
+    return 'Africa';
+  }
+
+  // North America (including Central America, Caribbean)
+  if (lng > -170 && lng < -30 && lat >= 15) return 'North America';
+  if (lng > -120 && lng < -60 && lat >= 7 && lat < 15) return 'North America';
+
+  // Europe
+  if (lng > -25 && lng < 40 && lat >= 35 && lat < 72) return 'Europe';
+
+  // Asia (everything else in eastern hemisphere or high-lat Russia)
+  if (lng >= 25 || (lng > -170 && lng < -130 && lat > 50)) return 'Asia';
+
+  // Default fallback
+  return 'North America';
+}
+
+/** Get continent for a provider by looking up its coordinates */
+function getProviderContinent(
+  providerName: string,
+  catalogRegionMap: Map<string, string>,
+): Continent {
+  const coords = getProviderCoords(providerName, catalogRegionMap.get(providerName));
+  return classifyContinent(coords);
+}
+
+// Continent filter persistence
+const CONTINENT_FILTER_KEY = 'te-internet-insights-continents';
+
+function loadContinentFilter(): Set<Continent> {
+  try {
+    const raw = localStorage.getItem(CONTINENT_FILTER_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw) as string[];
+      const valid = arr.filter(c => ALL_CONTINENTS.includes(c as Continent)) as Continent[];
+      if (valid.length > 0) return new Set(valid);
+    }
+  } catch { /* ignore */ }
+  return new Set<Continent>(); // empty = all continents (no filter)
+}
+
+function saveContinentFilter(set: Set<Continent>) {
+  if (set.size === 0) {
+    localStorage.removeItem(CONTINENT_FILTER_KEY);
+  } else {
+    localStorage.setItem(CONTINENT_FILTER_KEY, JSON.stringify([...set]));
+  }
 }
 
 // ============================================================================
@@ -781,11 +852,15 @@ export const InternetInsightsPanel = memo(({ onAskAI }: InternetInsightsPanelPro
   const [showWatchlistModal, setShowWatchlistModal] = useState(false);
   const [expandedOutage, setExpandedOutage] = useState<string | null>(null);
   const [catalogProviders, setCatalogProviders] = useState<InternetInsightsCatalogProvider[]>([]);
+  const [continentFilter, setContinentFilter] = useState<Set<Continent>>(new Set());
+  const [showContinentDropdown, setShowContinentDropdown] = useState(false);
+  const continentDropdownRef = useRef<HTMLDivElement>(null);
   const feedRef = useRef<HTMLDivElement>(null);
 
-  // Load watchlist from localStorage on mount
+  // Load watchlist + continent filter from localStorage on mount
   useEffect(() => {
     setWatchlist(loadWatchlist());
+    setContinentFilter(loadContinentFilter());
   }, []);
 
   // Fetch catalog providers (for watchlist)
@@ -895,6 +970,14 @@ export const InternetInsightsPanel = memo(({ onAskAI }: InternetInsightsPanelPro
   }, [fetchOutages]);
 
   // ---- Derived data ----
+  const catalogRegionMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of catalogProviders) {
+      if (p.region) m.set(p.providerName.toLowerCase(), p.region);
+    }
+    return m;
+  }, [catalogProviders]);
+
   const allProviders = useMemo(() => {
     const fromOutages = outages.map(o => o.providerName);
     const fromCatalog = catalogProviders.map(p => p.providerName);
@@ -905,8 +988,15 @@ export const InternetInsightsPanel = memo(({ onAskAI }: InternetInsightsPanelPro
     let result = outages;
     if (filter !== 'all') result = result.filter(o => o.type === filter);
     if (watchlistOnly && watchlist.size > 0) result = result.filter(o => watchlist.has(o.providerName));
+    // Continent filter
+    if (continentFilter.size > 0) {
+      result = result.filter(o => {
+        const continent = getProviderContinent(o.providerName, catalogRegionMap);
+        return continentFilter.has(continent);
+      });
+    }
     return result;
-  }, [outages, filter, watchlistOnly, watchlist]);
+  }, [outages, filter, watchlistOnly, watchlist, continentFilter, catalogRegionMap]);
 
   const totalPages = Math.max(1, Math.ceil(filteredOutages.length / pageSize));
   const paginatedOutages = useMemo(() => {
@@ -923,6 +1013,35 @@ export const InternetInsightsPanel = memo(({ onAskAI }: InternetInsightsPanelPro
       watched: watchlist.size,
     };
   }, [outages, watchlist]);
+
+  // ---- Continent filter handlers ----
+  const toggleContinent = useCallback((c: Continent) => {
+    setContinentFilter(prev => {
+      const next = new Set(prev);
+      if (next.has(c)) next.delete(c); else next.add(c);
+      saveContinentFilter(next);
+      setPage(1);
+      return next;
+    });
+  }, []);
+
+  const clearContinentFilter = useCallback(() => {
+    setContinentFilter(new Set());
+    saveContinentFilter(new Set());
+    setPage(1);
+  }, []);
+
+  // Close continent dropdown on outside click
+  useEffect(() => {
+    if (!showContinentDropdown) return;
+    const handler = (e: MouseEvent) => {
+      if (continentDropdownRef.current && !continentDropdownRef.current.contains(e.target as Node)) {
+        setShowContinentDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showContinentDropdown]);
 
   // ---- Watchlist handlers ----
   const toggleWatchlist = useCallback((name: string) => {
@@ -1008,6 +1127,58 @@ export const InternetInsightsPanel = memo(({ onAskAI }: InternetInsightsPanelPro
           <button onClick={() => { setFilter('network'); setPage(1); }} className={pillClass(filter === 'network')}>Network</button>
         </div>
         <div className="flex items-center gap-2">
+          {/* Continent filter dropdown */}
+          <div ref={continentDropdownRef} className="relative">
+            <button
+              onClick={() => setShowContinentDropdown(v => !v)}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                continentFilter.size > 0
+                  ? 'bg-purple-100 dark:bg-purple-500/20 border-purple-300 dark:border-purple-500/40 text-purple-700 dark:text-purple-400'
+                  : 'bg-white dark:bg-slate-800/50 border-slate-200 dark:border-slate-700/50 text-slate-600 dark:text-slate-400 hover:border-purple-300 dark:hover:border-purple-500/40'
+              }`}
+            >
+              <MapPin className="w-3.5 h-3.5" />
+              {continentFilter.size > 0 ? `${continentFilter.size} Region${continentFilter.size > 1 ? 's' : ''}` : 'Regions'}
+              <ChevronDown className={`w-3 h-3 transition-transform ${showContinentDropdown ? 'rotate-180' : ''}`} />
+            </button>
+            {showContinentDropdown && (
+              <div className="absolute right-0 top-full mt-1 z-50 w-52 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden">
+                <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-700/50 flex items-center justify-between">
+                  <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500 dark:text-slate-400">Filter by Region</span>
+                  {continentFilter.size > 0 && (
+                    <button onClick={clearContinentFilter} className="text-[10px] text-purple-600 dark:text-purple-400 hover:underline">
+                      Clear all
+                    </button>
+                  )}
+                </div>
+                <div className="py-1">
+                  {ALL_CONTINENTS.map(c => {
+                    const selected = continentFilter.has(c);
+                    return (
+                      <button
+                        key={c}
+                        onClick={() => toggleContinent(c)}
+                        className={`flex items-center gap-2.5 w-full px-3 py-2 text-left text-xs transition-colors ${
+                          selected
+                            ? 'bg-purple-50 dark:bg-purple-500/10 text-purple-700 dark:text-purple-300'
+                            : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50'
+                        }`}
+                      >
+                        <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${
+                          selected
+                            ? 'bg-purple-600 border-purple-600'
+                            : 'border-slate-300 dark:border-slate-600'
+                        }`}>
+                          {selected && <Check className="w-3 h-3 text-white" />}
+                        </div>
+                        {c}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
           {/* Watchlist filter toggle */}
           <button
             onClick={() => { setWatchlistOnly(v => !v); setPage(1); }}
@@ -1062,7 +1233,9 @@ export const InternetInsightsPanel = memo(({ onAskAI }: InternetInsightsPanelPro
               </div>
               <p className="text-sm font-medium text-green-700 dark:text-green-400">No outages detected</p>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                {watchlistOnly ? 'No outages for watched providers in this window' : 'All clear in the selected time window'}
+                {watchlistOnly ? 'No outages for watched providers in this window'
+                  : continentFilter.size > 0 ? `No outages in selected region${continentFilter.size > 1 ? 's' : ''} for this time window`
+                  : 'All clear in the selected time window'}
               </p>
             </div>
           ) : (

@@ -102,13 +102,14 @@ export function useCardData({
   // Check if we can fetch (have endpoint and required scope)
   const canFetch = endpoint !== null;
 
-  // For cards without endpoints, get the empty state from transformer immediately
-  const noEndpointData = !canFetch && config?.transformData
+  // For no-endpoint cards, only generate empty state when no initialData provided
+  const noEndpointData = !canFetch && !initialData && config?.transformData
     ? config.transformData(null)
     : undefined;
 
-  // Transform initial data if provided (so it matches the format of fetched data)
-  const transformedInitialData = initialData && config?.transformData
+  // For no-endpoint cards (AI cards), pass initialData through untouched
+  // For API-fetched cards, transform initialData to match fetched format
+  const transformedInitialData = initialData && canFetch && config?.transformData
     ? config.transformData(initialData)
     : initialData;
 

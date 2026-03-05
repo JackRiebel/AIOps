@@ -10,6 +10,7 @@ export { usePathAnalysisIngestion } from './usePathAnalysisIngestion';
 export { useTestDataPointIngestion } from './useTestDataPointIngestion';
 export { useTEAnalysisIngestion } from './useTEAnalysisIngestion';
 export { useQueryIngestion } from './useQueryIngestion';
+export { useSplunkAnalysisIngestion } from './useSplunkAnalysisIngestion';
 export { useCardTemplates } from './useCardTemplates';
 
 export type { UseSessionReturn } from './useSession';
@@ -44,6 +45,11 @@ export type {
   UseQueryIngestionReturn,
   QueryIngestionState,
 } from './useQueryIngestion';
+export type {
+  UseSplunkAnalysisIngestionReturn,
+  SplunkAnalysisState,
+  SplunkAnalysisPayload,
+} from './useSplunkAnalysisIngestion';
 export type {
   UseCardTemplatesReturn,
   CardScope,

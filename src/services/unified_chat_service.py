@@ -618,6 +618,7 @@ TOOL_CARD_MAPPING = {
     "meraki_wireless_list_ssids": "meraki_ssid_clients",
     "meraki_wireless_get_ssid": "meraki_ssid_clients",
     "meraki_wireless_get_mesh_statuses": "meraki_device_table",
+    "meraki_analyze_network_wireless": "meraki_rf_health",
 
     # ThousandEyes
     "thousandeyes_list_tests": "te_test_results",
@@ -1045,6 +1046,36 @@ def _transform_card_data(card_type: str, raw_data: Any, tool_name: str) -> Any:
                         {"label": "Non-WiFi", "value": round(total_non_wifi / count, 1), "max": 100, "unit": "%"},
                     ]
             elif isinstance(raw_data, dict):
+                # Composite wireless analysis format from meraki_analyze_network_wireless
+                if "wireless_devices" in raw_data or "channel_utilization" in raw_data:
+                    gauges = []
+                    devices = raw_data.get("wireless_devices", [])
+                    chan_util = raw_data.get("channel_utilization")
+
+                    # Channel utilization gauges
+                    if chan_util and isinstance(chan_util, dict):
+                        util_24 = chan_util.get("band_2_4_ghz_avg", 0)
+                        util_5 = chan_util.get("band_5_ghz_avg", 0)
+                        gauges.append({"label": "2.4 GHz Util", "value": util_24, "max": 100, "unit": "%"})
+                        gauges.append({"label": "5 GHz Util", "value": util_5, "max": 100, "unit": "%"})
+                    else:
+                        gauges.append({"label": "2.4 GHz Util", "value": 0, "max": 100, "unit": "%"})
+                        gauges.append({"label": "5 GHz Util", "value": 0, "max": 100, "unit": "%"})
+
+                    # AP status gauge
+                    if devices:
+                        total_aps = len(devices)
+                        online_aps = len([d for d in devices if d.get("status") == "online"])
+                        gauges.append({"label": "APs Online", "value": online_aps, "max": total_aps, "unit": f"/{total_aps}"})
+                    else:
+                        gauges.append({"label": "APs", "value": 0, "max": 0, "unit": ""})
+
+                    # SSIDs gauge
+                    ssids = raw_data.get("ssids", [])
+                    gauges.append({"label": "SSIDs Active", "value": len(ssids), "max": 15, "unit": ""})
+
+                    return gauges
+
                 # Signal quality / single-device stats
                 gauges = []
                 if "signalStrength" in raw_data or "snr" in raw_data:
@@ -1126,6 +1157,52 @@ def _transform_card_data(card_type: str, raw_data: Any, tool_name: str) -> Any:
                 # Could be a single event or wrapped
                 events = raw_data.get("events", raw_data.get("results", [raw_data]))
                 return events if isinstance(events, list) else [events]
+            return raw_data
+
+        # VLAN list → ensure list format
+        if card_type == "meraki_vlan_list":
+            if isinstance(raw_data, dict):
+                # Unwrap if data is in a wrapper like {"vlans": [...]}
+                vlans = raw_data.get("vlans", raw_data.get("results", raw_data.get("data", None)))
+                if isinstance(vlans, list):
+                    return vlans
+                return [raw_data]
+            return raw_data
+
+        # TE test results → normalize to list of tests
+        if card_type == "te_test_results":
+            if isinstance(raw_data, dict):
+                tests = raw_data.get("test", raw_data.get("tests", raw_data.get("results", None)))
+                if isinstance(tests, list):
+                    return tests
+                if tests is not None:
+                    return [tests]
+                return [raw_data]
+            return raw_data
+
+        # Catalyst site health → extract healthScore to gauge format
+        if card_type == "catalyst_site_health":
+            if isinstance(raw_data, dict):
+                health = raw_data.get("healthScore", raw_data.get("overallHealth", None))
+                if health is not None:
+                    score = health if isinstance(health, (int, float)) else 0
+                    return {"value": score, "max": 100, "label": "Site Health", "unit": "%"}
+                # Check for response wrapper
+                response = raw_data.get("response", None)
+                if isinstance(response, list) and len(response) > 0:
+                    first = response[0]
+                    if isinstance(first, dict):
+                        score = first.get("healthScore", first.get("overallHealth", 0))
+                        return {"value": score, "max": 100, "label": "Site Health", "unit": "%"}
+            return raw_data
+
+        # Catalyst device inventory → ensure list format
+        if card_type == "catalyst_device_inventory":
+            if isinstance(raw_data, dict):
+                devices = raw_data.get("response", raw_data.get("devices", raw_data.get("results", None)))
+                if isinstance(devices, list):
+                    return devices
+                return [raw_data]
             return raw_data
 
         # Default: return raw data unchanged
@@ -2502,10 +2579,11 @@ AVAILABLE PLATFORMS:
 9. **RESPONSE FORMATTING FOR CARDS**: When tools return data arrays (devices, VLANs, rules, etc.):
    - SUMMARIZE key findings in natural language (counts, highlights, notable issues)
    - DO NOT dump raw JSON, full data arrays, or verbose tool output in your response
-   - The raw data is automatically available via "Add to Canvas" buttons - users click these for details
-   - Example GOOD: "Found 13 devices on Demo Home: 1 MX security appliance, 4 access points, 2 switches, and 6 sensors. Note: MS-220 switch has outdated firmware."
-   - Example BAD: Pasting full device list with all properties in the response
-   - Keep responses concise (2-5 sentences) with actionable insights, not data dumps
+   - The raw data is automatically available via canvas cards - users can explore details there
+   - For STATUS queries: 2-4 sentences summarizing counts and notable issues
+   - For INVESTIGATION queries: Full analysis with root cause, findings, and remediation (see ANALYSIS RESPONSE FORMAT)
+   - Example GOOD: "Found 13 devices on Demo Home: 1 MX, 4 APs, 2 switches, 6 sensors. The MS-220 switch is running firmware 14.28 (latest is 15.21) — recommend scheduling an upgrade during maintenance window to patch CVE-2024-1234."
+   - Example BAD: Pasting full device list with all properties, or just "I've added a device card."
 10. **THINK TOOL**: For investigation queries, use `think` between tool calls to analyze results and plan next steps. It is free (no API cost). Use it after receiving data-gathering tool results.
 
 **DATA INTEGRITY** (Critical):
@@ -2635,33 +2713,45 @@ Format by Query Type:
 - CONFIGURATION queries (create VLAN, update firewall): Confirm action, show proposed changes, list prerequisites, note risks
 
 **ANALYSIS RESPONSE FORMAT** (MANDATORY for troubleshooting/investigation queries):
-Keep analysis responses SHORT and ACTIONABLE. Structure:
-- Single-platform queries: Maximum 150 words
-- Multi-platform investigations (2+ data sources): Maximum 300 words for proper cross-platform correlation
+Provide thorough, evidence-based analysis. Cards visualize data; your text explains what it MEANS.
+- Single-platform queries: 150-250 words
+- Multi-platform investigations (2+ data sources): 300-500 words for cross-platform correlation
 
-**Summary**: One sentence stating the core issue + key metric.
+Required structure:
 
-**Cause**: One sentence on root cause (or "Investigating..." if unclear).
+**Summary**: 1-2 sentences with key metrics and the core finding.
 
-**Action**: 1-2 specific next steps.
+**Key Findings**: 2-4 bullet points with specific numbers, affected devices/services, and comparisons to expected baselines.
 
-EXAMPLE (good - concise):
-"**Summary**: 90% WiFi success rate (below 95% target) - 738 disconnects in 24h.
+**Root Cause**: 2-3 sentences explaining WHY the issue is happening, citing evidence from the data. If uncertain, state what evidence points toward and what additional investigation is needed.
 
-**Cause**: 92% of disconnects are 'client inactive' timeouts, not auth failures (only 3 WPA failures).
+**Recommended Actions**: 3-5 numbered, specific remediation steps. For each step, briefly explain why it addresses the root cause.
 
-**Action**:
-1. Increase idle timeout on 'Corp-WiFi' SSID
-2. Check client power management settings"
+EXAMPLE (good - thorough analysis):
+"**Summary**: 90% WiFi success rate (below 95% target) with 738 disconnects in 24h, concentrated on a single AP.
 
-EXAMPLE (bad - too verbose):
-"I've analyzed the data and found several interesting patterns. Let me walk through each query result..."
+**Key Findings**:
+- 92% of failures are 'client inactive' timeouts on 'Corp-WiFi' SSID
+- AP Q2KD-J5A6 accounts for 680 of 738 disconnects (92%)
+- Only 3 WPA auth failures — authentication infrastructure is healthy
+- Peak disconnect time: 2-4 PM daily (high-density usage period)
+
+**Root Cause**: The idle timeout on 'Corp-WiFi' SSID is too aggressive (5 min), causing devices in power-save mode to be disconnected during peak hours. AP Q2KD-J5A6's disproportionate failure count suggests it also has a coverage gap forcing more client roaming.
+
+**Recommended Actions**:
+1. Increase idle timeout to 30 min on 'Corp-WiFi' SSID — prevents premature disconnections for idle clients
+2. Check RF signal strength on AP Q2KD-J5A6 — may need repositioning or power adjustment
+3. Review client power management policies — corporate devices may be entering sleep too aggressively
+4. Monitor for 48h after changes to confirm improvement"
+
+EXAMPLE (bad - no analysis):
+"I've added WiFi monitoring cards to your canvas. These provide an overview of wireless performance."
 
 DO NOT:
-- List every query you ran
-- Repeat raw data from tool results
-- Add filler phrases ("Let me check...", "I found that...")
-- Exceed the word limit above
+- List every query you ran or announce tool calls
+- Repeat raw data from tool results (cards show the raw data)
+- Add filler phrases ("Let me check...", "I found that...", "Let me walk through...")
+- Give cards without analysis — always explain what the data means
 
 Verbosity Level: {verbosity.upper()}
 {self._get_verbosity_instructions(verbosity)}
@@ -2709,14 +2799,14 @@ Avoid:
 - "I'll need to use another tool..."
 
 **SEAMLESS EXPERIENCE** (CRITICAL - Follow strictly):
-- Execute tools SILENTLY - the user should only see results, never process
+- Execute tools SILENTLY - don't narrate the tool-calling process to the user
 - If a tool fails, try alternatives WITHOUT announcing the failure
 - If you need more tools, use `request_more_tools` INVISIBLY - never mention it
 - NEVER announce retries, fallbacks, or tool switches
 - Present results as if you always knew exactly how to get them
 - The response should read like expert analysis, NOT a debugging log
-- When something doesn't work, quietly try another approach
-- Only show the successful result, not the journey to get there
+- "Seamless" means no process narration — it does NOT mean minimal analysis
+- Your analysis text should be thorough: explain findings, root causes, and next steps
 
 **CANVAS VISUALIZATION GUIDELINES** (Follow strictly):
 
@@ -2724,9 +2814,12 @@ TOOL SELECTION:
 - `canvas_add_dashboard`: Use for INCIDENT ANALYSIS and MULTI-CARD scenarios (2-4 cards at once)
 - `canvas_add_card`: Use for adding a SINGLE card
 
-WHEN TO ADD CARDS vs TEXT:
-- ADD cards when: user asks to "show/display/monitor" something, incident analysis, or data has tables/lists/metrics worth visualizing
-- TEXT ONLY when: simple factual answers, confirmations, brief status updates, or the answer is a single value
+CARDS AND TEXT WORK TOGETHER:
+- Cards visualize the DATA (metrics, device lists, timelines, charts)
+- Text provides the ANALYSIS (root cause, impact, remediation, next steps)
+- For any investigation or complex query: ALWAYS provide both cards AND detailed text analysis
+- Cards should NEVER replace your analysis — they enhance it by giving users interactive data to explore
+- TEXT ONLY when: simple factual answers, confirmations, or single-value lookups
 - NEVER add a card if the same card type is already on the canvas
 
 DASHBOARD SCENARIOS - Use canvas_add_dashboard based on query type:
@@ -2755,29 +2848,47 @@ AUTO-GENERATED CARDS:
 - You do NOT need to manually add cards for data you already fetched with tools
 - Only use canvas_add_card when you want to add a MONITORING card (live data refresh) or an AI contextual card with custom data
 
+AI CONTEXTUAL CARDS (IMPORTANT):
+When you have data from tool calls, use AI contextual cards to visualize key findings:
+
+- ai-metric: Single key value. card_data: {"label": "Uptime", "value": "99.7%", "unit": "%", "status": "good"}
+- ai-stats-grid: 2-6 related metrics. card_data: {"stats": [{"label": "Online", "value": 12}, {"label": "Offline", "value": 2}, ...]} (colors auto-inferred from label text)
+- ai-gauge: Percentage/progress. card_data: {"label": "CPU", "value": 78, "max": 100, "unit": "%"}
+- ai-breakdown: Distribution/composition. card_data: {"title": "Device Types", "items": [{"label": "APs", "value": 8}, ...]}
+- ai-finding: Issues/recommendations. card_data: {"severity": "warning", "title": "High Utilization", "description": "...", "recommendation": "..."}
+- ai-device-summary: Device info. card_data: {"name": "AP-Lobby", "model": "MR46", "status": "online", "ip": "10.0.0.1", "serial": "Q2XX-XXXX-XXXX"}
+
+ALWAYS include card_data when using AI contextual cards. Without card_data, the card will show empty.
+
+CARD DATA FLOW:
+- Live monitoring cards (meraki_*, te_*, splunk_*, catalyst_*): Frontend auto-fetches data. Just specify card_type and network_id/org_id.
+- AI contextual cards (ai-*): YOU must provide data via card_data. No API endpoint exists.
+- Knowledge cards: Provide data via card_data, citations, or products parameters.
+- Auto-generated cards: Created automatically from tool results. Don't duplicate with canvas_add_card.
+
 Card rules:
 1. Maximum 1 card per follow-up query via canvas_add_card
-2. After adding cards, briefly confirm: "I've added [X] to your canvas"
-3. Always include network_id when available
-4. For live monitoring cards, don't pre-populate data - let the card fetch its own
+2. Always include network_id when available
+3. For live monitoring cards, don't pre-populate data - let the card fetch its own
 
 Response format:
-- Keep text concise when cards provide the detail
+- Provide full analysis FIRST (findings, root cause, remediation), then mention cards at the end
 - DO NOT include raw JSON blocks in your text response
-- Example: "Here's a summary of the network health. I've added a monitoring card to your canvas."
+- Cards are supplementary visualization — your text analysis is the primary value
+- Example: "WiFi success rate is 84% with 48 failures concentrated on AP Q2KD. Root cause appears to be RF interference — the AP shows elevated noise floor on channel 6. I recommend switching to channel 11 and checking for co-channel interference from neighboring APs. I've added a WiFi performance card for ongoing monitoring."
 """
 
     def _get_verbosity_instructions(self, verbosity: str) -> str:
         """Get verbosity-specific instructions for system prompt."""
         instructions = {
-            "brief": """- Maximum 3-5 sentences for simple queries
+            "brief": """- Maximum 5-8 sentences for simple queries
 - Tables limited to 5 rows (note if more exist)
-- Skip detailed explanations
-- Focus on actionable answer only""",
-            "standard": """- Balanced detail level
-- Include context where helpful
+- Still include root cause and recommended actions, just concisely
+- Focus on actionable findings with evidence""",
+            "standard": """- Balanced detail level with thorough analysis
+- Include root cause analysis, evidence, and recommended actions
 - Full tables up to 15 rows
-- Explain reasoning briefly""",
+- Explain reasoning and cite specific data points from tool results""",
             "detailed": """- Comprehensive analysis
 - Include all relevant data
 - Explain methodology and reasoning

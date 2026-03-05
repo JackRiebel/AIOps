@@ -18,7 +18,7 @@
  */
 
 import { useCallback, useMemo, useState, useEffect, useRef, Suspense } from 'react';
-import { useSession, useStreaming, useOrganizationContext, useIncidentIngestion, usePathAnalysisIngestion, useTestDataPointIngestion, useTEAnalysisIngestion, useQueryIngestion } from './hooks';
+import { useSession, useStreaming, useOrganizationContext, useIncidentIngestion, usePathAnalysisIngestion, useTestDataPointIngestion, useTEAnalysisIngestion, useSplunkAnalysisIngestion, useQueryIngestion } from './hooks';
 import { useAISession } from '@/contexts/AISessionContext';
 import { ChatPanel } from './components/ChatPanel';
 import { MasonryCanvas } from './components/MasonryCanvas';
@@ -149,7 +149,21 @@ function ChatV2PageContent() {
     logAIQuery,
   });
 
-  // Generic ?q= query ingestion from URL params (used by Splunk, NetworkMapView, etc.)
+  // Splunk analysis ingestion from URL params
+  useSplunkAnalysisIngestion({
+    session,
+    sessionLoading,
+    isStreaming,
+    newSession,
+    addMessage,
+    addCard,
+    stream,
+    orgDisplayNames,
+    isAISessionActive,
+    logAIQuery,
+  });
+
+  // Generic ?q= query ingestion from URL params (used by NetworkMapView, etc.)
   useQueryIngestion({
     session,
     sessionLoading,

@@ -211,7 +211,62 @@ function SplunkPage() {
   }, [router, cc]);
 
   const handleAskAI = useCallback((query: string) => {
-    router.push(`/chat-v2?q=${encodeURIComponent(query)}`);
+    // Parse query to build structured Splunk analysis payload
+    type SplunkCategory = 'security-briefing' | 'firewall' | 'device-status' | 'access-anomaly' | 'threat-impact' | 'assessment' | 'general';
+    let category: SplunkCategory = 'general';
+    let title = 'Splunk Analysis';
+    const details: Record<string, string | number | undefined> = {};
+
+    const lower = query.toLowerCase();
+    if (lower.includes('comprehensive') && lower.includes('security briefing')) {
+      category = 'security-briefing';
+      title = 'Security Intelligence Briefing';
+      const evtMatch = query.match(/([\d,]+)\s*events/i);
+      if (evtMatch) details['Events'] = evtMatch[1];
+      const findMatch = query.match(/(\d+)\s*categorized findings/i);
+      if (findMatch) details['Findings'] = findMatch[1];
+      const critMatch = query.match(/(\d+)\s*critical\/high/i);
+      if (critMatch) details['Critical/High'] = critMatch[1];
+      const merakiMatch = query.match(/Meraki:\s*(\d+)\s*devices/i);
+      if (merakiMatch) details['Meraki Devices'] = merakiMatch[1];
+      const catMatch = query.match(/Catalyst:\s*(\d+)\s*devices/i);
+      if (catMatch) details['Catalyst Devices'] = catMatch[1];
+    } else if (lower.includes('firewall') && (lower.includes('deny') || lower.includes('drop') || lower.includes('blocked'))) {
+      category = 'firewall';
+      title = 'Firewall Event Analysis';
+      const devMatch = query.match(/(\d+)\s*Meraki devices/i);
+      if (devMatch) details['Devices'] = devMatch[1];
+    } else if (lower.includes('device status') || lower.includes('status changes')) {
+      category = 'device-status';
+      title = 'Device Status Analysis';
+      const offMatch = query.match(/(\d+)\s*offline/i);
+      if (offMatch) details['Offline'] = offMatch[1];
+      const alertMatch = query.match(/(\d+)\s*alerting/i);
+      if (alertMatch) details['Alerting'] = alertMatch[1];
+    } else if (lower.includes('access') && lower.includes('anomal')) {
+      category = 'access-anomaly';
+      title = 'Access Anomaly Detection';
+    } else if (lower.includes('threat') && lower.includes('impact')) {
+      category = 'threat-impact';
+      title = 'Threat Impact Assessment';
+      const critMatch = query.match(/(\d+)\s*critical\/high/i);
+      if (critMatch) details['Critical/High'] = critMatch[1];
+    } else if (lower.includes('comprehensive') && lower.includes('assessment')) {
+      category = 'assessment';
+      title = 'Full Security Assessment';
+      const evtMatch = query.match(/([\d,]+)\s*total events/i);
+      if (evtMatch) details['Events'] = evtMatch[1];
+    }
+
+    const payload = {
+      message: query,
+      context: {
+        type: 'splunk_analysis' as const,
+        data: { category, title, details, message: query },
+      },
+    };
+    const encoded = btoa(encodeURIComponent(JSON.stringify(payload)));
+    router.push(`/chat-v2?new_session=true&splunk_analysis=${encodeURIComponent(encoded)}`);
   }, [router]);
 
   const handleSecuritySearch = useCallback((query: string) => {

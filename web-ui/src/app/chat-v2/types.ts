@@ -67,6 +67,11 @@ export interface ChatMessage {
       type: 'te_analysis';
       data: import('./components/TEAnalysisContextCard').TEAnalysisContextData;
     };
+    // Splunk analysis context from Splunk page "Ask AI" buttons
+    splunkAnalysisContext?: {
+      type: 'splunk_analysis';
+      data: import('./components/SplunkAnalysisContextCard').SplunkAnalysisContextData;
+    };
   };
 }
 

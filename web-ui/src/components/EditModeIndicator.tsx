@@ -1,18 +1,12 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-
-interface EditModeStatus {
-  edit_mode_enabled: boolean;
-  allowed_operations?: string[];
-}
 
 export default function EditModeIndicator() {
   const [editMode, setEditMode] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
+  const [toggling, setToggling] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
-  const router = useRouter();
 
   useEffect(() => {
     // Fetch edit mode status
@@ -22,8 +16,8 @@ export default function EditModeIndicator() {
           credentials: 'include',
         });
         if (response.ok) {
-          const data: EditModeStatus = await response.json();
-          setEditMode(data.edit_mode_enabled);
+          const data = await response.json();
+          setEditMode(data.edit_mode_enabled ?? data.enabled ?? false);
         }
       } catch (error) {
         console.error('Failed to fetch edit mode:', error);
@@ -63,8 +57,25 @@ export default function EditModeIndicator() {
     return null;
   }
 
-  const handleEditModeClick = () => {
-    router.push('/admin?tab=security');
+  const handleEditModeClick = async () => {
+    if (toggling) return;
+    setToggling(true);
+    try {
+      const response = await fetch('/api/security/edit-mode', {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !editMode }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setEditMode(data.edit_mode_enabled ?? data.enabled ?? !editMode);
+      }
+    } catch (error) {
+      console.error('Failed to toggle edit mode:', error);
+    } finally {
+      setToggling(false);
+    }
   };
 
   return (
@@ -72,15 +83,17 @@ export default function EditModeIndicator() {
       {/* Edit Mode Badge */}
       <button
         onClick={handleEditModeClick}
+        disabled={toggling}
         className={`
           flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium
           transition-colors cursor-pointer
+          ${toggling ? 'opacity-50 cursor-wait' : ''}
           ${editMode
             ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 hover:bg-amber-200 dark:hover:bg-amber-900/50'
             : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
           }
         `}
-        title={editMode ? 'AI can make changes (with approval) - Click to manage' : 'AI is in read-only mode - Click to enable edit mode'}
+        title={editMode ? 'Click to switch to read-only mode' : 'Click to enable edit mode'}
       >
         {editMode ? (
           <>

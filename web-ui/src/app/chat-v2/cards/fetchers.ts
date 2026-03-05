@@ -510,9 +510,45 @@ function transformRFHealth(data: unknown): Array<{ label: string; value: number;
     return { _emptyState: true, message: 'No RF health data available', icon: 'network' };
   }
 
+  // If data is already an array of gauge objects (pre-transformed by backend), pass through
+  if (Array.isArray(data)) {
+    return (data as Array<Record<string, unknown>>).map(item => ({
+      label: String(item.label || ''),
+      value: Number(item.value || 0),
+      min: Number(item.min || 0),
+      max: Number(item.max || 100),
+      unit: item.unit ? String(item.unit) : undefined,
+      status: item.status ? String(item.status) : undefined,
+    }));
+  }
+
   const obj = data as Record<string, unknown>;
 
-  // Get access points array
+  // Handle composite wireless analysis format (from meraki_analyze_network_wireless)
+  if ('wireless_devices' in obj || 'channel_utilization' in obj) {
+    const devices = obj.wireless_devices as Array<Record<string, unknown>> | undefined;
+    const chanUtil = obj.channel_utilization as Record<string, number> | undefined;
+    const ssids = obj.ssids as Array<unknown> | undefined;
+    const gauges: Array<{ label: string; value: number; min: number; max: number; unit?: string; status?: string }> = [];
+
+    const util24 = chanUtil?.band_2_4_ghz_avg || 0;
+    const util5 = chanUtil?.band_5_ghz_avg || 0;
+    gauges.push({ label: '2.4 GHz Util', value: util24, min: 0, max: 100, unit: '%', status: util24 > 70 ? 'warning' : 'good' });
+    gauges.push({ label: '5 GHz Util', value: util5, min: 0, max: 100, unit: '%', status: util5 > 70 ? 'warning' : 'good' });
+
+    if (Array.isArray(devices) && devices.length > 0) {
+      const online = devices.filter(d => d.status === 'online').length;
+      gauges.push({ label: 'APs Online', value: online, min: 0, max: devices.length, unit: '', status: online === devices.length ? 'good' : 'warning' });
+    }
+
+    if (Array.isArray(ssids)) {
+      gauges.push({ label: 'SSIDs Active', value: ssids.length, min: 0, max: 15, unit: '' });
+    }
+
+    return gauges;
+  }
+
+  // Get access points array (from /api/cards/wireless-overview endpoint)
   const aps = obj.accessPoints as Array<Record<string, unknown>> | undefined;
   if (!Array.isArray(aps) || aps.length === 0) {
     return { _emptyState: true, message: 'No wireless access points in this network', icon: 'network' };
@@ -1074,6 +1110,60 @@ export const CARD_FETCHERS: Partial<Record<AllCardTypes, FetchConfig>> = {
     refreshInterval: 60000,
   },
 
+  meraki_firewall_rules: {
+    buildEndpoint: (scope) =>
+      scope.networkId
+        ? `/api/meraki/networks/${encodeURIComponent(scope.networkId)}/firewall/l3/rules?organization=${encodeURIComponent(scope.credentialOrg || '')}`
+        : null,
+    transformData: (data: unknown) => {
+      if (!data || typeof data !== 'object') {
+        return { _emptyState: true, message: 'No firewall rules configured', icon: 'security' };
+      }
+      const obj = data as Record<string, unknown>;
+      const rules = (obj.rules || obj) as Array<Record<string, unknown>>;
+      if (!Array.isArray(rules) || rules.length === 0) {
+        return { _emptyState: true, message: 'No L3 firewall rules configured', icon: 'security' };
+      }
+      return rules.map((rule, i) => ({
+        id: String(i + 1),
+        policy: String(rule.policy || 'allow'),
+        protocol: String(rule.protocol || 'any'),
+        srcCidr: String(rule.srcCidr || 'any'),
+        srcPort: String(rule.srcPort || 'any'),
+        destCidr: String(rule.destCidr || 'any'),
+        destPort: String(rule.destPort || 'any'),
+        comment: String(rule.comment || ''),
+      }));
+    },
+    requiredScope: ['networkId'],
+    refreshInterval: 60000,
+  },
+
+  meraki_vlan_list: {
+    buildEndpoint: (scope) =>
+      scope.networkId
+        ? withOrgQuery(`${API_BASE}/vlan/${scope.networkId}/data`, scope.credentialOrg)
+        : null,
+    transformData: (data: unknown) => {
+      if (!data || typeof data !== 'object') {
+        return { _emptyState: true, message: 'No VLANs configured - network may be in Single LAN mode', icon: 'network' };
+      }
+      const obj = data as Record<string, unknown>;
+      const vlans = (obj.vlans || obj) as Array<Record<string, unknown>>;
+      if (!Array.isArray(vlans) || vlans.length === 0) {
+        return { _emptyState: true, message: 'No VLANs configured - network may be in Single LAN mode', icon: 'network' };
+      }
+      return vlans.map((vlan) => ({
+        id: String(vlan.id || ''),
+        name: String(vlan.name || ''),
+        subnet: String(vlan.subnet || ''),
+        applianceIp: String(vlan.applianceIp || ''),
+      }));
+    },
+    requiredScope: ['networkId'],
+    refreshInterval: 60000,
+  },
+
   // ===========================================================================
   // ThousandEyes Cards - Using /api/thousandeyes/... endpoints
   // Note: All TE endpoints require ?organization= param (can be any value, token is used for auth)
@@ -1536,6 +1626,13 @@ export const CARD_FETCHERS: Partial<Record<AllCardTypes, FetchConfig>> = {
     },
     requiredScope: [],
     refreshInterval: 30000,
+  },
+
+  te_network_diagnostic: {
+    buildEndpoint: () => null,
+    transformData: () => ({ _emptyState: true, message: 'Cross-platform network diagnostic - requires active test selection', icon: 'network' }),
+    requiredScope: [],
+    refreshInterval: 0,
   },
 
   // ===========================================================================
@@ -2006,6 +2103,14 @@ export const CARD_FETCHERS: Partial<Record<AllCardTypes, FetchConfig>> = {
     refreshInterval: 0,
   },
 
+  catalyst_interfaces: {
+    // Catalyst Center requires DNA Center integration
+    buildEndpoint: () => null,
+    transformData: () => ({ _emptyState: true, message: 'Catalyst Center not configured - requires DNA Center integration', icon: 'config' }),
+    requiredScope: [],
+    refreshInterval: 0,
+  },
+
   // ===========================================================================
   // General Network Cards
   // Using Meraki Dashboard API endpoints for network visibility
@@ -2327,6 +2432,100 @@ export const CARD_FETCHERS: Partial<Record<AllCardTypes, FetchConfig>> = {
     },
     requiredScope: ['networkId'],
     refreshInterval: 60000,
+  },
+
+  // ===========================================================================
+  // AI / System Cards - Data provided by AI, not fetched from APIs
+  // ===========================================================================
+
+  ai_metric: {
+    buildEndpoint: () => null,
+    transformData: (data: unknown) => {
+      if (data && typeof data === 'object' && !((data as Record<string, unknown>)._emptyState)) return data;
+      return { _emptyState: true, message: 'AI-populated card - data provided during chat', icon: 'ai' };
+    },
+    requiredScope: [],
+    refreshInterval: 0,
+  },
+
+  ai_stats_grid: {
+    buildEndpoint: () => null,
+    transformData: (data: unknown) => {
+      if (data && typeof data === 'object' && !((data as Record<string, unknown>)._emptyState)) return data;
+      return { _emptyState: true, message: 'AI-populated card - data provided during chat', icon: 'ai' };
+    },
+    requiredScope: [],
+    refreshInterval: 0,
+  },
+
+  ai_gauge: {
+    buildEndpoint: () => null,
+    transformData: (data: unknown) => {
+      if (data && typeof data === 'object' && !((data as Record<string, unknown>)._emptyState)) return data;
+      return { _emptyState: true, message: 'AI-populated card - data provided during chat', icon: 'ai' };
+    },
+    requiredScope: [],
+    refreshInterval: 0,
+  },
+
+  ai_breakdown: {
+    buildEndpoint: () => null,
+    transformData: (data: unknown) => {
+      if (data && typeof data === 'object' && !((data as Record<string, unknown>)._emptyState)) return data;
+      return { _emptyState: true, message: 'AI-populated card - data provided during chat', icon: 'ai' };
+    },
+    requiredScope: [],
+    refreshInterval: 0,
+  },
+
+  ai_finding: {
+    buildEndpoint: () => null,
+    transformData: (data: unknown) => {
+      if (data && typeof data === 'object' && !((data as Record<string, unknown>)._emptyState)) return data;
+      return { _emptyState: true, message: 'AI-populated card - data provided during chat', icon: 'ai' };
+    },
+    requiredScope: [],
+    refreshInterval: 0,
+  },
+
+  ai_device_summary: {
+    buildEndpoint: () => null,
+    transformData: (data: unknown) => {
+      if (data && typeof data === 'object' && !((data as Record<string, unknown>)._emptyState)) return data;
+      return { _emptyState: true, message: 'AI-populated card - data provided during chat', icon: 'ai' };
+    },
+    requiredScope: [],
+    refreshInterval: 0,
+  },
+
+  knowledge_sources: {
+    buildEndpoint: () => null,
+    transformData: (data: unknown) => {
+      if (data && typeof data === 'object' && !((data as Record<string, unknown>)._emptyState)) return data;
+      return { _emptyState: true, message: 'AI-populated card - sources provided during chat', icon: 'ai' };
+    },
+    requiredScope: [],
+    refreshInterval: 0,
+  },
+
+  product_detail: {
+    buildEndpoint: () => null,
+    transformData: (data: unknown) => {
+      if (data && typeof data === 'object' && !((data as Record<string, unknown>)._emptyState)) return data;
+      return { _emptyState: true, message: 'AI-populated card - product data provided during chat', icon: 'ai' };
+    },
+    requiredScope: [],
+    refreshInterval: 0,
+  },
+
+  datasheet_comparison: {
+    buildEndpoint: () => null,
+    transformData: (data: unknown) => {
+      if (data && typeof data === 'object' && !((data as Record<string, unknown>)._emptyState)) return data;
+      return { _emptyState: true, message: 'AI-populated card - comparison data provided during chat', icon: 'ai' };
+    },
+    requiredScope: [],
+    refreshInterval: 0,
   },
 };
 

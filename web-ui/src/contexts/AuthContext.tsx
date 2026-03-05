@@ -37,26 +37,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [router]);
 
   async function checkAuth() {
+    // Use direct fetch instead of apiClient.getCurrentUser() to avoid
+    // triggering the global sessionExpiredHandler on 401. During initial
+    // auth check, a 401 is expected (not-logged-in) — not an expired session.
     const maxRetries = 2;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        const currentUser = await apiClient.getCurrentUser();
-        setUser(currentUser);
-        setLoading(false);
-        return;
-      } catch (error: any) {
-        // On 401, immediately clear user (session truly invalid)
-        if (error?.status === 401 || error?.response?.status === 401) {
+        const res = await fetch('/api/auth/me', {
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+        });
+
+        if (res.status === 401) {
+          // Not authenticated — expected on first visit or expired session
+          console.debug('[Auth] checkAuth: 401 — not authenticated');
           setUser(null);
           setLoading(false);
           return;
         }
-        // Transient error — retry before giving up
-        if (attempt < maxRetries) {
-          await new Promise((r) => setTimeout(r, 1500));
+
+        if (!res.ok) {
+          // Transient server error — retry
+          const text = await res.text().catch(() => '');
+          console.warn(`[Auth] checkAuth attempt ${attempt + 1}: ${res.status} ${text}`);
+          throw new Error(`Auth check failed: ${res.status}`);
+        }
+
+        const currentUser = await res.json();
+        setUser(currentUser);
+        setLoading(false);
+        return;
+      } catch (error: any) {
+        if (error?.message?.startsWith('Auth check failed:')) {
+          // Non-401 HTTP error — retry
         } else {
+          // Network/fetch error — retry
+          console.warn(`[Auth] checkAuth attempt ${attempt + 1} error:`, error?.message);
+        }
+
+        if (attempt >= maxRetries) {
+          console.error('[Auth] checkAuth: all retries exhausted, clearing user');
           setUser(null);
           setLoading(false);
+        } else {
+          await new Promise((r) => setTimeout(r, 1500));
         }
       }
     }

@@ -357,15 +357,49 @@ export function PathIntelligenceView({ tests: teTests, testResults: teTestResult
     fetchPathData(testId);
   }, [teTests, fetchTETestResults, fetchPathData]);
 
-  // AI analysis with full hop details
+  // AI analysis with structured path data → creates new session with cards
   const analyzePath = useCallback(() => {
     if (!selectedTest || pathHops.length === 0) return;
-    const hopDetails = pathHops.map(h => {
-      const zone = classifyZone(h, pathHops.indexOf(h), pathHops.length);
-      return `Hop ${h.hopNumber}: ${h.hostname || h.ipAddress} (${h.latency.toFixed(0)}ms, ${h.loss.toFixed(1)}% loss, zone=${zone}${h.network ? `, network=${h.network}` : ''})`;
-    }).join('. ');
-    const prompt = `Analyze ThousandEyes path for "${selectedTest.testName}" (${selectedTest.type}) with ${pathHops.length} hops: ${hopDetails}. Identify the bottleneck hop/zone and recommend specific optimizations.`;
-    router.push(`/chat-v2?q=${encodeURIComponent(prompt)}`);
+
+    const hops = pathHops.map((h, idx) => ({
+      hopNumber: h.hopNumber,
+      ip: h.ipAddress,
+      hostname: h.hostname || undefined,
+      latency: h.latency,
+      loss: h.loss,
+      zone: classifyZone(h, idx, pathHops.length),
+      network: h.network || undefined,
+    }));
+
+    const bottleneckHop = pathHops.reduce((max, h) => h.latency > max.latency ? h : max, pathHops[0]);
+    const bottleneckIdx = pathHops.indexOf(bottleneckHop);
+
+    const payload = {
+      message: `Analyze ThousandEyes path for "${selectedTest.testName}" (${selectedTest.type}) with ${pathHops.length} hops: ${hops.map(h => `Hop ${h.hopNumber}: ${h.hostname || h.ip} (${h.latency.toFixed(0)}ms, ${h.loss.toFixed(1)}% loss, zone=${h.zone}${h.network ? `, network=${h.network}` : ''})`).join('. ')}. Identify the bottleneck hop/zone and recommend specific optimizations.`,
+      context: {
+        type: 'path_analysis' as const,
+        pathData: {
+          providerName: selectedTest.testName,
+          hopCount: pathHops.length,
+          testId: selectedTest.testId,
+          hops,
+          bottleneck: {
+            hopNumber: bottleneckHop.hopNumber,
+            hostname: bottleneckHop.hostname || undefined,
+            ip: bottleneckHop.ipAddress,
+            latency: bottleneckHop.latency,
+            zone: classifyZone(bottleneckHop, bottleneckIdx, pathHops.length),
+          },
+          metrics: {
+            latency: Math.max(...pathHops.map(h => h.latency)),
+            loss: Math.max(...pathHops.map(h => h.loss)),
+          },
+        },
+      },
+    };
+
+    const encoded = btoa(encodeURIComponent(JSON.stringify(payload)));
+    router.push(`/chat-v2?new_session=true&path_analysis=${encodeURIComponent(encoded)}`);
   }, [selectedTest, pathHops, router]);
 
   // Not configured state

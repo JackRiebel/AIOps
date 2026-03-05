@@ -9,7 +9,7 @@
  * Use this to verify which card types are working correctly.
  */
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { SmartCardWrapper } from '../chat-v2/cards/SmartCardWrapper';
 import {
   CARD_REGISTRY,
@@ -18,6 +18,7 @@ import {
   generateCard,
   type CardScope,
 } from '../chat-v2/cards/registry';
+import { getFetchConfig, hasRequiredScope } from '../chat-v2/cards/fetchers';
 import type { SmartCard, CardPlatform, AllCardTypes } from '../chat-v2/cards/types';
 
 // =============================================================================
@@ -28,7 +29,7 @@ interface Organization {
   id: number;
   name: string;
   display_name?: string;
-  platform: 'meraki' | 'catalyst';
+  platform: string;
   is_active: boolean;
 }
 
@@ -36,6 +37,38 @@ interface Network {
   id: string;
   name: string;
   organizationId?: string;
+}
+
+interface Device {
+  serial: string;
+  name: string;
+  model: string;
+  networkId?: string;
+}
+
+interface TETest {
+  testId: string;
+  testName: string;
+  type: string;
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+/** Scope requirement badge */
+function ScopeBadge({ field, satisfied }: { field: string; satisfied: boolean }) {
+  return (
+    <span
+      className={`inline-block px-1.5 py-0.5 text-[9px] font-mono rounded ${
+        satisfied
+          ? 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400'
+          : 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400'
+      }`}
+    >
+      {field}
+    </span>
+  );
 }
 
 // =============================================================================
@@ -46,12 +79,16 @@ export default function CardTestPage() {
   // API data state
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [networks, setNetworks] = useState<Network[]>([]);
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [teTests, setTETests] = useState<TETest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Selection state
   const [selectedOrg, setSelectedOrg] = useState<string>('');
   const [selectedNetwork, setSelectedNetwork] = useState<string>('');
+  const [selectedDevice, setSelectedDevice] = useState<string>('');
+  const [selectedTETest, setSelectedTETest] = useState<string>('');
   const [selectedPlatform, setSelectedPlatform] = useState<CardPlatform | 'all'>('meraki');
   const [filterStatus, setFilterStatus] = useState<'all' | 'working' | 'broken'>('all');
 
@@ -67,13 +104,13 @@ export default function CardTestPage() {
         const res = await fetch('/api/organizations/network-platforms', { credentials: 'include' });
         if (!res.ok) throw new Error('Failed to fetch organizations');
         const data = await res.json();
-        // Filter to active Meraki orgs
-        const merakiOrgs = (data || []).filter((o: Organization) => o.platform === 'meraki' && o.is_active);
-        setOrganizations(merakiOrgs);
+        // Show all active orgs regardless of platform
+        const activeOrgs = (data || []).filter((o: Organization) => o.is_active);
+        setOrganizations(activeOrgs);
 
         // Auto-select first org
-        if (merakiOrgs.length > 0) {
-          setSelectedOrg(merakiOrgs[0].name);
+        if (activeOrgs.length > 0) {
+          setSelectedOrg(activeOrgs[0].name);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load organizations');
@@ -84,10 +121,31 @@ export default function CardTestPage() {
     fetchOrganizations();
   }, []);
 
+  // Fetch ThousandEyes tests when TE platform is selected (not on mount, to avoid
+  // 401 responses that can clear the session cookie via the API proxy)
+  useEffect(() => {
+    if (selectedPlatform !== 'thousandeyes' && selectedPlatform !== 'all') {
+      return;
+    }
+    const fetchTETests = async () => {
+      try {
+        const res = await fetch('/api/thousandeyes/tests?organization=default', { credentials: 'include' });
+        if (!res.ok) return;
+        const data = await res.json();
+        const tests = data.data || data.tests || data || [];
+        setTETests(Array.isArray(tests) ? tests : []);
+      } catch {
+        // TE tests are optional - silently ignore
+      }
+    };
+    fetchTETests();
+  }, [selectedPlatform]);
+
   // Fetch networks when org changes
   useEffect(() => {
     if (!selectedOrg) {
       setNetworks([]);
+      setDevices([]);
       return;
     }
 
@@ -102,6 +160,8 @@ export default function CardTestPage() {
         // Auto-select first network
         if (networkList.length > 0) {
           setSelectedNetwork(networkList[0].id);
+        } else {
+          setSelectedNetwork('');
         }
       } catch (err) {
         console.error('Failed to fetch networks:', err);
@@ -110,6 +170,28 @@ export default function CardTestPage() {
     };
     fetchNetworks();
   }, [selectedOrg]);
+
+  // Fetch devices when network changes
+  useEffect(() => {
+    if (!selectedNetwork) {
+      setDevices([]);
+      setSelectedDevice('');
+      return;
+    }
+
+    const fetchDevices = async () => {
+      try {
+        const res = await fetch(`/api/meraki/devices?networkId=${encodeURIComponent(selectedNetwork)}`, { credentials: 'include' });
+        if (!res.ok) return;
+        const data = await res.json();
+        const deviceList = data.data || data || [];
+        setDevices(Array.isArray(deviceList) ? deviceList : []);
+      } catch {
+        setDevices([]);
+      }
+    };
+    fetchDevices();
+  }, [selectedNetwork]);
 
   // Build scope from selections
   const scope: CardScope = useMemo(() => {
@@ -122,28 +204,23 @@ export default function CardTestPage() {
       organizationName: org?.display_name || org?.name || '',
       networkId: selectedNetwork,
       networkName: network?.name || '',
+      ...(selectedDevice ? { deviceSerial: selectedDevice } : {}),
+      ...(selectedTETest ? { testId: selectedTETest } : {}),
     };
-  }, [selectedOrg, selectedNetwork, organizations, networks]);
-
-  // Debug logging
-  useEffect(() => {
-    console.log('[CardTest] Organizations:', organizations);
-    console.log('[CardTest] Networks:', networks);
-    console.log('[CardTest] Selected org:', selectedOrg);
-    console.log('[CardTest] Selected network:', selectedNetwork);
-  }, [organizations, networks, selectedOrg, selectedNetwork]);
+  }, [selectedOrg, selectedNetwork, selectedDevice, selectedTETest, organizations, networks]);
 
   // Generate cards for selected platform
-  const generateCards = () => {
-    if (!selectedOrg || !selectedNetwork) {
-      alert('Please select an organization and network first');
+  const generateCards = useCallback(() => {
+    // For TE/splunk/system cards, org alone is enough (they have requiredScope: [])
+    const needsNetwork = selectedPlatform === 'meraki' || selectedPlatform === 'catalyst' || selectedPlatform === 'general';
+    if (!selectedOrg || (needsNetwork && !selectedNetwork)) {
       return;
     }
 
     let newCards: SmartCard[] = [];
 
     if (selectedPlatform === 'all') {
-      const platforms: CardPlatform[] = ['meraki', 'thousandeyes', 'splunk', 'catalyst', 'general'];
+      const platforms: CardPlatform[] = ['meraki', 'thousandeyes', 'splunk', 'catalyst', 'general', 'system'];
       platforms.forEach(platform => {
         newCards = [...newCards, ...generateCardsForPlatform(platform, scope)];
       });
@@ -152,13 +229,27 @@ export default function CardTestPage() {
     }
 
     setCards(newCards);
-    // Reset statuses
     setCardStatuses({});
-  };
+  }, [selectedOrg, selectedNetwork, selectedPlatform, scope]);
+
+  // Auto-generate when org + platform change
+  useEffect(() => {
+    // Skip initial mount (loading state)
+    if (loading) return;
+    if (!selectedOrg) return;
+
+    // Debounce to avoid rapid re-triggers during cascade (org → network → devices)
+    const timer = setTimeout(() => {
+      generateCards();
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [selectedOrg, selectedNetwork, selectedPlatform, generateCards, loading]);
 
   // Generate single card
   const addSingleCard = (type: AllCardTypes) => {
-    if (!selectedOrg || !selectedNetwork) {
+    const needsNetwork = !['thousandeyes', 'splunk', 'system'].includes(CARD_REGISTRY[type]?.platform || '');
+    if (!selectedOrg || (needsNetwork && !selectedNetwork)) {
       alert('Please select an organization and network first');
       return;
     }
@@ -197,6 +288,18 @@ export default function CardTestPage() {
     });
   }, [cards, cardStatuses, filterStatus]);
 
+  // Group filtered cards by platform
+  const cardsByPlatform = useMemo(() => {
+    const grouped: Record<string, SmartCard[]> = {};
+    filteredCards.forEach(card => {
+      const def = CARD_REGISTRY[card.type];
+      const platform = def?.platform || 'unknown';
+      if (!grouped[platform]) grouped[platform] = [];
+      grouped[platform].push(card);
+    });
+    return grouped;
+  }, [filteredCards]);
+
   // Card type list for individual card generation
   const allCardTypes = useMemo(() => getAllCardTypes(), []);
   const cardTypesByPlatform = useMemo(() => {
@@ -226,6 +329,40 @@ export default function CardTestPage() {
     return { total, working, broken, pending };
   }, [cards.length, cardStatuses]);
 
+  // Copy report to clipboard
+  const copyReport = useCallback(() => {
+    const lines: string[] = [
+      `Card Test Report — ${new Date().toLocaleString()}`,
+      `Org: ${selectedOrg} | Network: ${networks.find(n => n.id === selectedNetwork)?.name || selectedNetwork} | Platform: ${selectedPlatform}`,
+      `Total: ${stats.total} | Working: ${stats.working} | Broken: ${stats.broken} | Pending: ${stats.pending}`,
+      '',
+    ];
+
+    // Group by platform
+    const grouped: Record<string, SmartCard[]> = {};
+    cards.forEach(card => {
+      const def = CARD_REGISTRY[card.type];
+      const platform = def?.platform || 'unknown';
+      if (!grouped[platform]) grouped[platform] = [];
+      grouped[platform].push(card);
+    });
+
+    Object.entries(grouped).forEach(([platform, platformCards]) => {
+      lines.push(`=== ${platform.toUpperCase()} (${platformCards.length}) ===`);
+      platformCards.forEach(card => {
+        const status = cardStatuses[card.id];
+        const tag = status === 'success' ? 'OK' : status === 'error' ? 'ERR' : 'PENDING';
+        lines.push(`  [${tag}] ${card.type} — ${card.title}`);
+      });
+      lines.push('');
+    });
+
+    navigator.clipboard.writeText(lines.join('\n')).then(
+      () => alert('Report copied to clipboard'),
+      () => alert('Failed to copy report')
+    );
+  }, [cards, cardStatuses, selectedOrg, selectedNetwork, selectedPlatform, networks, stats]);
+
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex items-center justify-center">
@@ -233,6 +370,8 @@ export default function CardTestPage() {
       </div>
     );
   }
+
+  const platformOrder: CardPlatform[] = ['meraki', 'thousandeyes', 'splunk', 'catalyst', 'general', 'system'];
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 p-6">
@@ -253,7 +392,7 @@ export default function CardTestPage() {
 
         {/* Controls */}
         <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-4 mb-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-4">
             {/* Organization Select */}
             <div>
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
@@ -267,7 +406,7 @@ export default function CardTestPage() {
                 <option value="">Select organization...</option>
                 {organizations.map((org) => (
                   <option key={String(org.id)} value={org.name}>
-                    {org.display_name || org.name}
+                    {org.display_name || org.name} ({org.platform})
                   </option>
                 ))}
               </select>
@@ -293,6 +432,46 @@ export default function CardTestPage() {
               </select>
             </div>
 
+            {/* Device Select */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                Device
+              </label>
+              <select
+                value={selectedDevice}
+                onChange={(e) => setSelectedDevice(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                disabled={devices.length === 0}
+              >
+                <option value="">Any device</option>
+                {devices.map((device) => (
+                  <option key={device.serial} value={device.serial}>
+                    {device.name || device.serial} ({device.model})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* ThousandEyes Test Select */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                TE Test
+              </label>
+              <select
+                value={selectedTETest}
+                onChange={(e) => setSelectedTETest(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                disabled={teTests.length === 0}
+              >
+                <option value="">Any test</option>
+                {teTests.map((test) => (
+                  <option key={test.testId} value={test.testId}>
+                    {test.testName} ({test.type})
+                  </option>
+                ))}
+              </select>
+            </div>
+
             {/* Platform Select */}
             <div>
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
@@ -309,6 +488,7 @@ export default function CardTestPage() {
                 <option value="splunk">Splunk</option>
                 <option value="catalyst">Catalyst</option>
                 <option value="general">General Network</option>
+                <option value="system">AI / System</option>
               </select>
             </div>
 
@@ -316,7 +496,7 @@ export default function CardTestPage() {
             <div className="flex items-end">
               <button
                 onClick={generateCards}
-                disabled={!selectedOrg || !selectedNetwork}
+                disabled={!selectedOrg}
                 className="w-full px-4 py-2 bg-cyan-600 hover:bg-cyan-700 disabled:bg-slate-400 text-white font-medium rounded-lg transition-colors"
               >
                 Generate Cards
@@ -354,6 +534,14 @@ export default function CardTestPage() {
                 </select>
               </div>
 
+              {/* Copy Report */}
+              <button
+                onClick={copyReport}
+                className="px-3 py-1 text-sm bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded transition-colors"
+              >
+                Copy Report
+              </button>
+
               {/* Clear */}
               <button
                 onClick={() => { setCards([]); setCardStatuses({}); }}
@@ -371,67 +559,108 @@ export default function CardTestPage() {
             Add Individual Cards ({allCardTypes.length} types available)
           </summary>
           <div className="p-4 pt-0 space-y-4">
-            {(['meraki', 'thousandeyes', 'splunk', 'catalyst', 'general'] as CardPlatform[]).map((platform) => (
-              <div key={platform}>
-                <h3 className="text-sm font-medium text-slate-600 dark:text-slate-400 uppercase mb-2">
-                  {platform} ({cardTypesByPlatform[platform].length})
-                </h3>
-                <div className="flex flex-wrap gap-2">
-                  {cardTypesByPlatform[platform].map((type) => (
-                    <button
-                      key={type}
-                      onClick={() => addSingleCard(type)}
-                      disabled={!selectedOrg || !selectedNetwork}
-                      className="px-2 py-1 text-xs bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50 text-slate-700 dark:text-slate-300 rounded transition-colors"
-                    >
-                      {CARD_REGISTRY[type].title}
-                    </button>
-                  ))}
+            {(['meraki', 'thousandeyes', 'splunk', 'catalyst', 'general', 'system'] as CardPlatform[]).map((platform) => (
+              cardTypesByPlatform[platform].length > 0 && (
+                <div key={platform}>
+                  <h3 className="text-sm font-medium text-slate-600 dark:text-slate-400 uppercase mb-2">
+                    {platform} ({cardTypesByPlatform[platform].length})
+                  </h3>
+                  <div className="flex flex-wrap gap-2">
+                    {cardTypesByPlatform[platform].map((type) => (
+                      <button
+                        key={type}
+                        onClick={() => addSingleCard(type)}
+                        disabled={!selectedOrg}
+                        className="px-2 py-1 text-xs bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50 text-slate-700 dark:text-slate-300 rounded transition-colors"
+                      >
+                        {CARD_REGISTRY[type].title}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )
             ))}
           </div>
         </details>
 
-        {/* Cards Grid */}
+        {/* Cards — grouped by platform */}
         {filteredCards.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {filteredCards.map((card) => (
-              <div key={card.id} className="relative">
-                {/* Status Badge */}
-                <div className="absolute -top-2 -right-2 z-10">
-                  {cardStatuses[card.id] === 'success' && (
-                    <span className="px-2 py-0.5 text-xs font-medium bg-green-500 text-white rounded-full">
-                      OK
-                    </span>
-                  )}
-                  {cardStatuses[card.id] === 'error' && (
-                    <span className="px-2 py-0.5 text-xs font-medium bg-red-500 text-white rounded-full">
-                      ERROR
-                    </span>
-                  )}
-                  {!cardStatuses[card.id] && (
-                    <span className="px-2 py-0.5 text-xs font-medium bg-amber-500 text-white rounded-full animate-pulse">
-                      Loading
-                    </span>
-                  )}
-                </div>
+          <div className="space-y-8">
+            {platformOrder.map(platform => {
+              const platformCards = cardsByPlatform[platform];
+              if (!platformCards || platformCards.length === 0) return null;
 
-                {/* Card Type Label */}
-                <div className="absolute -top-2 left-2 z-10">
-                  <span className="px-2 py-0.5 text-[10px] font-mono bg-slate-800 dark:bg-slate-600 text-white rounded">
-                    {card.type}
-                  </span>
-                </div>
+              return (
+                <div key={platform}>
+                  {/* Platform section header */}
+                  <div className="flex items-center gap-3 mb-4">
+                    <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-200 uppercase tracking-wide">
+                      {platform}
+                    </h2>
+                    <span className="px-2 py-0.5 text-xs font-medium bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400 rounded-full">
+                      {platformCards.length}
+                    </span>
+                  </div>
 
-                <SmartCardWrapper
-                  card={card}
-                  onRemove={removeCard}
-                  onAction={handleCardAction}
-                  pollingContext={scope}
-                />
-              </div>
-            ))}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {platformCards.map((card) => {
+                      const fetchConfig = getFetchConfig(card.type);
+                      const requiredFields = fetchConfig?.requiredScope || [];
+
+                      return (
+                        <div key={card.id} className="relative">
+                          {/* Status Badge */}
+                          <div className="absolute -top-2 -right-2 z-10">
+                            {cardStatuses[card.id] === 'success' && (
+                              <span className="px-2 py-0.5 text-xs font-medium bg-green-500 text-white rounded-full">
+                                OK
+                              </span>
+                            )}
+                            {cardStatuses[card.id] === 'error' && (
+                              <span className="px-2 py-0.5 text-xs font-medium bg-red-500 text-white rounded-full">
+                                ERROR
+                              </span>
+                            )}
+                            {!cardStatuses[card.id] && (
+                              <span className="px-2 py-0.5 text-xs font-medium bg-amber-500 text-white rounded-full animate-pulse">
+                                Loading
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Card Type Label + Scope Badges */}
+                          <div className="absolute -top-2 left-2 z-10 flex items-center gap-1">
+                            <span className="px-2 py-0.5 text-[10px] font-mono bg-slate-800 dark:bg-slate-600 text-white rounded">
+                              {card.type}
+                            </span>
+                          </div>
+
+                          {/* Scope requirement indicators */}
+                          {requiredFields.length > 0 && (
+                            <div className="absolute top-5 left-2 z-10 flex gap-0.5">
+                              {requiredFields.map(field => (
+                                <ScopeBadge
+                                  key={field}
+                                  field={field}
+                                  satisfied={!!scope[field]}
+                                />
+                              ))}
+                            </div>
+                          )}
+
+                          <SmartCardWrapper
+                            card={card}
+                            onRemove={removeCard}
+                            onAction={handleCardAction}
+                            pollingContext={scope}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         ) : (
           <div className="text-center py-16 text-slate-500 dark:text-slate-400">
