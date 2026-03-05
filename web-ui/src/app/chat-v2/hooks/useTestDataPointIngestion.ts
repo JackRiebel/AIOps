@@ -169,13 +169,15 @@ export function useTestDataPointIngestion({
       targetSessionIdRef.current = null;
       setStoredPayload(null);
 
-      const sendToAI = async () => {
+      // Send to AI immediately (no setTimeout to avoid race with debounced session save)
+      const sessionId = session.id;
+      (async () => {
         const startTime = Date.now();
         try {
           const result = await stream({
             message: payload.message,
             history: [],
-            sessionId: session.id,
+            sessionId,
             verbosity: 'standard',
             organization: '',
             orgDisplayNames,
@@ -199,9 +201,7 @@ export function useTestDataPointIngestion({
         } finally {
           isSendingRef.current = false;
         }
-      };
-
-      setTimeout(sendToAI, 100);
+      })();
     }
   }, [state, storedPayload, needsNewSession, session, sessionLoading, isStreaming, newSession, addMessage, addCard, stream, orgDisplayNames, isAISessionActive, logAIQuery]);
 

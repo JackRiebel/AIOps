@@ -119,14 +119,15 @@ export function useQueryIngestion({
       setState('done');
       setStoredQuery(null);
 
-      // Auto-stream the AI response
-      const sendToAI = async () => {
+      // Send to AI immediately (no setTimeout to avoid race with debounced session save)
+      const sessionId = session.id;
+      (async () => {
         const startTime = Date.now();
         try {
           const result = await stream({
             message: q,
             history: [],
-            sessionId: session.id,
+            sessionId,
             verbosity: 'standard',
             organization: '',
             orgDisplayNames,
@@ -150,9 +151,7 @@ export function useQueryIngestion({
         } finally {
           isSendingRef.current = false;
         }
-      };
-
-      setTimeout(sendToAI, 100);
+      })();
     }
   }, [state, storedQuery, session, sessionLoading, isStreaming, addMessage, addCard, stream, orgDisplayNames, isAISessionActive, logAIQuery]);
 

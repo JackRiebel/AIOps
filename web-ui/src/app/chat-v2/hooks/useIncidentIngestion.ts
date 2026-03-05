@@ -201,15 +201,16 @@ export function useIncidentIngestion({
       targetSessionIdRef.current = null;
       setStoredPayload(null);
 
-      // Send to AI
-      const sendToAI = async () => {
+      // Send to AI immediately (no setTimeout to avoid race with debounced session save)
+      const sessionId = session.id;
+      (async () => {
         const startTime = Date.now();
 
         try {
           const result = await stream({
             message: payload.message,
             history: [],
-            sessionId: session.id,
+            sessionId,
             verbosity: 'standard',
             organization: '',
             orgDisplayNames,
@@ -237,9 +238,7 @@ export function useIncidentIngestion({
         } finally {
           isSendingRef.current = false;
         }
-      };
-
-      setTimeout(sendToAI, 100);
+      })();
     }
   }, [
     askAIState,

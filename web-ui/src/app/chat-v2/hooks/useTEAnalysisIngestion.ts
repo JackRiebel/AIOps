@@ -171,14 +171,15 @@ export function useTEAnalysisIngestion({
       targetSessionIdRef.current = null;
       setStoredPayload(null);
 
-      // Auto-stream the AI response
-      const sendToAI = async () => {
+      // Send to AI immediately (no setTimeout to avoid race with debounced session save)
+      const sessionId = session.id;
+      (async () => {
         const startTime = Date.now();
         try {
           const result = await stream({
             message: payload.message,
             history: [],
-            sessionId: session.id,
+            sessionId,
             verbosity: 'standard',
             organization: '',
             orgDisplayNames,
@@ -202,9 +203,7 @@ export function useTEAnalysisIngestion({
         } finally {
           isSendingRef.current = false;
         }
-      };
-
-      setTimeout(sendToAI, 100);
+      })();
     }
   }, [state, storedPayload, needsNewSession, session, sessionLoading, isStreaming, newSession, addMessage, addCard, stream, orgDisplayNames, isAISessionActive, logAIQuery]);
 
