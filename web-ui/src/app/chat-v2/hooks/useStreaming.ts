@@ -97,6 +97,58 @@ export interface StreamResult {
 }
 
 // =============================================================================
+// Text-Based Tool Call Extraction
+// =============================================================================
+
+/**
+ * Extract follow-up suggestions that the AI wrote as plain text
+ * instead of using proper tool_use blocks.
+ * Handles patterns like:
+ *   Action: suggest_followups Action Input: {"suggestions": [...]}
+ *   Action: suggest_followups\nAction Input: {"suggestions": [...]}
+ */
+function extractTextFollowups(content: string): {
+  cleanedContent: string;
+  extractedFollowups: FollowUpSuggestion[];
+} {
+  const extractedFollowups: FollowUpSuggestion[] = [];
+
+  // Find "Action: suggest_followups" marker
+  const markerPattern = /\n*Action:\s*suggest_followups\s*(?:\n\s*)?Action\s*Input:\s*/;
+  const markerMatch = content.match(markerPattern);
+
+  if (!markerMatch || markerMatch.index === undefined) {
+    return { cleanedContent: content, extractedFollowups };
+  }
+
+  // Everything after the marker is the JSON payload
+  const jsonStart = markerMatch.index + markerMatch[0].length;
+  const jsonText = content.slice(jsonStart).trim();
+
+  try {
+    const parsed = JSON.parse(jsonText);
+    const suggestions = parsed.suggestions;
+    if (Array.isArray(suggestions)) {
+      for (const s of suggestions) {
+        if (s && typeof s === 'object' && s.label) {
+          extractedFollowups.push({
+            label: s.label,
+            query: s.query || s.label,
+          });
+        }
+      }
+    }
+  } catch {
+    // JSON parse failed — leave content as-is
+    return { cleanedContent: content, extractedFollowups: [] };
+  }
+
+  // Strip everything from the marker onward
+  const cleanedContent = content.slice(0, markerMatch.index).trimEnd();
+  return { cleanedContent, extractedFollowups };
+}
+
+// =============================================================================
 // Tool Summary Extraction
 // =============================================================================
 
@@ -551,6 +603,16 @@ export function useStreaming(): UseStreamingReturn {
         setPhase('idle');
       }
       abortRef.current = null;
+    }
+
+    // Post-process: extract follow-up suggestions written as text by the AI
+    // Some models output "Action: suggest_followups Action Input: {...}" as text
+    // instead of using proper tool_use blocks
+    const { cleanedContent, extractedFollowups } = extractTextFollowups(fullContent);
+    if (extractedFollowups.length > 0) {
+      fullContent = cleanedContent;
+      setContent(cleanedContent);
+      followups.push(...extractedFollowups);
     }
 
     return {
