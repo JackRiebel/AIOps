@@ -262,6 +262,23 @@ class AITraceCollector:
             cost_usd=totals.get("total_cost"),
         )
 
+    async def update_span_te_enrichment(self, span_id: int, te_enrichment: Dict[str, Any]) -> None:
+        """Update a root span's trace_metadata with TE enrichment data."""
+        try:
+            async with self._db.session() as session:
+                result = await session.execute(
+                    select(AIQueryTrace).where(AIQueryTrace.id == span_id)
+                )
+                span = result.scalar_one_or_none()
+                if span:
+                    metadata = dict(span.trace_metadata or {})
+                    metadata["te_enrichment"] = te_enrichment
+                    span.trace_metadata = metadata
+                    await session.commit()
+                    logger.debug(f"[Trace] Updated TE enrichment for span {span_id}")
+        except Exception as e:
+            logger.debug(f"[Trace] Failed to update TE enrichment: {e}")
+
     async def update_span_path(self, span_id: int, network_path: List[Dict]) -> None:
         """Update a span's network_path after initial end_span."""
         try:

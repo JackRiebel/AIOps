@@ -22,6 +22,19 @@ def _normalize_provider(provider: Optional[str]) -> Optional[str]:
     return PROVIDER_ALIASES.get(provider, provider) if provider else provider
 
 
+@router.get("/te-status")
+async def get_te_monitoring_status(
+    current_user=Depends(require_viewer),
+):
+    """Return TE monitoring status per AI provider."""
+    try:
+        from src.services.te_auto_provisioner import get_te_auto_provisioner
+        provisioner = get_te_auto_provisioner()
+        return {"providers": provisioner.get_monitoring_status()}
+    except Exception:
+        return {"providers": {}}
+
+
 @router.get("/stats/summary")
 async def get_trace_stats(
     hours: int = Query(24, ge=1, le=720),
@@ -207,5 +220,25 @@ async def get_trace_journey(
             (effective_network_ms / total_duration_ms * 100) if total_duration_ms > 0 else 0, 1
         ),
     }
+
+    # Add TE monitoring status for providers involved in this trace
+    try:
+        from src.services.te_auto_provisioner import get_te_auto_provisioner
+        provisioner = get_te_auto_provisioner()
+        te_status = provisioner.get_monitoring_status()
+        # Filter to only providers involved in this trace
+        involved_providers: set = set()
+
+        def _collect_providers(span: dict) -> None:
+            p = span.get("provider")
+            if p:
+                involved_providers.add(p.lower())
+            for child in span.get("children", []):
+                _collect_providers(child)
+
+        _collect_providers(trace["root_span"])
+        trace["te_monitoring"] = {p: te_status.get(p, False) for p in involved_providers}
+    except Exception:
+        pass
 
     return trace

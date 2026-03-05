@@ -2434,6 +2434,12 @@ class UnifiedChatService:
                     provider=self.provider, model=self.model,
                     is_system=_is_system_query,
                 )
+                # Fire-and-forget: ensure TE tests exist for this provider
+                try:
+                    from src.services.te_auto_provisioner import get_te_auto_provisioner
+                    asyncio.ensure_future(get_te_auto_provisioner().ensure_tests_for_provider(self.provider))
+                except Exception:
+                    pass
                 # Add LLM call span
                 await collector.add_span(
                     trace_id=trace_id, span_type="llm_call",
@@ -2590,6 +2596,18 @@ class UnifiedChatService:
                         total_output_tokens=result.token_usage.get("output_tokens", 0),
                         total_cost=result.cost,
                     )
+                    # Fire-and-forget: enrich root span with TE data
+                    async def _enrich_te():
+                        try:
+                            from src.services.te_path_correlator import get_te_path_correlator
+                            enrichment = await get_te_path_correlator().get_full_enrichment(
+                                destination="", platform=self.provider,
+                            )
+                            if enrichment:
+                                await collector.update_span_te_enrichment(root_span_id, enrichment)
+                        except Exception:
+                            pass
+                    asyncio.ensure_future(_enrich_te())
                 except Exception as trace_err:
                     logger.warning(f"[Trace] Failed to end {self.provider} trace: {trace_err}")
 
@@ -4356,6 +4374,12 @@ I've added 3 monitoring cards for real-time visibility."
                     provider="anthropic", model=self.model,
                     is_system=_is_system_query,
                 )
+                # Fire-and-forget: ensure TE tests exist for Anthropic
+                try:
+                    from src.services.te_auto_provisioner import get_te_auto_provisioner
+                    asyncio.ensure_future(get_te_auto_provisioner().ensure_tests_for_provider("anthropic"))
+                except Exception:
+                    pass
             except Exception as trace_err:
                 logger.warning(f"[Trace] Failed to start trace: {trace_err}")
                 trace_id = None
@@ -4917,6 +4941,18 @@ I've added 3 monitoring cards for real-time visibility."
                         total_input_tokens=total_input_tokens,
                         total_output_tokens=total_output_tokens,
                     )
+                    # Fire-and-forget: enrich root span with TE data
+                    async def _enrich_te_anthropic():
+                        try:
+                            from src.services.te_path_correlator import get_te_path_correlator
+                            enrichment = await get_te_path_correlator().get_full_enrichment(
+                                destination="", platform="anthropic",
+                            )
+                            if enrichment:
+                                await collector.update_span_te_enrichment(root_span_id, enrichment)
+                        except Exception:
+                            pass
+                    asyncio.ensure_future(_enrich_te_anthropic())
                 except Exception as trace_err:
                     logger.warning(f"[Trace] Failed to end trace: {trace_err}")
 
@@ -4984,6 +5020,12 @@ I've added 3 monitoring cards for real-time visibility."
                     provider="openai", model=self.model,
                     is_system=_is_system_query,
                 )
+                # Fire-and-forget: ensure TE tests exist for OpenAI
+                try:
+                    from src.services.te_auto_provisioner import get_te_auto_provisioner
+                    asyncio.ensure_future(get_te_auto_provisioner().ensure_tests_for_provider("openai"))
+                except Exception:
+                    pass
                 llm_span_id = await collector.add_span(
                     trace_id=trace_id, span_type="llm_call",
                     parent_span_id=root_span_id, span_name=self.model,
@@ -5173,6 +5215,18 @@ I've added 3 monitoring cards for real-time visibility."
                         total_input_tokens=input_tokens,
                         total_output_tokens=output_tokens,
                     )
+                    # Fire-and-forget: enrich root span with TE data
+                    async def _enrich_te_openai():
+                        try:
+                            from src.services.te_path_correlator import get_te_path_correlator
+                            enrichment = await get_te_path_correlator().get_full_enrichment(
+                                destination="", platform="openai",
+                            )
+                            if enrichment:
+                                await collector.update_span_te_enrichment(root_span_id, enrichment)
+                        except Exception:
+                            pass
+                    asyncio.ensure_future(_enrich_te_openai())
                 except Exception:
                     pass
 

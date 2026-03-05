@@ -118,6 +118,7 @@ export interface AITraceDetail {
     total_wasted_usd: number;
     network_tax_pct: number;
   };
+  te_monitoring?: Record<string, boolean>;
 }
 
 export const SPAN_COLORS: Record<SpanType, { bg: string; hex: string }> = {

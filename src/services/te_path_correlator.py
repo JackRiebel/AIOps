@@ -283,6 +283,13 @@ class TEPathCorrelator:
             logger.debug(f"[TEPathCorrelator] HTTP server results failed for test {test_id}: {e}")
             return None
 
+    def invalidate_destination_cache(self, destination: str) -> None:
+        """Remove a cached destination so newly created TE tests are discoverable."""
+        self._test_cache.pop(destination, None)
+        # Also clear enrichment cache entries for any test previously associated
+        # so fresh data is fetched on next lookup
+        self._enrichment_cache.clear()
+
     async def _find_test_for_destination(self, destination: str) -> Optional[int]:
         """Find a TE test targeting this destination."""
         # Check cache

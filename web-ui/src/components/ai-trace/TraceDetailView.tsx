@@ -16,6 +16,7 @@ import {
   Wrench,
   CheckCircle,
   XCircle,
+  Eye,
 } from 'lucide-react';
 
 type TabKey = 'flow' | 'network' | 'waterfall';
@@ -147,6 +148,26 @@ export function TraceDetailView({ trace, waterfall, costSummary }: TraceDetailVi
                 <span className="text-slate-400 dark:text-slate-500 font-mono">
                   {stats.success}{stats.failed > 0 ? `/${stats.failed}f` : ''}
                 </span>
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* TE monitoring status badges */}
+        {trace.te_monitoring && Object.keys(trace.te_monitoring).length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(trace.te_monitoring).map(([provider, active]) => (
+              <span
+                key={provider}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border ${
+                  active
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200/60 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800/40'
+                    : 'bg-amber-50 text-amber-700 border-amber-200/60 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800/40'
+                }`}
+              >
+                <Eye className="w-3 h-3" />
+                <span className="capitalize">{provider}</span>
+                <span>{active ? 'TE Active' : 'TE Pending'}</span>
               </span>
             ))}
           </div>
