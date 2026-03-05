@@ -14,6 +14,7 @@ import { useState, useCallback, useRef, useEffect, memo, useContext } from 'reac
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { ChatMessage, StreamingPhase } from '../types';
+import type { FollowUpSuggestion } from '../hooks/useStreaming';
 import HighlightContext from '../contexts/HighlightContext';
 import { IncidentContextCard, hasIncidentContext } from './IncidentContextCard';
 import { PathAnalysisContextCard, hasPathAnalysisContext } from './PathAnalysisContextCard';
@@ -41,6 +42,8 @@ interface ChatPanelProps {
   className?: string;
   sessionId?: string;
   onActionApproval?: (actionId: string, approved: boolean) => void;
+  followupSuggestions?: FollowUpSuggestion[];
+  onFollowupClick?: (query: string) => void;
 }
 
 // =============================================================================
@@ -454,6 +457,43 @@ const StreamingIndicator = memo(({
 });
 StreamingIndicator.displayName = 'StreamingIndicator';
 
+// Follow-up suggestion buttons
+const FollowUpButtons = memo(({
+  suggestions,
+  onClick,
+}: {
+  suggestions: FollowUpSuggestion[];
+  onClick: (query: string) => void;
+}) => {
+  if (!suggestions || suggestions.length === 0) return null;
+
+  return (
+    <div className="flex justify-start min-w-0">
+      <div className="flex flex-wrap gap-2 max-w-full">
+        {suggestions.map((s, i) => (
+          <button
+            key={i}
+            onClick={() => onClick(s.query)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium
+              text-cyan-700 dark:text-cyan-300
+              bg-cyan-50 dark:bg-cyan-500/10
+              border border-cyan-200 dark:border-cyan-500/20
+              rounded-xl hover:bg-cyan-100 dark:hover:bg-cyan-500/20
+              hover:border-cyan-300 dark:hover:border-cyan-500/30
+              transition-all duration-150 hover:shadow-sm"
+          >
+            <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+            </svg>
+            {s.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+});
+FollowUpButtons.displayName = 'FollowUpButtons';
+
 // Chat input
 const ChatInput = memo(({
   onSend,
@@ -558,6 +598,8 @@ export function ChatPanel({
   className = '',
   sessionId,
   onActionApproval,
+  followupSuggestions,
+  onFollowupClick,
 }: ChatPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -627,6 +669,11 @@ export function ChatPanel({
               </div>
             </div>
           </div>
+        )}
+
+        {/* Follow-up suggestion buttons */}
+        {!isStreaming && followupSuggestions && followupSuggestions.length > 0 && onFollowupClick && (
+          <FollowUpButtons suggestions={followupSuggestions} onClick={onFollowupClick} />
         )}
 
         <div ref={messagesEndRef} />

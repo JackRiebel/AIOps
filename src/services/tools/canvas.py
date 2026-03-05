@@ -877,11 +877,107 @@ After calling this tool, confirm: "I've added X cards to your canvas for [purpos
 ]
 
 
+# =============================================================================
+# Follow-Up Suggestions Tool
+# =============================================================================
+
+async def suggest_followups_handler(params: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """Suggest follow-up actions the user can take with one click.
+
+    Returns follow-up suggestions that will be rendered as clickable buttons
+    below the AI's response in the chat UI.
+    """
+    suggestions = params.get("suggestions", [])
+
+    if not suggestions or not isinstance(suggestions, list):
+        return {"success": False, "error": "Must provide a list of suggestions"}
+
+    # Validate and normalize suggestions (max 3)
+    normalized = []
+    for s in suggestions[:3]:
+        if isinstance(s, str):
+            normalized.append({"label": s, "query": s})
+        elif isinstance(s, dict) and s.get("label"):
+            normalized.append({
+                "label": s["label"],
+                "query": s.get("query", s["label"]),
+            })
+
+    if not normalized:
+        return {"success": False, "error": "No valid suggestions provided"}
+
+    logger.info(f"[FollowUpTool] Suggesting {len(normalized)} follow-ups: {[s['label'] for s in normalized]}")
+
+    return {
+        "success": True,
+        "followup_suggestions": normalized,
+        "message": f"Suggested {len(normalized)} follow-up actions",
+    }
+
+
+FOLLOWUP_TOOLS = [
+    create_tool(
+        name="suggest_followups",
+        description="""Suggest 2-3 follow-up actions the user might want to take next. These appear as clickable buttons below your response.
+
+WHEN TO USE THIS TOOL:
+- After completing any analysis or investigation — suggest deeper dives
+- After answering a question — suggest related questions the user might have
+- After showing device/network status — suggest troubleshooting or monitoring actions
+- After providing recommendations — offer to implement them or investigate further
+
+WHEN NOT TO USE:
+- Simple yes/no answers
+- When you're asking the user a clarifying question (use text instead)
+
+Each suggestion should be a complete, actionable query that you can answer if the user clicks it.""",
+        platform="canvas",
+        category="interaction",
+        properties={
+            "suggestions": {
+                "type": "array",
+                "description": "2-3 follow-up suggestions. Each has a short label (shown on button) and the full query to send.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "label": {
+                            "type": "string",
+                            "description": "Short button label (max 60 chars), e.g., 'Investigate root cause'",
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "Full query to send when clicked, e.g., 'Investigate the root cause of the VLAN mismatch on subnet 10.0.0.0/24'",
+                        },
+                    },
+                    "required": ["label", "query"],
+                },
+            },
+        },
+        required=["suggestions"],
+        handler=suggest_followups_handler,
+        tags=["canvas", "interaction", "ui"],
+        examples=[
+            {
+                "query": "Show me device health",
+                "params": {
+                    "suggestions": [
+                        {"label": "Check offline devices", "query": "Investigate the 3 offline devices and check if they have recent alerts"},
+                        {"label": "View bandwidth trends", "query": "Show me bandwidth usage trends for the past 24 hours"},
+                        {"label": "Run health audit", "query": "Run a comprehensive health audit across all networks"},
+                    ]
+                }
+            },
+        ],
+    ),
+]
+
+
 def register_canvas_tools():
     """Register all canvas visualization tools."""
     registry = get_tool_registry()
     registry.register_many(CANVAS_TOOLS)
-    logger.info(f"[CanvasTools] Registered {len(CANVAS_TOOLS)} canvas tools")
+    registry.register_many(FOLLOWUP_TOOLS)
+    logger.info(f"[CanvasTools] Registered {len(CANVAS_TOOLS)} canvas tools + {len(FOLLOWUP_TOOLS)} followup tools")
 
 
 # Auto-register when imported

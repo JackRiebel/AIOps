@@ -29,6 +29,7 @@ import { WorkspaceSidebar } from './components/WorkspaceSidebar';
 import { SessionMetrics } from './components/SessionMetrics';
 import { HighlightProvider } from './contexts/HighlightContext';
 import { processStreamResult } from './services/messageHandler';
+import type { FollowUpSuggestion } from './hooks/useStreaming';
 
 // =============================================================================
 // Loading Fallback
@@ -215,6 +216,9 @@ function ChatV2PageContent() {
   // Undo toast state
   const [undoAction, setUndoAction] = useState<UndoAction | null>(null);
 
+  // Follow-up suggestion state
+  const [followupSuggestions, setFollowupSuggestions] = useState<FollowUpSuggestion[]>([]);
+
   // Toggle canvas handler
   const handleToggleCanvas = useCallback(() => {
     setShowCanvas(prev => {
@@ -251,8 +255,9 @@ function ChatV2PageContent() {
   const handleSendMessage = useCallback(async (content: string) => {
     if (!session) return;
 
-    // Clear agent flow from previous query
+    // Clear agent flow and follow-ups from previous query
     clearAgentFlow();
+    setFollowupSuggestions([]);
 
     // Add user message to UI
     addMessage({ role: 'user', content });
@@ -286,7 +291,7 @@ function ChatV2PageContent() {
     const duration = Date.now() - startTime;
 
     // Process result and add messages/cards
-    processStreamResult({
+    const { followupSuggestions: newFollowups } = processStreamResult({
       result,
       session,
       addMessage,
@@ -297,6 +302,11 @@ function ChatV2PageContent() {
       logAIQuery,
       lastAssistantMessageId,
     });
+
+    // Store follow-up suggestions for UI rendering
+    if (newFollowups.length > 0) {
+      setFollowupSuggestions(newFollowups);
+    }
   }, [session, addMessage, addCard, stream, history, orgDisplayNames, lastAssistantMessageId, clearAgentFlow, logAIQuery, isAISessionActive]);
 
   // Handle card removal with undo
@@ -375,6 +385,11 @@ function ChatV2PageContent() {
               currentAgent={currentAgent}
               onCancel={cancel}
               placeholder="Ask anything..."
+              followupSuggestions={followupSuggestions}
+              onFollowupClick={(query) => {
+                setFollowupSuggestions([]);
+                handleSendMessage(query);
+              }}
             />
           </div>
 

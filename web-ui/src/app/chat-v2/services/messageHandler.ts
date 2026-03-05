@@ -7,7 +7,7 @@
 import type { AllCardTypes, ChatMessage, IncidentContextData } from '../types';
 import type { SmartCard } from '../cards/types';
 import type { AddCardOptions as SessionAddCardOptions } from '../hooks/useSession';
-import type { StreamResult as StreamingResult, CardSuggestion } from '../hooks/useStreaming';
+import type { StreamResult as StreamingResult, CardSuggestion, FollowUpSuggestion } from '../hooks/useStreaming';
 import { mapBackendCardType } from '../cards';
 
 // =============================================================================
@@ -66,6 +66,10 @@ export interface ProcessStreamResultOptions {
   lastAssistantMessageId?: string | null;
 }
 
+export interface ProcessStreamResultOutput {
+  followupSuggestions: FollowUpSuggestion[];
+}
+
 /**
  * Process a stream result and add messages/cards to the session
  */
@@ -79,7 +83,11 @@ export function processStreamResult({
   isAISessionActive,
   logAIQuery,
   lastAssistantMessageId,
-}: ProcessStreamResultOptions): void {
+}: ProcessStreamResultOptions): ProcessStreamResultOutput {
+  const output: ProcessStreamResultOutput = {
+    followupSuggestions: result.followupSuggestions || [],
+  };
+
   // Add assistant response
   if (result.content) {
     addMessage({
@@ -130,6 +138,8 @@ export function processStreamResult({
       content: `Error: ${result.error}`,
     });
   }
+
+  return output;
 }
 
 /**

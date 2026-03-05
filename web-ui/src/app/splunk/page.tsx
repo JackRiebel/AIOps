@@ -176,13 +176,56 @@ function SplunkPage() {
   // ============================================================================
 
   const investigateCard = useCallback((card: SplunkInsight) => {
-    const prompt = `Investigate Splunk log category: ${card.title} (${card.severity} severity, ${card.log_count} occurrences). Examples: ${card.examples.slice(0, 3).join('; ')}. Provide root cause analysis, impact, and recommendations.`;
-    router.push(`/chat-v2?q=${encodeURIComponent(prompt)}`);
+    // Map insight severity/title to a Splunk analysis category
+    type SplunkCategory = 'security-briefing' | 'firewall' | 'device-status' | 'access-anomaly' | 'threat-impact' | 'assessment' | 'general';
+    let category: SplunkCategory = 'general';
+    const lower = card.title.toLowerCase();
+    if (lower.includes('firewall') || lower.includes('deny') || lower.includes('drop') || lower.includes('blocked')) {
+      category = 'firewall';
+    } else if (lower.includes('device') && (lower.includes('status') || lower.includes('offline') || lower.includes('down'))) {
+      category = 'device-status';
+    } else if (lower.includes('access') || lower.includes('auth') || lower.includes('anomal')) {
+      category = 'access-anomaly';
+    } else if (lower.includes('threat') || lower.includes('attack') || lower.includes('malware')) {
+      category = 'threat-impact';
+    } else if (lower.includes('security') || lower.includes('ids') || lower.includes('ips')) {
+      category = 'security-briefing';
+    }
+
+    const details: Record<string, string | number | undefined> = {
+      'Severity': card.severity,
+      'Occurrences': card.log_count,
+    };
+    if (card.source_system) details['Source'] = card.source_system;
+
+    const message = `Investigate Splunk log category: ${card.title} (${card.severity} severity, ${card.log_count} occurrences). Examples: ${card.examples.slice(0, 3).join('; ')}. Provide root cause analysis, impact, and recommendations.`;
+    const payload = {
+      message,
+      context: {
+        type: 'splunk_analysis' as const,
+        data: { category, title: card.title, details, message },
+      },
+    };
+    const encoded = btoa(encodeURIComponent(JSON.stringify(payload)));
+    router.push(`/chat-v2?new_session=true&splunk_analysis=${encodeURIComponent(encoded)}`);
   }, [router]);
 
   const getSuggestedQuery = useCallback((card: SplunkInsight) => {
-    const prompt = `Generate a Splunk SPL query to investigate: ${card.title} (${card.severity} severity, ${card.log_count} occurrences). Return ONLY a valid SPL query.`;
-    router.push(`/chat-v2?q=${encodeURIComponent(prompt)}`);
+    const message = `Generate a Splunk SPL query to investigate: ${card.title} (${card.severity} severity, ${card.log_count} occurrences). Return ONLY a valid SPL query.`;
+    const payload = {
+      message,
+      context: {
+        type: 'splunk_analysis' as const,
+        data: {
+          category: 'general' as const,
+          title: `SPL Query: ${card.title}`,
+          details: { 'Severity': card.severity, 'Occurrences': card.log_count },
+          message,
+        },
+      },
+    };
+    const encoded = btoa(encodeURIComponent(JSON.stringify(payload)));
+    router.push(`/chat-v2?new_session=true&splunk_analysis=${encodeURIComponent(encoded)}`);
   }, [router]);
 
   const findSimilarLogs = useCallback((_card: SplunkInsight) => {

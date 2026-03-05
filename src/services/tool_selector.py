@@ -83,6 +83,7 @@ ESSENTIAL_TOOLS = {
 ALWAYS_INCLUDE_TOOLS = [
     "canvas_add_card",        # AI can add visualization cards to canvas
     "canvas_add_dashboard",   # AI can add dashboard layouts to canvas
+    "suggest_followups",      # AI suggests follow-up actions as clickable buttons
     "think",                  # Zero-cost reasoning tool for multi-step analysis
 ]
 
@@ -112,6 +113,8 @@ INCIDENT_ANALYSIS_TOOLS = [
     # Canvas tools (for visualization)
     "canvas_add_card",
     "canvas_add_dashboard",
+    # Follow-up suggestions
+    "suggest_followups",
     # Request more if needed
     "request_more_tools",
 ]

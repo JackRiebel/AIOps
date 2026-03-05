@@ -234,13 +234,13 @@ class CiscoProvider(BaseProvider):
                         result = await tool_executor.execute(tool_name, tool_input)
                         execution_time = int((time.time() - start_time) * 1000)
 
-                        # For canvas tools, preserve the full result dict (contains card_suggestion)
+                        # For canvas/followup tools, preserve the full result dict (contains card_suggestion)
                         # For other tools, extract just the data key for cleaner responses
                         if isinstance(result, dict):
-                            if tool_name.startswith("canvas_"):
-                                # Canvas tools need full result to emit card_suggestion
+                            if tool_name.startswith("canvas_") or tool_name == "suggest_followups":
+                                # Canvas/followup tools need full result to emit card_suggestion/followups
                                 tool_result_data = result
-                                logger.info(f"[Cisco] Canvas tool '{tool_name}' result keys: {list(result.keys())}")
+                                logger.info(f"[Cisco] Canvas/followup tool '{tool_name}' result keys: {list(result.keys())}")
                             else:
                                 tool_result_data = result.get("data")
                         else:
@@ -452,13 +452,13 @@ class CiscoProvider(BaseProvider):
                                     result = await tool_executor.execute(tc["name"], tool_input)
                                     execution_time = int((time.time() - start_time) * 1000)
 
-                                    # For canvas tools, preserve the full result dict (contains card_suggestion)
+                                    # For canvas/followup tools, preserve the full result dict (contains card_suggestion/followups)
                                     # For other tools, extract just the data key for cleaner responses
                                     if isinstance(result, dict):
-                                        if tc["name"].startswith("canvas_"):
-                                            # Canvas tools need full result to emit card_suggestion
+                                        if tc["name"].startswith("canvas_") or tc["name"] == "suggest_followups":
+                                            # Canvas/followup tools need full result to emit card_suggestion/followups
                                             tool_result_data = result
-                                            logger.info(f"[Cisco][Stream] Canvas tool '{tc['name']}' result keys: {list(result.keys())}")
+                                            logger.info(f"[Cisco][Stream] Canvas/followup tool '{tc['name']}' result keys: {list(result.keys())}")
                                         else:
                                             tool_result_data = result.get("data")
                                     else:

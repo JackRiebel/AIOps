@@ -2444,6 +2444,12 @@ class UnifiedChatService:
                     for card in tool_result.get("card_suggestions", []):
                         yield {"type": "card_suggestion", "card": card}
 
+                # Handle suggest_followups tool
+                if tool_name == "suggest_followups" and isinstance(tool_result, dict) and tool_result.get("success"):
+                    followups = tool_result.get("followup_suggestions", [])
+                    if followups:
+                        yield {"type": "followup_suggestions", "suggestions": followups}
+
             if tools_used:
                 logger.info(f"[NonStreaming] Emitted events for {len(tools_used)} tools, platforms: {platforms_used}")
 
@@ -2811,8 +2817,8 @@ Avoid:
 **CANVAS VISUALIZATION GUIDELINES** (Follow strictly):
 
 TOOL SELECTION:
-- `canvas_add_dashboard`: Use for INCIDENT ANALYSIS and MULTI-CARD scenarios (2-4 cards at once)
-- `canvas_add_card`: Use for adding a SINGLE card
+- `canvas_add_dashboard`: Use for INCIDENT ANALYSIS with predefined layouts (incident, performance, wireless, security, connectivity scenarios)
+- `canvas_add_card`: Use for adding cards — call it MULTIPLE TIMES to add 2-4 cards when you have distinct data to visualize
 
 CARDS AND TEXT WORK TOGETHER:
 - Cards visualize the DATA (metrics, device lists, timelines, charts)
@@ -2867,15 +2873,32 @@ CARD DATA FLOW:
 - Auto-generated cards: Created automatically from tool results. Don't duplicate with canvas_add_card.
 
 Card rules:
-1. Maximum 1 card per follow-up query via canvas_add_card
+1. Add MULTIPLE cards when you have meaningful data to visualize — use 2-4 canvas_add_card calls per response when appropriate (e.g., one ai-stats-grid for metrics + one ai-finding for issues + one ai-breakdown for distribution)
 2. Always include network_id when available
 3. For live monitoring cards, don't pre-populate data - let the card fetch its own
+4. DON'T limit yourself to 1 card — if your analysis surfaces multiple distinct data points or findings, give each its own card
 
 Response format:
 - Provide full analysis FIRST (findings, root cause, remediation), then mention cards at the end
 - DO NOT include raw JSON blocks in your text response
 - Cards are supplementary visualization — your text analysis is the primary value
-- Example: "WiFi success rate is 84% with 48 failures concentrated on AP Q2KD. Root cause appears to be RF interference — the AP shows elevated noise floor on channel 6. I recommend switching to channel 11 and checking for co-channel interference from neighboring APs. I've added a WiFi performance card for ongoing monitoring."
+- Example: "WiFi success rate is 84% with 48 failures concentrated on AP Q2KD. Root cause appears to be RF interference — the AP shows elevated noise floor on channel 6. I recommend switching to channel 11 and checking for co-channel interference from neighboring APs. I've added performance and device summary cards for monitoring."
+
+**PROACTIVE FOLLOW-UP SUGGESTIONS** (IMPORTANT - Follow on EVERY analysis response):
+After completing any analysis, investigation, or data retrieval, ALWAYS call the `suggest_followups` tool with 2-3 actionable follow-up options.
+
+BE PROACTIVE, NOT PASSIVE:
+- WRONG: "You should check the firewall logs for related events." (passive — tells user to do work)
+- RIGHT: Call suggest_followups with: "Check firewall logs for related events" (proactive — offers to do the work)
+
+- WRONG: "I recommend investigating the root cause further." (passive)
+- RIGHT: Call suggest_followups with: "Investigate root cause of high latency" (proactive)
+
+Follow-up suggestions should:
+1. Be specific to what was just analyzed (not generic)
+2. Offer deeper investigation, related checks, or next logical steps
+3. Be complete enough that clicking them produces a useful response
+4. Cover different angles (e.g., one for deeper analysis, one for related data, one for remediation)
 """
 
     def _get_verbosity_instructions(self, verbosity: str) -> str:
@@ -4566,6 +4589,12 @@ I've added 3 monitoring cards for real-time visibility."
                                                     "card": pending_card,
                                                 }
                                             pending_auto_cards.clear()
+
+                                # Handle suggest_followups tool
+                                if block.name == "suggest_followups" and isinstance(safe_result, dict) and safe_result.get("success"):
+                                    followups = safe_result.get("followup_suggestions", [])
+                                    if followups:
+                                        yield {"type": "followup_suggestions", "suggestions": followups}
 
                                 # Store result for conversation history
                                 tool_results.append({

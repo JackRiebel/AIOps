@@ -81,12 +81,18 @@ export interface StreamOptions {
   currentCards?: Array<{ id: string; type: string; title: string; networkId?: string; orgId?: string }>;
 }
 
+export interface FollowUpSuggestion {
+  label: string;
+  query: string;
+}
+
 export interface StreamResult {
   content: string;
   usage?: TokenUsage;
   toolsUsed: string[];
   toolData?: Array<{ tool: string; data: unknown }>;
   cardSuggestions: CardSuggestion[];
+  followupSuggestions: FollowUpSuggestion[];
   error?: string;
 }
 
@@ -315,6 +321,7 @@ export function useStreaming(): UseStreamingReturn {
     let toolsUsed: string[] = [];
     let toolData: Array<{ tool: string; data: unknown }> | undefined;
     const suggestions: CardSuggestion[] = [];
+    const followups: FollowUpSuggestion[] = [];
     let errorMessage: string | undefined;
 
     try {
@@ -481,6 +488,12 @@ export function useStreaming(): UseStreamingReturn {
                 }
                 break;
 
+              case 'followup_suggestions':
+                if (event.suggestions && Array.isArray(event.suggestions)) {
+                  followups.push(...event.suggestions);
+                }
+                break;
+
               // ==================
               // Completion Events
               // ==================
@@ -546,6 +559,7 @@ export function useStreaming(): UseStreamingReturn {
       toolsUsed,
       toolData,
       cardSuggestions: suggestions,
+      followupSuggestions: followups,
       error: errorMessage,
     };
   }, [reset]);
