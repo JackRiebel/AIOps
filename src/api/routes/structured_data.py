@@ -33,6 +33,7 @@ class QueryRequest(BaseModel):
     question: str
     provider: Optional[str] = None
     auto_execute: bool = False
+    include_metadata: bool = False
 
 
 class ExecuteRequest(BaseModel):
@@ -45,6 +46,7 @@ class InterpretRequest(BaseModel):
     sql: str
     results: dict
     provider: Optional[str] = None
+    include_metadata: bool = False
 
 
 class FeedbackRequest(BaseModel):
@@ -223,7 +225,10 @@ async def query_dataset(
         raise HTTPException(400, f"Dataset is not ready (status: {dataset.status})")
 
     # Generate SQL (includes self-correction loop + EXPLAIN validation)
-    gen = await _sql_service.generate_sql(session, dataset, req.question, req.provider)
+    gen = await _sql_service.generate_sql(
+        session, dataset, req.question, req.provider,
+        include_metadata=req.include_metadata,
+    )
 
     response = {
         "sql": gen["sql"],
@@ -234,6 +239,9 @@ async def query_dataset(
         "attempts": gen.get("attempts", 1),
         "results": None,
     }
+
+    if req.include_metadata and "metadata" in gen:
+        response["generation_metadata"] = gen["metadata"]
 
     if not gen["valid"]:
         await _sql_service.log_query(
@@ -309,12 +317,17 @@ async def interpret_results(
 ):
     """Interpret query results using LLM (rich markdown + chart suggestion)."""
     result = await _sql_service.interpret_results(
-        req.question, req.sql, req.results, req.provider
+        req.question, req.sql, req.results, req.provider,
+        include_metadata=req.include_metadata,
     )
-    return {
+    response = {
         "interpretation": result["interpretation"],
         "suggested_chart": result.get("suggested_chart", "none"),
+        "follow_up_questions": result.get("follow_up_questions", []),
     }
+    if req.include_metadata and "metadata" in result:
+        response["interpretation_metadata"] = result["metadata"]
+    return response
 
 
 # =============================================================================

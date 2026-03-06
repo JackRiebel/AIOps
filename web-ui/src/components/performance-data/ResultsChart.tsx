@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useCallback } from 'react';
 import {
   ResponsiveContainer,
   BarChart, Bar,
@@ -9,8 +9,9 @@ import {
   PieChart, Pie, Cell,
   ScatterChart, Scatter,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  ReferenceLine,
 } from 'recharts';
-import { BarChart3, TrendingUp, PieChart as PieIcon, ScatterChart as ScatterIcon, AreaChart as AreaIcon, Hash } from 'lucide-react';
+import { BarChart3, TrendingUp, PieChart as PieIcon, ScatterChart as ScatterIcon, AreaChart as AreaIcon, Hash, Download } from 'lucide-react';
 import type { SQLQueryResult } from './types';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -148,6 +149,56 @@ function ChartTooltip({ active, payload, label }: TooltipProps) {
   );
 }
 
+// ─── Pie Tooltip ─────────────────────────────────────────────────────────────
+
+interface PieTooltipProps {
+  active?: boolean;
+  payload?: Array<{ name: string; value: number; color: string; payload?: Record<string, unknown> }>;
+}
+
+function PieChartTooltip({ active, payload }: PieTooltipProps) {
+  if (!active || !payload?.length) return null;
+  const entry = payload[0];
+  const total = (entry.payload as Record<string, unknown>)?._total as number | undefined;
+  const pct = total ? ((entry.value / total) * 100).toFixed(1) : null;
+  return (
+    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 shadow-lg">
+      <div className="flex items-center gap-1.5 mb-1">
+        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
+        <span className="text-xs font-medium text-slate-700 dark:text-slate-200">{entry.name}</span>
+      </div>
+      <div className="text-xs text-slate-600 dark:text-slate-300">
+        <span className="font-semibold text-slate-900 dark:text-white">{formatNumber(entry.value)}</span>
+        {pct && <span className="ml-1.5 text-slate-400">({pct}%)</span>}
+      </div>
+    </div>
+  );
+}
+
+// ─── CSV Export ───────────────────────────────────────────────────────────────
+
+function downloadCSV(data: Record<string, unknown>[], columns: string[]) {
+  const header = columns.join(',');
+  const rows = data.map(row =>
+    columns.map(col => {
+      const val = row[col];
+      if (val == null) return '';
+      const str = String(val);
+      return str.includes(',') || str.includes('"') || str.includes('\n')
+        ? `"${str.replace(/"/g, '""')}"`
+        : str;
+    }).join(',')
+  );
+  const csv = [header, ...rows].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'chart-data.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // ─── Stat Card (single-row aggregate) ────────────────────────────────────────
 
 function StatCard({ results, numericCols }: { results: SQLQueryResult; numericCols: string[] }) {
@@ -206,6 +257,9 @@ export function ResultsChart({ results, suggestedChart }: ResultsChartProps) {
     return entry;
   });
 
+  // All columns present in chartData for CSV export
+  const chartColumns = [categoryKey, ...numericCols];
+
   // Build full options list (include stat when applicable)
   const allOptions = results.rows.length === 1 && numericCols.length >= 1
     ? [...CHART_OPTIONS, { type: 'stat' as ChartType, icon: Hash, label: 'Stat' }]
@@ -215,7 +269,7 @@ export function ResultsChart({ results, suggestedChart }: ResultsChartProps) {
 
   return (
     <div className="bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/50 p-5">
-      {/* Chart type selector */}
+      {/* Chart type selector + CSV export */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-1.5">
           {allOptions.map(({ type, icon: Icon, label }) => (
@@ -233,11 +287,20 @@ export function ResultsChart({ results, suggestedChart }: ResultsChartProps) {
             </button>
           ))}
         </div>
-        {truncated && (
-          <span className="text-xs text-amber-500 dark:text-amber-400">
-            Showing first {MAX_POINTS} of {rawRows.length} rows
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {truncated && (
+            <span className="text-xs text-amber-500 dark:text-amber-400">
+              Showing first {MAX_POINTS} of {rawRows.length} rows
+            </span>
+          )}
+          <button
+            onClick={() => downloadCSV(chartData, chartColumns)}
+            className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50 rounded-md transition-colors"
+            title="Download CSV"
+          >
+            <Download className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
       {/* Stat card or Recharts */}
@@ -256,6 +319,11 @@ export function ResultsChart({ results, suggestedChart }: ResultsChartProps) {
 
 // ─── Chart renderers ─────────────────────────────────────────────────────────
 
+function computeAverage(data: Record<string, unknown>[], col: string): number {
+  const values = data.map(d => Number(d[col]) || 0);
+  return values.reduce((a, b) => a + b, 0) / (values.length || 1);
+}
+
 function renderChart(
   type: ChartType,
   data: Record<string, unknown>[],
@@ -267,7 +335,8 @@ function renderChart(
 
   switch (type) {
     case 'bar':
-    case 'grouped_bar':
+    case 'grouped_bar': {
+      const avg = computeAverage(data, numericCols[0]);
       return (
         <BarChart data={data}>
           <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} />
@@ -275,25 +344,32 @@ function renderChart(
           <YAxis tick={axisStyle} tickFormatter={v => formatNumber(Number(v))} />
           <Tooltip content={<ChartTooltip />} />
           {numericCols.length > 1 && <Legend wrapperStyle={{ fontSize: 12 }} />}
+          <ReferenceLine y={avg} stroke="#94a3b8" strokeDasharray="6 4" label={{ value: `Avg: ${formatNumber(avg)}`, position: 'right', fill: '#94a3b8', fontSize: 10 }} />
           {numericCols.map((col, i) => (
             <Bar key={col} dataKey={col} fill={COLORS[i % COLORS.length]} radius={[4, 4, 0, 0]} />
           ))}
         </BarChart>
       );
+    }
 
-    case 'horizontal_bar':
+    case 'horizontal_bar': {
+      // Sort descending by first numeric column
+      const sortedData = [...data].sort((a, b) => (Number(b[numericCols[0]]) || 0) - (Number(a[numericCols[0]]) || 0));
+      const avg = computeAverage(sortedData, numericCols[0]);
       return (
-        <BarChart data={data} layout="vertical">
+        <BarChart data={sortedData} layout="vertical">
           <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} />
           <XAxis type="number" tick={axisStyle} tickFormatter={v => formatNumber(Number(v))} />
           <YAxis dataKey={categoryKey} type="category" tick={axisStyle} width={120} tickFormatter={v => truncateLabel(String(v))} />
           <Tooltip content={<ChartTooltip />} />
           {numericCols.length > 1 && <Legend wrapperStyle={{ fontSize: 12 }} />}
+          <ReferenceLine x={avg} stroke="#94a3b8" strokeDasharray="6 4" label={{ value: `Avg: ${formatNumber(avg)}`, position: 'top', fill: '#94a3b8', fontSize: 10 }} />
           {numericCols.map((col, i) => (
             <Bar key={col} dataKey={col} fill={COLORS[i % COLORS.length]} radius={[0, 4, 4, 0]} />
           ))}
         </BarChart>
       );
+    }
 
     case 'line':
       return (
@@ -312,23 +388,33 @@ function renderChart(
     case 'area':
       return (
         <AreaChart data={data}>
+          <defs>
+            {numericCols.map((col, i) => (
+              <linearGradient key={col} id={`gradient-${col}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={COLORS[i % COLORS.length]} stopOpacity={0.3} />
+                <stop offset="100%" stopColor={COLORS[i % COLORS.length]} stopOpacity={0.02} />
+              </linearGradient>
+            ))}
+          </defs>
           <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} />
           <XAxis dataKey={categoryKey} tick={axisStyle} tickFormatter={v => truncateLabel(String(v))} />
           <YAxis tick={axisStyle} tickFormatter={v => formatNumber(Number(v))} />
           <Tooltip content={<ChartTooltip />} />
           {numericCols.length > 1 && <Legend wrapperStyle={{ fontSize: 12 }} />}
           {numericCols.map((col, i) => (
-            <Area key={col} type="monotone" dataKey={col} stroke={COLORS[i % COLORS.length]} fill={COLORS[i % COLORS.length]} fillOpacity={0.15} strokeWidth={2} />
+            <Area key={col} type="monotone" dataKey={col} stroke={COLORS[i % COLORS.length]} fill={`url(#gradient-${col})`} strokeWidth={2} />
           ))}
         </AreaChart>
       );
 
     case 'pie': {
       const valueKey = numericCols[0];
+      const total = data.reduce((sum, d) => sum + (Number(d[valueKey]) || 0), 0);
+      const pieData = data.map(d => ({ ...d, _total: total }));
       return (
         <PieChart>
           <Pie
-            data={data}
+            data={pieData}
             dataKey={valueKey}
             nameKey={categoryKey}
             cx="50%"
@@ -340,11 +426,11 @@ function renderChart(
             labelLine={false}
             style={{ fontSize: 11 }}
           >
-            {data.map((_, i) => (
+            {pieData.map((_, i) => (
               <Cell key={i} fill={COLORS[i % COLORS.length]} />
             ))}
           </Pie>
-          <Tooltip content={<ChartTooltip />} />
+          <Tooltip content={<PieChartTooltip />} />
         </PieChart>
       );
     }

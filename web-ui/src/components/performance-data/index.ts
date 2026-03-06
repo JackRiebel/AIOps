@@ -14,3 +14,4 @@ export { ResultsChart } from './ResultsChart';
 export { QueryHistory } from './QueryHistory';
 export { LLMProviderSelector } from './LLMProviderSelector';
 export { ColumnRenameOverlay } from './ColumnRenameOverlay';
+export { ProcessView } from './ProcessView';

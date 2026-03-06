@@ -3,12 +3,13 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Search, Sparkles, Loader2, MessageSquare, ChevronDown, ChevronRight, RotateCcw, Code2 } from 'lucide-react';
-import type { DatasetInfo, QueryResponse, SQLQueryResult } from './types';
+import { Search, Sparkles, Loader2, MessageSquare, ChevronDown, ChevronRight, RotateCcw, Code2, Eye } from 'lucide-react';
+import type { DatasetInfo, QueryResponse, SQLQueryResult, GenerationMetadata, InterpretationMetadata } from './types';
 import { LLMProviderSelector } from './LLMProviderSelector';
 import { SQLPreview } from './SQLPreview';
 import { ResultsTable } from './ResultsTable';
 import { ResultsChart, type ChartType } from './ResultsChart';
+import { ProcessView } from './ProcessView';
 
 interface QueryInterfaceProps {
   datasets: DatasetInfo[];
@@ -30,6 +31,17 @@ export function QueryInterface({ datasets, selectedDatasetId, onSelectDataset }:
   const [showDetails, setShowDetails] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sqlEdited, setSqlEdited] = useState(false);
+
+  // Follow-up questions
+  const [followUps, setFollowUps] = useState<string[]>([]);
+
+  // Process view
+  const [showProcess, setShowProcess] = useState(false);
+  const [generationMetadata, setGenerationMetadata] = useState<GenerationMetadata | undefined>(undefined);
+  const [interpretationMetadata, setInterpretationMetadata] = useState<InterpretationMetadata | undefined>(undefined);
+
+  // Follow-up auto-trigger ref
+  const pendingFollowUp = useRef(false);
 
   const readyDatasets = datasets.filter(d => d.status === 'ready');
 
@@ -78,16 +90,19 @@ export function QueryInterface({ datasets, selectedDatasetId, onSelectDataset }:
           sql,
           results: execResults,
           provider: provider || undefined,
+          include_metadata: showProcess,
         }),
       });
       if (resp.ok) {
         const data = await resp.json();
         setInterpretation(data.interpretation);
         if (data.suggested_chart) setSuggestedChart(data.suggested_chart as ChartType);
+        if (data.follow_up_questions) setFollowUps(data.follow_up_questions);
+        if (data.interpretation_metadata) setInterpretationMetadata(data.interpretation_metadata);
       }
     } catch { /* ignore */ }
     finally { setInterpreting(false); }
-  }, [selectedDatasetId, question, provider]);
+  }, [selectedDatasetId, question, provider, showProcess]);
 
   // ── Generate SQL (kicks off the whole pipeline) ──────────────────────
   const handleGenerate = useCallback(async () => {
@@ -100,20 +115,28 @@ export function QueryInterface({ datasets, selectedDatasetId, onSelectDataset }:
     setQueryResponse(null);
     setSqlEdited(false);
     setShowDetails(false);
+    setFollowUps([]);
+    setGenerationMetadata(undefined);
+    setInterpretationMetadata(undefined);
 
     try {
       const resp = await fetch(`/api/structured-data/datasets/${selectedDatasetId}/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: question.trim(), provider: provider || undefined }),
+        body: JSON.stringify({
+          question: question.trim(),
+          provider: provider || undefined,
+          include_metadata: showProcess,
+        }),
       });
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}));
         throw new Error(data.detail || `Request failed (${resp.status})`);
       }
-      const data: QueryResponse = await resp.json();
+      const data: QueryResponse & { generation_metadata?: GenerationMetadata } = await resp.json();
       setQueryResponse(data);
       setEditedSql(data.sql);
+      if (data.generation_metadata) setGenerationMetadata(data.generation_metadata);
 
       if (data.valid) {
         pendingAutoExecute.current = true;
@@ -123,7 +146,7 @@ export function QueryInterface({ datasets, selectedDatasetId, onSelectDataset }:
     } finally {
       setGenerating(false);
     }
-  }, [selectedDatasetId, question, provider]);
+  }, [selectedDatasetId, question, provider, showProcess]);
 
   // Chain: generate → execute
   useEffect(() => {
@@ -141,6 +164,14 @@ export function QueryInterface({ datasets, selectedDatasetId, onSelectDataset }:
     }
   }, [results, interpreting, interpretation, doInterpret, editedSql]);
 
+  // Follow-up auto-trigger: when question changes via follow-up, auto-run
+  useEffect(() => {
+    if (pendingFollowUp.current && question.trim()) {
+      pendingFollowUp.current = false;
+      handleGenerate();
+    }
+  }, [question, handleGenerate]);
+
   const handleExecute = useCallback(() => {
     doExecute(editedSql);
   }, [doExecute, editedSql]);
@@ -148,6 +179,11 @@ export function QueryInterface({ datasets, selectedDatasetId, onSelectDataset }:
   const handleSqlChange = useCallback((sql: string) => {
     setEditedSql(sql);
     setSqlEdited(true);
+  }, []);
+
+  const handleFollowUp = useCallback((q: string) => {
+    setQuestion(q);
+    pendingFollowUp.current = true;
   }, []);
 
   const isBusy = generating || executing;
@@ -263,12 +299,31 @@ export function QueryInterface({ datasets, selectedDatasetId, onSelectDataset }:
         </div>
       )}
 
+      {/* ── Follow-up Questions ────────────────────────────────────── */}
+      {followUps.length > 0 && !pipelineActive && (
+        <div className="flex flex-wrap gap-2">
+          {followUps.map((q, i) => (
+            <button
+              key={i}
+              onClick={() => handleFollowUp(q)}
+              className={`text-xs px-3 py-1.5 rounded-full transition-colors ${
+                i === 0
+                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:from-purple-700 hover:to-indigo-700 font-medium shadow-sm'
+                  : 'border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-purple-300 dark:hover:border-purple-600 hover:text-purple-600 dark:hover:text-purple-400'
+              }`}
+            >
+              {q}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* ── Visualization (shown prominently, above the collapsible SQL & Data) ── */}
       {results && (
         <ResultsChart results={results} suggestedChart={suggestedChart} />
       )}
 
-      {/* ── Details toggle (SQL, table) ──────────────────────────────── */}
+      {/* ── Details toggle (SQL, table) + Process toggle ──────────── */}
       {results && (
         <div className="space-y-3">
           {/* Toggle bar */}
@@ -281,6 +336,17 @@ export function QueryInterface({ datasets, selectedDatasetId, onSelectDataset }:
               <Code2 className="w-3.5 h-3.5" />
               SQL &amp; Data
             </button>
+            <button
+              onClick={() => setShowProcess(!showProcess)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                showProcess
+                  ? 'border-purple-300 dark:border-purple-600 bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400'
+                  : 'border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-purple-300 dark:hover:border-purple-600'
+              }`}
+            >
+              <Eye className="w-3.5 h-3.5" />
+              Process
+            </button>
             {sqlEdited && (
               <button
                 onClick={handleExecute}
@@ -292,6 +358,16 @@ export function QueryInterface({ datasets, selectedDatasetId, onSelectDataset }:
               </button>
             )}
           </div>
+
+          {/* Process View */}
+          {showProcess && (
+            <ProcessView
+              generationMetadata={generationMetadata}
+              interpretationMetadata={interpretationMetadata}
+              results={results}
+              finalSql={editedSql}
+            />
+          )}
 
           {/* Collapsible details panel */}
           {showDetails && (

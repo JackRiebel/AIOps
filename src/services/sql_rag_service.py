@@ -93,7 +93,8 @@ Query results ({row_count} rows total, {col_count} columns: {col_names}):
 Respond with ONLY valid JSON (no markdown fences, no extra text) in this exact format:
 {{
   "interpretation": "<markdown string>",
-  "suggested_chart": "<chart_type>"
+  "suggested_chart": "<chart_type>",
+  "follow_up_questions": ["<q1>", "<q2>", "<q3>"]
 }}
 
 For "interpretation", write a rich markdown analysis:
@@ -110,7 +111,12 @@ For "suggested_chart", pick the single best visualization from: bar, horizontal_
 - Use "pie" for categorical + 1 numeric with ≤8 rows (proportions/percentages)
 - Use "scatter" for 2 numeric columns without categorical
 - Use "stat" for a single-row aggregate (one big number)
-- Use "none" if the data doesn't suit any chart"""
+- Use "none" if the data doesn't suit any chart
+
+For "follow_up_questions", suggest exactly 3 natural follow-up questions:
+1. First: dig deeper into the top finding or most interesting result
+2. Second: explore a different dimension or angle of the same data
+3. Third: ask about trends, root causes, or comparisons over time"""
 
 
 class SQLRAGService:
@@ -362,6 +368,7 @@ class SQLRAGService:
         question: str,
         provider: Optional[str] = None,
         max_retries: int = 3,
+        include_metadata: bool = False,
     ) -> dict:
         """Generate SQL from a natural language question with self-correction.
 
@@ -373,6 +380,7 @@ class SQLRAGService:
 
         Returns:
             dict with keys: sql, valid, error, provider, model, attempts
+            Optionally includes 'metadata' when include_metadata is True.
         """
         llm_service = get_agentic_rag_llm_service()
         if not llm_service:
@@ -405,6 +413,7 @@ class SQLRAGService:
         last_error = None
         sql = ""
         model_name = ""
+        attempts_metadata: list[dict] = []
 
         for attempt in range(max_retries):
             # Generate SQL — schema in system prompt, question in user prompt
@@ -426,7 +435,17 @@ class SQLRAGService:
             # Safety check
             safe, reason = self._is_safe(sql)
             if not safe:
-                return {
+                if include_metadata:
+                    attempts_metadata.append({
+                        "attempt": attempt + 1,
+                        "system_prompt": system_prompt,
+                        "user_prompt": user_prompt,
+                        "raw_response": response.content,
+                        "extracted_sql": sql,
+                        "safety_error": reason,
+                        "explain_error": None,
+                    })
+                result = {
                     "sql": sql,
                     "valid": False,
                     "error": reason,
@@ -434,11 +453,31 @@ class SQLRAGService:
                     "model": model_name,
                     "attempts": attempt + 1,
                 }
+                if include_metadata:
+                    result["metadata"] = {
+                        "schema_context": schema_context,
+                        "glossary_context": glossary_context,
+                        "examples_context": examples_context,
+                        "attempts": attempts_metadata,
+                    }
+                return result
 
             # EXPLAIN check — validates syntax against real Postgres
             explain_ok, explain_err = await self._explain_check(sql)
+
+            if include_metadata:
+                attempts_metadata.append({
+                    "attempt": attempt + 1,
+                    "system_prompt": system_prompt,
+                    "user_prompt": user_prompt,
+                    "raw_response": response.content,
+                    "extracted_sql": sql,
+                    "safety_error": None,
+                    "explain_error": explain_err,
+                })
+
             if explain_ok:
-                return {
+                result = {
                     "sql": sql,
                     "valid": True,
                     "error": None,
@@ -446,6 +485,14 @@ class SQLRAGService:
                     "model": model_name,
                     "attempts": attempt + 1,
                 }
+                if include_metadata:
+                    result["metadata"] = {
+                        "schema_context": schema_context,
+                        "glossary_context": glossary_context,
+                        "examples_context": examples_context,
+                        "attempts": attempts_metadata,
+                    }
+                return result
 
             # Self-correction: feed the error + schema back to the LLM
             last_error = explain_err
@@ -460,7 +507,7 @@ class SQLRAGService:
             )
 
         # All retries exhausted
-        return {
+        result = {
             "sql": sql,
             "valid": False,
             "error": f"Failed after {max_retries} attempts. Last error: {last_error}",
@@ -468,6 +515,14 @@ class SQLRAGService:
             "model": model_name,
             "attempts": max_retries,
         }
+        if include_metadata:
+            result["metadata"] = {
+                "schema_context": schema_context,
+                "glossary_context": glossary_context,
+                "examples_context": examples_context,
+                "attempts": attempts_metadata,
+            }
+        return result
 
     # ─── Execution ────────────────────────────────────────────────────────
 
@@ -532,17 +587,21 @@ class SQLRAGService:
         sql: str,
         results: dict,
         provider: Optional[str] = None,
+        include_metadata: bool = False,
     ) -> dict:
         """Send results back to the LLM for rich markdown summary + chart suggestion.
 
         Returns:
-            dict with keys: interpretation (markdown str), suggested_chart (str)
+            dict with keys: interpretation (markdown str), suggested_chart (str),
+            follow_up_questions (list[str]).
+            Optionally includes 'metadata' when include_metadata is True.
         """
         llm_service = get_agentic_rag_llm_service()
         if not llm_service:
             return {
                 "interpretation": "LLM service not available for result interpretation.",
                 "suggested_chart": "none",
+                "follow_up_questions": [],
             }
 
         columns = results.get("columns", [])
@@ -573,7 +632,7 @@ class SQLRAGService:
         raw = await llm_service.generate(
             prompt=prompt,
             json_output=True,
-            max_tokens=768,
+            max_tokens=1024,
             temperature=0.3,
             provider=provider,
         )
@@ -581,16 +640,26 @@ class SQLRAGService:
         # Parse JSON response, with fallback
         try:
             parsed = json.loads(raw)
-            return {
+            result = {
                 "interpretation": parsed.get("interpretation", raw),
                 "suggested_chart": parsed.get("suggested_chart", "none"),
+                "follow_up_questions": parsed.get("follow_up_questions", []),
             }
         except (json.JSONDecodeError, TypeError):
             logger.warning(f"Failed to parse narration JSON, using raw text. Raw: {raw[:200]}")
-            return {
+            result = {
                 "interpretation": raw,
                 "suggested_chart": "none",
+                "follow_up_questions": [],
             }
+
+        if include_metadata:
+            result["metadata"] = {
+                "prompt": prompt,
+                "raw_response": raw,
+            }
+
+        return result
 
     # ─── Query Logging & Feedback ─────────────────────────────────────────
 

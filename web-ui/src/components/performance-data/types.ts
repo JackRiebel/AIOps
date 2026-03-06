@@ -49,6 +49,31 @@ export interface QueryResponse {
   model?: string;
   attempts?: number;
   results?: SQLQueryResult | { error: string };
+  generation_metadata?: GenerationMetadata;
+}
+
+// ─── Process View Metadata Types ──────────────────────────────────────────────
+
+export interface GenerationAttempt {
+  attempt: number;
+  system_prompt: string;
+  user_prompt: string;
+  raw_response: string;
+  extracted_sql: string;
+  safety_error: string | null;
+  explain_error: string | null;
+}
+
+export interface GenerationMetadata {
+  schema_context: string;
+  glossary_context: string;
+  examples_context: string;
+  attempts: GenerationAttempt[];
+}
+
+export interface InterpretationMetadata {
+  prompt: string;
+  raw_response: string;
 }
 
 export interface SchemaMetadataItem {
