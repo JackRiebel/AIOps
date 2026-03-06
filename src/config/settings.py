@@ -223,6 +223,26 @@ class Settings(BaseSettings):
         description="Google API key for Gemini models"
     )
 
+    # Ollama (Local LLM) Configuration
+    ollama_enabled: bool = Field(
+        default=False,
+        description="Enable Ollama local LLM support"
+    )
+    ollama_base_url: str = Field(
+        default="http://localhost:11434",
+        description="Ollama API base URL"
+    )
+    ollama_model: str = Field(
+        default="qwen3:14b",
+        description="Default Ollama model to use"
+    )
+
+    # Structured Data (separate Postgres for performance data)
+    structured_data_database_url: str = Field(
+        default="",
+        description="PostgreSQL connection URL for external performance data (e.g., postgresql://user:pass@localhost:5432/perfdata)"
+    )
+
     # Embedding Configuration
     embedding_provider: str = Field(
         default="local",
@@ -467,6 +487,20 @@ class Settings(BaseSettings):
                     "best_for": ["simple tasks", "cost-sensitive"]
                 },
             ],
+            "ollama": [
+                {
+                    "id": "qwen3:14b",
+                    "name": "Qwen 3 14B (Local)",
+                    "description": "Local Qwen 3 14B via Ollama — data stays on machine",
+                    "cost_input_1k": 0,
+                    "cost_output_1k": 0,
+                    "speed": 3,
+                    "capability": 4,
+                    "context_window": 32000,
+                    "best_for": ["local inference", "structured data", "SQL generation"],
+                    "tier": "local"
+                },
+            ],
             "cisco": [
                 # === FREE TIER MODELS ===
                 {
@@ -692,6 +726,9 @@ class Settings(BaseSettings):
         if self.cisco_circuit_client_id and self.cisco_circuit_client_secret:
             for model in self.available_models["cisco"]:
                 available.append({**model, "provider": "cisco"})
+        if self.ollama_enabled:
+            for model in self.available_models["ollama"]:
+                available.append({**model, "provider": "ollama"})
         return available
 
     @property

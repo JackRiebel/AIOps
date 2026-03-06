@@ -240,6 +240,7 @@ sql_alchemy_models = [
     "src.models.mfa_challenge",
     "src.models.network_change",
     "src.models.te_test_metric",
+    "src.models.structured_dataset",
 ]
 
 for module_name in sql_alchemy_models:

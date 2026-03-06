@@ -15,6 +15,14 @@ from src.models.ai_trace import AIQueryTrace
 from src.models.mfa_challenge import MfaChallenge
 from src.models.pending_action import PendingAction, ActionStatus
 from src.models.te_test_metric import TETestMetric
+from src.models.structured_dataset import (
+    StructuredDataset,
+    StructuredSchemaEmbedding,
+    StructuredQueryExample,
+    StructuredQueryLog,
+    SchemaMetadata,
+    BusinessGlossary,
+)
 from src.models.workflow import (
     Workflow,
     WorkflowExecution,
@@ -83,4 +91,11 @@ __all__ = [
     "ActionStatus",
     # ThousandEyes Metrics
     "TETestMetric",
+    # Structured Data RAG Models
+    "StructuredDataset",
+    "StructuredSchemaEmbedding",
+    "StructuredQueryExample",
+    "StructuredQueryLog",
+    "SchemaMetadata",
+    "BusinessGlossary",
 ]

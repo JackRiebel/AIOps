@@ -21,7 +21,8 @@ from src.api.routes import (
     ai_feedback, ai_sessions, ai_traces, oauth, setup, knowledge, knowledge_feedback, knowledge_analytics,
     agents, agent_chat, websocket, webhooks, metrics, rbac, workflows, actions,
     rag_metrics, activity, wireless, topology, streaming, artifacts, network_changes,
-    pending_actions, cross_platform, ai_endpoint_monitor, mcp_monitor, te_metrics
+    pending_actions, cross_platform, ai_endpoint_monitor, mcp_monitor, te_metrics,
+    structured_data
 )
 from src.api.routes import settings as settings_routes
 
@@ -218,12 +219,18 @@ async def startup_event():
             google_key = await config_service.get_config("google_api_key")
 
         async with get_async_session() as session:
-            if openai_key or anthropic_key or google_key:
+            # Resolve Ollama settings
+            ollama_base_url = getattr(settings, 'ollama_base_url', None) if getattr(settings, 'ollama_enabled', False) else None
+            ollama_model = getattr(settings, 'ollama_model', None)
+
+            if openai_key or anthropic_key or google_key or ollama_base_url:
                 llm_service = init_agentic_rag_llm_service(
                     openai_key=openai_key,
                     anthropic_key=anthropic_key,
                     google_key=google_key,
-                    default_provider="openai" if openai_key else ("anthropic" if anthropic_key else "google"),
+                    default_provider="openai" if openai_key else ("anthropic" if anthropic_key else ("google" if google_key else "ollama")),
+                    ollama_base_url=ollama_base_url,
+                    ollama_model=ollama_model,
                 )
 
                 # Initialize config from database
@@ -245,6 +252,21 @@ async def startup_event():
                 logger.info("Agentic RAG not initialized: no LLM API keys configured in .env or database")
     except Exception as e:
         logger.warning(f"Failed to initialize Agentic RAG pipeline: {e}")
+
+    # Initialize structured data engine (uses separate Postgres if configured, else shares the app DB)
+    try:
+        sd_url = getattr(settings, 'structured_data_database_url', '') or ''
+        if not sd_url:
+            # Fallback to the app's embedded Postgres — data tables coexist with metadata
+            sd_url = settings.database_url
+        if sd_url:
+            from src.config.structured_data_db import init_structured_data_engine
+            init_structured_data_engine(sd_url)
+            logger.info("Structured data engine initialized")
+        else:
+            logger.info("Structured data engine not initialized: no database URL available")
+    except Exception as e:
+        logger.warning(f"Failed to initialize structured data engine: {e}")
 
     logger.info("Cisco AIOps Hub started with full CORS")
 
@@ -343,6 +365,7 @@ app.include_router(pending_actions.router, tags=["Pending Actions"])
 app.include_router(ai_endpoint_monitor.router, tags=["AI Assurance"])
 app.include_router(mcp_monitor.router, tags=["MCP Monitor"])
 app.include_router(te_metrics.router, tags=["ThousandEyes Metrics"])
+app.include_router(structured_data.router, tags=["Structured Data"])
 
 # Register standardized error handlers
 register_error_handlers(app)

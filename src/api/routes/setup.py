@@ -621,6 +621,22 @@ async def save_integrations(request: SaveIntegrationsRequest):
         reset_credential_pool()
         logger.info("Reset credential pool to pick up new credentials from setup")
 
+        # Auto-sync networks in the background so user doesn't have to click Sync manually
+        network_keys = {"meraki_api_key", "catalyst_center_host"}
+        if any(key in network_keys for key in saved):
+            import asyncio
+            from src.services.network_service import sync_all_organizations
+
+            async def _background_sync():
+                try:
+                    logger.info("Auto-syncing networks after setup integration save...")
+                    result = await sync_all_organizations(force=True)
+                    logger.info(f"Post-setup network sync complete: {result.get('synced', 0)}/{result.get('total', 0)} orgs synced")
+                except Exception as e:
+                    logger.warning(f"Post-setup network sync failed (user can sync manually): {e}")
+
+            asyncio.create_task(_background_sync())
+
     logger.info(f"Saved {len(saved)} integrations successfully")
     return {
         "success": True,

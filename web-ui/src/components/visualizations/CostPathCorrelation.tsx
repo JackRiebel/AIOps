@@ -17,8 +17,8 @@ import {
   Wifi, Zap, Activity, AlertTriangle, CheckCircle2,
   ChevronDown, ChevronRight, Repeat, Clock, Users, Target,
 } from 'lucide-react';
-import type { CostAnalysis } from './hooks/useAIPathJourney';
-import type { PathAgentTrace } from './hooks/useAIPathJourney';
+import type { CostAnalysis, PathAgentTrace } from './hooks/useAIPathJourney';
+import { PathDetailOverlay } from './PathDetailOverlay';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -140,6 +140,7 @@ function TimelineTooltip({ active, payload, label }: any) {
 // ---------------------------------------------------------------------------
 
 export const NetworkImpactPanel = memo(function NetworkImpactPanel({ data, agentTraces }: NetworkImpactPanelProps) {
+  const [selectedTrace, setSelectedTrace] = useState<PathAgentTrace | null>(null);
   const { latency_cost_impact: impact, hourly_breakdown: breakdown } = data;
 
   // Derive chart data with cost
@@ -471,7 +472,8 @@ export const NetworkImpactPanel = memo(function NetworkImpactPanel({ data, agent
                   <th className="pr-3 pb-1.5 font-semibold">Location</th>
                   <th className="pr-3 pb-1.5 font-semibold text-right">Path Latency</th>
                   <th className="pr-3 pb-1.5 font-semibold text-right">Hops</th>
-                  <th className="pb-1.5 font-semibold text-right">Path Health</th>
+                  <th className="pr-3 pb-1.5 font-semibold text-right">Path Health</th>
+                  <th className="pb-1.5 w-5" />
                 </tr>
               </thead>
               <tbody>
@@ -479,13 +481,18 @@ export const NetworkImpactPanel = memo(function NetworkImpactPanel({ data, agent
                   const healthColor = row.health === 'Degraded' ? 'text-red-500' : row.health === 'Elevated' ? 'text-amber-500' : 'text-emerald-500';
                   const rowBg = row.health === 'Degraded' ? 'bg-red-50/50 dark:bg-red-950/10' : row.health === 'Elevated' ? 'bg-amber-50/50 dark:bg-amber-950/10' : '';
                   return (
-                    <tr key={i} className={`border-t border-slate-100 dark:border-slate-700/50 ${rowBg}`}>
+                    <tr
+                      key={i}
+                      className={`border-t border-slate-100 dark:border-slate-700/50 ${rowBg} cursor-pointer hover:bg-slate-50/60 dark:hover:bg-slate-700/30 transition-colors`}
+                      onClick={() => agentTraces?.[i] && setSelectedTrace(agentTraces[i])}
+                    >
                       <td className="pr-3 py-1.5 text-slate-700 dark:text-slate-300 font-medium">{row.location}</td>
                       <td className={`pr-3 py-1.5 text-right font-mono font-semibold ${row.latency > 100 ? 'text-red-500' : row.latency > 50 ? 'text-amber-500' : 'text-slate-600 dark:text-slate-400'}`}>
                         {row.latency.toFixed(0)}ms
                       </td>
                       <td className="pr-3 py-1.5 text-right font-mono text-slate-500 dark:text-slate-400">{row.hops}</td>
                       <td className={`py-1.5 text-right font-medium ${healthColor}`}>{row.health}</td>
+                      <td className="py-1.5 text-slate-400"><ChevronRight className="w-3.5 h-3.5" /></td>
                     </tr>
                   );
                 })}
@@ -494,6 +501,13 @@ export const NetworkImpactPanel = memo(function NetworkImpactPanel({ data, agent
           </div>
         </CollapsibleSection>
       )}
+
+      {/* Path Detail Overlay */}
+      <PathDetailOverlay
+        trace={selectedTrace}
+        isOpen={!!selectedTrace}
+        onClose={() => setSelectedTrace(null)}
+      />
     </div>
   );
 });

@@ -784,6 +784,11 @@ start_backend() {
     # Set Keras compatibility mode for sentence-transformers
     export TF_USE_LEGACY_KERAS=1
 
+    # Fix SSL cert resolution for httpx/huggingface_hub (Homebrew Python)
+    if [ -f "/opt/homebrew/etc/openssl@3/cert.pem" ]; then
+        export SSL_CERT_FILE="/opt/homebrew/etc/openssl@3/cert.pem"
+    fi
+
     if [ "$USE_SSL" = "true" ] && [ -f "certs/key.pem" ]; then
         PYTHONPATH="$SCRIPT_DIR" uvicorn src.api.web_api:app \
             --host 0.0.0.0 \

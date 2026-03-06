@@ -335,6 +335,8 @@ class AgenticRAGLLMService:
         google_key: Optional[str] = None,
         default_provider: str = "openai",
         default_model: Optional[str] = None,
+        ollama_base_url: Optional[str] = None,
+        ollama_model: Optional[str] = None,
     ):
         """Initialize the LLM service.
 
@@ -344,6 +346,8 @@ class AgenticRAGLLMService:
             google_key: Google API key
             default_provider: Default provider to use
             default_model: Default model (overrides per-provider defaults)
+            ollama_base_url: Ollama API base URL (enables Ollama adapter)
+            ollama_model: Ollama model name
         """
         self.adapters: Dict[str, BaseLLMAdapter] = {}
         self.default_provider = default_provider
@@ -360,6 +364,13 @@ class AgenticRAGLLMService:
         if google_key:
             model = (default_model if default_provider == "google" and default_model else None) or "gemini-1.5-flash"
             self.adapters["google"] = GoogleAdapter(google_key, model=model)
+
+        if ollama_base_url:
+            from src.services.agentic_rag.ollama_adapter import OllamaAdapter
+            self.adapters["ollama"] = OllamaAdapter(
+                base_url=ollama_base_url,
+                model=ollama_model or "qwen3:14b",
+            )
 
         # Track usage
         self.total_input_tokens = 0
@@ -461,6 +472,8 @@ def init_agentic_rag_llm_service(
     anthropic_key: Optional[str] = None,
     google_key: Optional[str] = None,
     default_provider: str = "openai",
+    ollama_base_url: Optional[str] = None,
+    ollama_model: Optional[str] = None,
 ) -> AgenticRAGLLMService:
     """Initialize the global LLM service.
 
@@ -469,6 +482,8 @@ def init_agentic_rag_llm_service(
         anthropic_key: Anthropic API key
         google_key: Google API key
         default_provider: Default provider to use
+        ollama_base_url: Ollama API base URL
+        ollama_model: Ollama model name
 
     Returns:
         Initialized LLM service
@@ -480,6 +495,8 @@ def init_agentic_rag_llm_service(
         anthropic_key=anthropic_key,
         google_key=google_key,
         default_provider=default_provider,
+        ollama_base_url=ollama_base_url,
+        ollama_model=ollama_model,
     )
 
     logger.info(
